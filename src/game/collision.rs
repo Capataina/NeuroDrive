@@ -1,12 +1,20 @@
 use bevy::prelude::*;
-use crate::game::car::Car;
+
+use crate::game::car::{Car, CAR_HEIGHT, CAR_WIDTH};
 use crate::maps::track::Track;
 
-/// Event emitted when the car collides with a barrier.
+/// Event emitted when the car leaves the driveable road surface.
 #[derive(Event)]
 pub struct CollisionEvent;
 
-/// Checks if the car is outside track boundaries and marks it for reset.
+/// Checks each frame whether any corner of the car's bounding rectangle lies
+/// off the driveable road surface.
+///
+/// The four corners of the car sprite (defined by [`CAR_WIDTH`] × [`CAR_HEIGHT`])
+/// are rotated into world space and tested individually against
+/// `track.grid.is_road_at()`. A collision is triggered as soon as any corner
+/// leaves the road, giving accurate edge-level detection rather than
+/// centre-only checking.
 pub fn collision_detection_system(
     car_query: Query<&Transform, With<Car>>,
     track_query: Query<&Track>,
@@ -20,31 +28,45 @@ pub fn collision_detection_system(
     };
 
     let car_pos = Vec2::new(car_transform.translation.x, car_transform.translation.y);
+    let half_w = CAR_WIDTH * 0.5;
+    let half_h = CAR_HEIGHT * 0.5;
 
-    // Car is off-track if outside outer boundary OR inside inner boundary
-    let inside_outer = point_in_polygon(car_pos, &track.outer_boundary);
-    let inside_inner = point_in_polygon(car_pos, &track.inner_boundary);
+    let local_corners = [
+        Vec2::new( half_w,  half_h),
+        Vec2::new( half_w, -half_h),
+        Vec2::new(-half_w,  half_h),
+        Vec2::new(-half_w, -half_h),
+    ];
 
-    if !inside_outer || inside_inner {
-        commands.trigger(CollisionEvent);
+    let (_, _, angle) = car_transform.rotation.to_euler(EulerRot::ZYX);
+    let (sin, cos) = angle.sin_cos();
+
+    for local in &local_corners {
+        let rotated = Vec2::new(
+            local.x * cos - local.y * sin,
+            local.x * sin + local.y * cos,
+        );
+        if !track.grid.is_road_at(car_pos + rotated) {
+            commands.trigger(CollisionEvent);
+            return;
+        }
     }
 }
 
-/// Handles collision events by resetting the game.
+/// Handles a `CollisionEvent` by despawning the car and respawning it at the
+/// track's designated spawn position and rotation.
 pub fn handle_collision_system(
     _trigger: On<CollisionEvent>,
     mut commands: Commands,
     car_query: Query<Entity, With<Car>>,
     track_query: Query<&Track>,
 ) {
-    info!("Car died (collision detected).");
+    info!("Car off-track — resetting to spawn.");
 
-    // Despawn the car
     for entity in car_query.iter() {
         commands.entity(entity).despawn();
     }
 
-    // Respawn at track start
     if let Ok(track) = track_query.single() {
         crate::game::car::spawn_car(
             &mut commands,
@@ -52,29 +74,4 @@ pub fn handle_collision_system(
             track.spawn_rotation,
         );
     }
-}
-
-/// Ray-casting algorithm to determine if a point is inside a polygon.
-fn point_in_polygon(point: Vec2, polygon: &[Vec2]) -> bool {
-    let n = polygon.len();
-    if n < 3 {
-        return false;
-    }
-
-    let mut inside = false;
-    let mut j = n - 1;
-
-    for i in 0..n {
-        let pi = polygon[i];
-        let pj = polygon[j];
-
-        if ((pi.y > point.y) != (pj.y > point.y))
-            && (point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y) + pi.x)
-        {
-            inside = !inside;
-        }
-        j = i;
-    }
-
-    inside
 }
