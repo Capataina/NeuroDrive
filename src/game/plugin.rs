@@ -1,21 +1,51 @@
 use bevy::prelude::*;
-use crate::game::car::{car_control_system, spawn_car};
-use crate::game::collision::{collision_detection_system, handle_collision_system};
+use crate::game::car::spawn_car;
+use crate::game::collision::{CollisionEvent, collision_detection_system, handle_collision_system};
+use crate::game::episode::{EpisodeConfig, EpisodeMovingAverages, EpisodeState, episode_loop_system};
+use crate::game::physics::car_physics_system;
+use crate::game::progress::update_track_progress_system;
 use crate::maps::track::Track;
+use crate::sim::sets::SimSet;
 
 /// Main game plugin that bundles all game systems.
 pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(handle_collision_system)
+        app.add_message::<CollisionEvent>()
+            .init_resource::<EpisodeConfig>()
+            .init_resource::<EpisodeState>()
+            .init_resource::<EpisodeMovingAverages>()
             .add_systems(PostStartup, setup_game)
-            .add_systems(
-                Update,
+            .configure_sets(
+                FixedUpdate,
                 (
-                    car_control_system,
+                    SimSet::Input,
+                    SimSet::Physics,
+                    SimSet::Collision,
+                    SimSet::Measurement,
+                )
+                    .chain(),
+            )
+            // Core simulation loop: runs on the fixed timestep.
+            .add_systems(FixedUpdate, car_physics_system.in_set(SimSet::Physics))
+            .add_systems(
+                FixedUpdate,
+                (
                     collision_detection_system,
-                ),
+                    handle_collision_system,
+                )
+                    .chain()
+                    .in_set(SimSet::Collision),
+            )
+            .add_systems(
+                FixedUpdate,
+                (
+                    update_track_progress_system,
+                    episode_loop_system.after(update_track_progress_system),
+                )
+                    .chain()
+                    .in_set(SimSet::Measurement),
             );
     }
 }

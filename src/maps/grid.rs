@@ -148,10 +148,18 @@ impl TrackGrid {
     ///
     /// Returns `None` if no `SpawnPoint` tile exists.
     pub fn find_spawn(&self) -> Option<(Vec2, f32)> {
+        let (row, col) = self.find_spawn_cell()?;
+        Some((self.cell_center(row, col), 0.0))
+    }
+
+    /// Locates the `SpawnPoint` tile and returns its `(row, col)` coordinates.
+    ///
+    /// Returns `None` if no `SpawnPoint` tile exists.
+    pub fn find_spawn_cell(&self) -> Option<(usize, usize)> {
         for (row, row_tiles) in self.tiles.iter().enumerate() {
             for (col, &tile) in row_tiles.iter().enumerate() {
                 if tile == TilePart::SpawnPoint {
-                    return Some((self.cell_center(row, col), 0.0));
+                    return Some((row, col));
                 }
             }
         }
@@ -461,4 +469,3 @@ fn spawn_line_segment_mesh(
         Visibility::Visible,
     ));
 }
-

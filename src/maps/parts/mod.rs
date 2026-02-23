@@ -29,6 +29,7 @@
 /// SpawnPoint    | _, _, E, W   (same as StraightH, marks spawn cell)
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum TilePart {
     /// No road surface. The car is off-track if it occupies this cell.
     Empty,

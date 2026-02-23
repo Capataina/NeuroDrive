@@ -1,13 +1,14 @@
 use bevy::prelude::*;
+use bevy::ecs::message::{MessageReader, MessageWriter};
 
 use crate::game::car::{Car, CAR_HEIGHT, CAR_WIDTH};
 use crate::maps::track::Track;
 
-/// Event emitted when the car leaves the driveable road surface.
-#[derive(Event)]
+/// Message emitted when the car leaves the driveable road surface.
+#[derive(Message)]
 pub struct CollisionEvent;
 
-/// Checks each frame whether any corner of the car's bounding rectangle lies
+/// Checks each fixed tick whether any corner of the car's bounding rectangle lies
 /// off the driveable road surface.
 ///
 /// The four corners of the car sprite (defined by [`CAR_WIDTH`] × [`CAR_HEIGHT`])
@@ -18,7 +19,7 @@ pub struct CollisionEvent;
 pub fn collision_detection_system(
     car_query: Query<&Transform, With<Car>>,
     track_query: Query<&Track>,
-    mut commands: Commands,
+    mut collision_events: MessageWriter<CollisionEvent>,
 ) {
     let Ok(car_transform) = car_query.single() else {
         return;
@@ -38,40 +39,35 @@ pub fn collision_detection_system(
         Vec2::new(-half_w, -half_h),
     ];
 
-    let (_, _, angle) = car_transform.rotation.to_euler(EulerRot::ZYX);
-    let (sin, cos) = angle.sin_cos();
-
     for local in &local_corners {
-        let rotated = Vec2::new(
-            local.x * cos - local.y * sin,
-            local.x * sin + local.y * cos,
-        );
+        let rotated = (car_transform.rotation * Vec3::new(local.x, local.y, 0.0)).truncate();
         if !track.grid.is_road_at(car_pos + rotated) {
-            commands.trigger(CollisionEvent);
+            collision_events.write(CollisionEvent);
             return;
         }
     }
 }
 
-/// Handles a `CollisionEvent` by despawning the car and respawning it at the
-/// track's designated spawn position and rotation.
+/// Handles a `CollisionEvent` by resetting the car to the track spawn pose.
 pub fn handle_collision_system(
-    _trigger: On<CollisionEvent>,
-    mut commands: Commands,
-    car_query: Query<Entity, With<Car>>,
+    mut collision_events: MessageReader<CollisionEvent>,
+    mut car_query: Query<(&mut Transform, &mut Car)>,
     track_query: Query<&Track>,
 ) {
-    info!("Car off-track — resetting to spawn.");
-
-    for entity in car_query.iter() {
-        commands.entity(entity).despawn();
+    if collision_events.read().next().is_none() {
+        return;
     }
 
-    if let Ok(track) = track_query.single() {
-        crate::game::car::spawn_car(
-            &mut commands,
-            track.spawn_position,
-            track.spawn_rotation,
-        );
+    info!("Car off-track — resetting to spawn.");
+
+    let Ok(track) = track_query.single() else {
+        return;
+    };
+
+    for (mut transform, mut car) in car_query.iter_mut() {
+        transform.translation.x = track.spawn_position.x;
+        transform.translation.y = track.spawn_position.y;
+        transform.rotation = Quat::from_rotation_z(track.spawn_rotation);
+        car.velocity = Vec2::ZERO;
     }
 }

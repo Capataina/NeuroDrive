@@ -9,119 +9,184 @@ The codebase is written in Rust using Bevy for simulation and rendering.
 
 ```
 NeuroDrive/
-├── src/
-│   ├── main.rs              # Application entry point
-│   ├── game/
-│   │   ├── mod.rs           # Game module exports
-│   │   ├── car.rs           # Car component and control systems
-│   │   ├── collision.rs     # Collision detection and reset logic
-│   │   └── plugin.rs        # GamePlugin bundling all game systems
-│   └── maps/
-│       ├── mod.rs           # Maps module exports
-│       ├── grid.rs          # TrackGrid definition and tile rendering
-│       ├── track.rs         # Track component
-│       ├── parts/
-│       │   └── mod.rs       # TilePart enum and connectivity rules
-│       └── monaco.rs        # Sepang-inspired circuit definition
-├── context/
-│   └── ARCHITECTURE.md      # This file
-├── Cargo.toml
-└── README.md                # Project vision (immutable)
+|-- src/
+|   |-- main.rs                  # Application entry point
+|   |-- agent/
+|   |   |-- mod.rs               # Agent interface module exports
+|   |   |-- action.rs            # Stable action interface + keyboard adapter
+|   |   |-- observation.rs       # Raycast sensors + normalised observation vector
+|   |   `-- plugin.rs            # AgentPlugin wiring (FixedUpdate)
+|   |-- debug/
+|   |   |-- mod.rs               # Debug module exports
+|   |   |-- hud.rs               # F3 driving-state HUD (UI + stats)
+|   |   |-- overlays.rs          # Gizmo-based overlay rendering + toggles
+|   |   `-- plugin.rs            # DebugPlugin wiring
+|   |-- sim/
+|   |   |-- mod.rs               # Simulation scheduling exports
+|   |   `-- sets.rs              # Fixed-tick pipeline ordering (SimSet)
+|   |-- game/
+|   |   |-- mod.rs               # Game module exports
+|   |   |-- car.rs               # Car component and spawn helper
+|   |   |-- physics.rs           # Fixed-tick vehicle dynamics (consumes actions)
+|   |   |-- collision.rs         # Off-track detection and reset logic
+|   |   |-- episode.rs           # Episode loop + reward + rolling telemetry
+|   |   |-- progress.rs          # Centreline projection + progress component
+|   |   `-- plugin.rs            # GamePlugin bundling game systems
+|   `-- maps/
+|       |-- mod.rs               # Maps module exports
+|       |-- grid.rs              # TrackGrid definition and tile rendering
+|       |-- centerline.rs         # Grid-derived centreline polyline + projection
+|       |-- track.rs             # Track component
+|       |-- parts/
+|       |   `-- mod.rs           # TilePart enum and connectivity rules
+|       `-- monaco.rs            # Sepang-inspired circuit definition
+|-- context/
+|   |-- ARCHITECTURE.md          # This file
+|   |-- SYSTEM_GAME_ENVIRONMENT.md
+|   |-- SYSTEM_DETERMINISM_REPLAY.md
+|   |-- SYSTEM_SENSORS_OBSERVATIONS.md
+|   |-- SYSTEM_TRACK_PROGRESS_AND_LAPS.md
+|   |-- SYSTEM_DEBUG_OVERLAYS.md
+|   `-- SYSTEM_TELEMETRY.md
+|-- Cargo.toml
+`-- README.md                    # Project vision (immutable)
 ```
 
 ## Current Implementation Status
 
 ### Implemented
 
-- Modular Bevy application structure
-- 2D car entity with physics (velocity, drag, rotation)
-- Keyboard controls: W (thrust), A (turn left), D (turn right)
-- Grid-based tile track system (`TrackGrid` + `TilePart`)
-- Tile types: straights (H/V), corners (NW/NE/SW/SE), T-junctions, crossroads, spawn point
-- Connectivity rules per tile type via `open_edges()`
-- Sepang-inspired circuit layout on a 14×9 tile grid
-- Tile rendering: filled road surfaces, straight wall bars on closed edges, quarter-circle arc walls on corner tiles
-- Corner road surfaces rendered as clipped quarter-circle meshes to prevent surface leakage past curved walls
-- Collision detection via `grid.is_road_at()` (replaces old polygon-based point-in-polygon)
-- Automatic reset on barrier collision
-- Car spawns at tile-grid-derived start position
-- Start/finish line marker
+- Modular Bevy application structure (track plugin then game plugin).
+- Fixed-timestep simulation configured at 60 Hz (`src/main.rs`), with explicit fixed-tick pipeline ordering (`src/sim/sets.rs`).
+- Stable action interface (`CarAction`) with a fixed-tick keyboard adapter and optional smoothing (`src/agent/action.rs`).
+- 2D car entity with deterministic fixed-tick velocity integration and drag (`src/game/physics.rs`).
+- Grid-based tile track system (`TrackGrid` + `TilePart`) with per-tile connectivity (`open_edges()`).
+- Tile types: straights (H/V), corners (NW/NE/SW/SE), T-junctions, crossroads, spawn point.
+- Sepang-inspired circuit layout on a 14x9 tile grid.
+- Tile rendering: filled road surfaces, straight wall bars on closed edges, quarter-circle arc walls on corner tiles.
+- Corner road surfaces rendered as clipped quarter-circle meshes to prevent surface leakage past curved walls.
+- Off-track detection via `TrackGrid::is_road_at()` with wall-thickness insets.
+- Automatic reset on off-track collision (in-place transform reset + velocity reset).
+- Start/finish line marker rendering.
+- Grid-derived closed centreline polyline and closest-point projection for continuous progress (`src/maps/centerline.rs`, `src/game/progress.rs`).
+- Episode loop with crash/timeout/lap-complete end conditions, reward accumulation, and rolling episode averages (`src/game/episode.rs`).
+- Geometry debug overlay (F1) for centreline + projection visualisation via Bevy gizmos (`src/debug/overlays.rs`).
+- Raycast sensor system with fixed ray layout and road-boundary intersection against `TrackGrid::is_road_at()` (`src/agent/observation.rs`).
+- Stable normalised observation vector composed from rays, speed, heading error, and angular velocity (`src/agent/observation.rs`).
+- Sensor debug overlay (F2) for ray lines and hit points (`src/debug/overlays.rs`).
+- Driving-state HUD (F3) with progress, heading error, death count, best progress + best life, reward, episode crash count, and moving averages (`src/debug/hud.rs`).
+- Deterministic replay unit test for the pure car dynamics stepper (`src/game/physics.rs` tests).
 
 ### Not Yet Implemented
 
-- Raycast sensor system
-- Progress measurement along centerline
-- Neural brain system
-- Learning mechanisms
-- Multiple tracks
-- Telemetry/observability
+- Replay harness over full ECS runtime action streams (record/playback mode) is still missing.
+- Full learning telemetry UI (e.g. policy/brain-specific diagnostics) is still missing.
+- Neural brain system and learning mechanisms.
+- Multiple tracks.
 
 ## Subsystem Responsibilities
 
-### main.rs
+### `src/main.rs`
 
-- Bevy app initialisation
-- Window configuration
-- Plugin registration order (track before game)
+- Bevy app initialisation.
+- Window configuration.
+- Plugin registration order (track before game).
+- Fixed timestep configuration and global plugin wiring (agent + game + debug).
 
-### game/car.rs
+### `src/agent/action.rs`
 
-- `Car` component with velocity, thrust, drag, rotation_speed
-- `spawn_car()` function for creating car entities
-- `car_control_system()` for handling W/A/D input
+- `CarAction` stable action interface (`steering`, `throttle`).
+- `ActionState` resource for fixed-tick desired/applied actions.
+- `keyboard_action_input_system()` maps keyboard state to `ActionState.desired` each fixed tick.
+- `action_smoothing_system()` optionally filters desired actions into applied actions.
 
-### game/collision.rs
+### `src/agent/observation.rs`
 
-- `CollisionEvent` for signalling barrier contact
-- `collision_detection_system()` checks car position against track grid
-- `handle_collision_system()` respawns car on collision
-- `point_in_polygon()` ray-casting algorithm (legacy, may be removed)
+- `SensorReadings` component stores ray hits/distances and derived kinematics.
+- `ObservationVector` component stores the fixed-size normalised observation features.
+- `update_sensor_readings_system()` updates raycasts and heading/speed/angular-velocity measurements per fixed tick.
+- `build_observation_vector_system()` normalises measured features into a stable observation contract.
 
-### game/plugin.rs
+### `src/sim/sets.rs`
 
-- `GamePlugin` bundles all game systems
-- Handles system ordering (control → collision → reset)
-- Spawns camera and car on startup
+- Defines `SimSet` to keep fixed-tick ordering explicit:
+  - Input â†’ Physics â†’ Collision â†’ Measurement.
 
-### maps/parts/mod.rs
+### `src/game/car.rs`
 
-- `TilePart` enum defining all tile types and the `Empty` sentinel
-- `open_edges()` returns `(north, south, east, west)` connectivity per tile
-- `is_road()` and `is_corner()` classification helpers
-- Connectivity reference table in doc comments
+- `Car` component (velocity, thrust, drag, rotation_speed).
+- `spawn_car()` spawns the car sprite and component.
 
-### maps/grid.rs
+### `src/game/physics.rs`
 
-- `TrackGrid` struct: row-major tile storage, origin, tile_size
-- `cell_center()`, `world_to_cell()`, `is_road_at()` for spatial queries
-- `find_spawn()` locates the `SpawnPoint` tile
-- `render_tile_grid()` spawns all visual sprites:
-  - Road surfaces (flat squares for straights, quarter-circle meshes for corners)
-  - Straight wall bars on every closed edge of non-corner tiles
-  - Quarter-circle arc walls on corner tiles
-- Arc geometry helpers (`corner_arc_params`, `spawn_arc_mesh`, `spawn_line_segment_mesh`)
+- `car_physics_system()` consumes `ActionState` and updates car transform/velocity on the fixed tick.
+- `step_car_dynamics()` provides a pure deterministic dynamics step used both by runtime physics and replay testing.
 
-### maps/track.rs
+### `src/game/collision.rs`
 
-- `Track` component carrying the grid, spawn position, and spawn heading
-- Queried by collision and game systems
+- `CollisionEvent` message signals that the car has left the driveable road surface.
+- `collision_detection_system()` checks quaternion-rotated car sprite corners against `TrackGrid::is_road_at()`.
+- `handle_collision_system()` resets the car to the track spawn pose on collision (no despawn/respawn).
 
-### maps/monaco.rs
+### `src/game/progress.rs`
 
-- `MonacoPlugin` spawns the Sepang-inspired track on startup
-- `build_tiles()` defines the 14×9 tile grid layout
-- `render_finish_line()` places the start/finish marker
-- Derives spawn position and heading from the grid's `SpawnPoint` tile
+- `TrackProgress` component stores centreline projection and progress fraction.
+- `update_track_progress_system()` updates `TrackProgress` each fixed tick from the track centreline.
+
+### `src/game/episode.rs`
+
+- `EpisodeConfig` defines timeout, lap detection thresholds, and reward constants.
+- `EpisodeState` tracks current episode lifecycle, reward, per-episode crash count, and end reason.
+- `EpisodeMovingAverages` stores rolling means for return/progress/crashes.
+- `episode_loop_system()` advances episode state and handles crash/timeout/lap boundaries.
+
+### `src/game/plugin.rs`
+
+- `GamePlugin` bundles game systems.
+- Registers collision messages and schedules fixed-tick simulation systems using `SimSet` ordering.
+- Spawns camera and car after the track is available (`PostStartup`).
+
+### `src/maps/parts/mod.rs`
+
+- `TilePart` enum defining all tile types and the `Empty` sentinel.
+- `open_edges()` returns `(north, south, east, west)` connectivity per tile.
+- `is_road()` and `is_corner()` classification helpers.
+
+### `src/maps/grid.rs`
+
+- `TrackGrid` struct: row-major tile storage, origin, tile_size.
+- Spatial queries: `cell_center()`, `world_to_cell()`, `is_road_at()`.
+- `find_spawn()` locates the `SpawnPoint` tile.
+- `find_spawn_cell()` locates the `SpawnPoint` tile cell coordinates.
+- `render_tile_grid()` spawns all visual geometry:
+  - Road surfaces (flat squares for non-corners, quarter-circle meshes for corners).
+  - Straight wall bars on closed edges of non-corner tiles.
+  - Quarter-circle arc walls on corner tiles.
+
+### `src/maps/track.rs`
+
+- `Track` component carrying the grid, spawn pose, and the computed centreline.
+- Queried by game and collision systems.
+
+### `src/maps/monaco.rs`
+
+- `MonacoPlugin` spawns the Sepang-inspired track on startup.
+- `build_tiles()` defines the 14x9 tile grid layout.
+- `render_finish_line()` places the start/finish marker.
+- Derives spawn position (tile centre) and heading (east) from the `SpawnPoint` tile.
 
 ## Execution Flow
 
-1. `MonacoPlugin` runs first (Startup): builds tile grid, renders sprites, spawns Track entity
-2. `GamePlugin` runs second (Startup): spawns Camera and Car at track spawn position
-3. Each frame (Update):
-   - `car_control_system`: reads input, updates velocity and rotation
-   - `collision_detection_system`: checks if car is off-track via `grid.is_road_at()`
-   - `handle_collision_system`: respawns car if collision detected
+1. `MonacoPlugin` runs first (Startup): builds tile grid, renders visuals, spawns the `Track` entity.
+2. `GamePlugin` runs next (PostStartup): spawns the 2D camera and the car at the track spawn pose.
+3. Each fixed tick (FixedUpdate):
+   - `SimSet::Input` (AgentPlugin): latch keyboard actions and optionally smooth them.
+   - `SimSet::Physics` (GamePlugin): integrate car dynamics from the stable action interface.
+   - `SimSet::Collision` (GamePlugin): detect off-track collisions and reset the car pose.
+   - `SimSet::Measurement` (GamePlugin + AgentPlugin): update centreline projection, advance episode/reward logic, then sensors, then the normalised observation vector.
+4. Each frame (Update):
+   - `DebugPlugin`: handle F1/F2/F3 toggles, render geometry/sensor gizmos, and update driving-state HUD visibility/text.
 
 ## Dependencies
 
-- `bevy 0.18.0` — Game engine for ECS, rendering, input handling
+- `bevy 0.18.0` — Game engine for ECS, rendering, and input handling.

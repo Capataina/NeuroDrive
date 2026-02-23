@@ -1,5 +1,8 @@
 use bevy::prelude::*;
 
+use crate::agent::observation::{ObservationVector, SensorReadings};
+use crate::game::progress::TrackProgress;
+
 /// Marker component identifying the player's car entity.
 #[derive(Component)]
 pub struct Car {
@@ -14,7 +17,7 @@ impl Default for Car {
         Self {
             velocity: Vec2::ZERO,
             rotation_speed: 4.0,
-            thrust: 1500.0,
+            thrust: 750.0,
             drag: 0.985,
         }
     }
@@ -30,6 +33,9 @@ pub fn spawn_car(commands: &mut Commands, position: Vec2, rotation: f32) {
         "Spawn car entity at ({:.1}, {:.1}) rot {:.2}.",
         position.x, position.y, rotation
     );
+    let mut sensor_readings = SensorReadings::default();
+    sensor_readings.previous_heading = rotation;
+
     commands.spawn((
         Sprite {
             color: Color::srgb(0.9, 0.2, 0.2),
@@ -39,39 +45,8 @@ pub fn spawn_car(commands: &mut Commands, position: Vec2, rotation: f32) {
         Transform::from_xyz(position.x, position.y, 10.0)
             .with_rotation(Quat::from_rotation_z(rotation)),
         Car::default(),
+        TrackProgress::default(),
+        sensor_readings,
+        ObservationVector::default(),
     ));
-}
-
-/// Handles keyboard input to control the car.
-pub fn car_control_system(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    time: Res<Time>,
-    mut query: Query<(&mut Transform, &mut Car)>,
-) {
-    let dt = time.delta_secs();
-
-    for (mut transform, mut car) in query.iter_mut() {
-        // Rotation: A = left, D = right
-        if keyboard.pressed(KeyCode::KeyA) {
-            transform.rotate_z(car.rotation_speed * dt);
-        }
-        if keyboard.pressed(KeyCode::KeyD) {
-            transform.rotate_z(-car.rotation_speed * dt);
-        }
-
-        // Thrust: W = forward
-        if keyboard.pressed(KeyCode::KeyW) {
-            let forward = transform.rotation * Vec3::X;
-            let thrust = car.thrust;
-            car.velocity += Vec2::new(forward.x, forward.y) * thrust * dt;
-        }
-
-        // Apply drag
-        let drag = car.drag;
-        car.velocity *= drag;
-
-        // Update position
-        transform.translation.x += car.velocity.x * dt;
-        transform.translation.y += car.velocity.y * dt;
-    }
 }

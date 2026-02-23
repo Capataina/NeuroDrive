@@ -308,149 +308,229 @@ Learning must be measurable, not guessed.
 
 ## Features & Roadmap
 
-### 🏎️ Milestone 0 — Environment Foundation (Deterministic Sandbox)
+NeuroDrive follows a deliberate sequencing strategy:
 
-- [ ] Deterministic fixed-timestep 2D car physics
-- [ ] Track representation with centerline spline + boundaries
-- [ ] Collision detection + reset conditions
-- [ ] Raycast sensor system with debug overlays
-- [ ] Reset-on-crash episodic loop
-- [ ] Manual / heuristic baseline controller (sanity check)
-- [ ] Minimal UI controls: pause, reset episode, reset brain
+1. Build a deterministic, observable environment.
+2. Prove the task is learnable with a lightweight RL baseline (A2C).
+3. Transition to brain-inspired local plasticity mechanisms.
+4. Gradually increase biological fidelity and structural complexity.
 
-**Success criteria:**
-A stable environment where a controller can drive and metrics are correct.
+This reduces debugging ambiguity and isolates representation issues from learning-rule issues.
 
 ---
 
-### 🧠 Milestone 1 — Brain v1 (Rate-Based Neurons + Reward-Modulated Plasticity)
+## 🏎️ Milestone 0 — Environment Foundation (Deterministic Sandbox)
 
-This milestone exists to validate the full learning pipeline before introducing spikes.
+This milestone establishes a fully deterministic, instrumented control environment before any learning algorithm is introduced.
+
+- [x] Deterministic fixed-timestep 2D car physics
+- [x] Track representation (centerline polyline/spline + boundaries)
+- [x] Collision detection + reset conditions
+- [x] Progress metric via centerline projection (continuous, no jumps)
+- [x] Raycast sensor system with on-screen debug overlays
+- [x] Stable observation vector (normalized inputs)
+- [x] Steering/throttle action interface with optional smoothing
+- [x] Episode loop (crash / timeout / lap complete)
+- [x] Telemetry: reward, progress %, crash count, moving averages
+- [x] Deterministic replay test (same seed + same actions → identical trajectory)
+
+- [x] Debug visual overlays:
+  - [x] Raycasts + hit points
+  - [x] Closest centerline projection point
+  - [x] Centerline tangent vector visualisation
+  - [x] Car forward vector (velocity and drag)
+  - [x] Heading error readout
+  - [x] Progress Percentage of the track
+  - [x] F1, F2 and F3 keys to toggle the debug overlays
+    - F1: Geometry overlays
+    - F2: Sensor overlays
+    - F3: Learning telemetry (after the ais are implemented)
+
+**Success criteria:**
+The environment is stable, deterministic, observable, and debuggable.  
+A manually controlled or heuristic controller can complete laps reliably.
+All geometric quantities (projection, tangent, heading error) are visually verified and stable before any learning begins.
+
+> No learning occurs at this stage. The goal is correctness and instrumentation.
+
+---
+
+## 🧠 Milestone 1 — A2C Baseline (Autonomous Learnability Validation)
+
+Before implementing biological plasticity, we validate that the task is learnable using a minimal on-policy RL algorithm.
+
+This is not the final direction of the project.  
+It is a diagnostic layer that answers:
+
+> Is the observation space + reward structure sufficient for autonomous learning?
+
+### Implementation Scope
+
+- [ ] Small MLP policy network (e.g. 2×64 hidden layers)
+- [ ] Value function (shared trunk or separate head)
+- [ ] On-policy rollout buffer
+- [ ] Advantage estimation (TD or GAE-lite)
+- [ ] Policy loss + value loss + entropy regularization
+- [ ] Online updates at fixed rollout intervals
+- [ ] Real-time learning visualisation (watchable behaviour)
+- [ ] Headless fast-training mode (optional)
+- [ ] Policy snapshot + evaluation mode
+
+### Constraints
+
+- No replay buffer
+- No target networks
+- No SAC / PPO complexity
+- No external ML libraries
+- Fully implemented in Rust
+
+### Observation Inputs
+
+- Raycast distances (normalized)
+- Speed
+- Heading error relative to track tangent
+- Optional angular velocity
+
+No privileged geometric information (no arc-length progress, no curvature lookahead).
+
+### Success criteria
+
+- Measurable improvement in forward progress within minutes
+- Reduced crash frequency over time
+- Stable lap completion behaviour
+- No reward hacking
+- Learning visible in real time
+
+If A2C fails:
+
+- Diagnose observation scaling
+- Diagnose reward magnitude
+- Diagnose timestep stability
+- Optionally validate representation using supervised cloning
+
+> Milestone 1 proves that the task is learnable.  
+> It isolates environment design from biological learning mechanics.
+
+---
+
+## 🧬 Milestone 2 — Brain v1 (Rate-Based Local Plasticity + δ Gating)
+
+After learnability is validated, we replace gradient-based learning with biologically inspired mechanisms.
 
 - [ ] Sparse neural graph (fixed I/O, sparse hidden connectivity)
-- [ ] Neuron state dynamics (time-evolving activations)
+- [ ] Neuron state dynamics (rate-based activations)
 - [ ] Eligibility traces per synapse
 - [ ] Reward-modulated weight updates (δ-gated plasticity)
-- [ ] Episode metrics + moving averages on-screen
-- [ ] Save/load checkpoints for brain state
+- [ ] No backpropagation
+- [ ] No global gradient computation
+- [ ] Continuous online learning (single persistent brain)
+- [ ] Episode metrics + moving averages
+- [ ] Save/load brain state
 
 **Success criteria:**
-Measurable improvement in progress metrics over 5–10 minutes of training.
+Observable behavioural improvement without gradients.
 
-> This is the “plumbing milestone”: it proves local learning + reward gating works end-to-end.
+> This milestone transitions from optimisation to local plasticity.
 
 ---
 
-### 🧪 Milestone 2 — Scientific Control (Stability, Instrumentation, Ablations)
+## 🧪 Milestone 3 — Scientific Control (Stability & Ablations)
 
-This milestone prevents self-deception and makes results defensible.
+Prevent self-deception. Prove causality.
 
-- [ ] Weight clamping + decay mechanisms
-- [ ] Learning rate schedules and safe defaults
-- [ ] Deterministic replay of episodes for debugging
-- [ ] First-half vs second-half statistical comparisons
+- [ ] Weight clamping + decay
+- [ ] Learning rate schedules
+- [ ] Deterministic episode replay
+- [ ] First-half vs second-half statistics
 - [ ] Ablations:
-  - [ ] no dopamine gating (δ fixed)
-  - [ ] no eligibility traces
-  - [ ] frozen weights (control baseline)
-- [ ] Training-speed controls (1×, 2×, 4×) while still watchable
+  - [ ] No dopamine gating
+  - [ ] No eligibility traces
+  - [ ] Frozen weights (control baseline)
+- [ ] Training-speed controls (1×, 2×, 4×)
 
 **Success criteria:**
-Clear evidence that improvements are caused by the intended learning mechanism.
+Clear evidence that improvements arise from the intended mechanisms.
 
 ---
 
-### ⚡ Milestone 3 — Spiking Upgrade (SNN + STDP-family Learning)
+## ⚡ Milestone 4 — Spiking Upgrade (SNN + STDP)
 
-Spiking neurons are not a “nice-to-have” if the goal is biological plausibility.
-This milestone upgrades the core representation.
+Upgrade representation to spike-based dynamics.
 
-- [ ] Spiking neuron model (membrane potential + threshold + reset)
-- [ ] Spike encoding for inputs (rate or temporal encoding)
-- [ ] Output decoding (spike counts → continuous steering/throttle)
-- [ ] STDP-style eligibility (timing-based local trace)
-- [ ] Reward-modulated STDP (δ gates consolidation)
-- [ ] Side-by-side comparison vs v1 (learning curves + behaviour)
+- [ ] Spiking neuron model (membrane potential, threshold, reset)
+- [ ] Spike encoding of inputs
+- [ ] Spike decoding of outputs
+- [ ] STDP-style eligibility traces
+- [ ] Reward-modulated STDP
+- [ ] Side-by-side comparison with rate-based version
 
 **Success criteria:**
-Comparable or improved learning with a more biologically grounded mechanism.
+Comparable or improved learning with greater biological plausibility.
 
 ---
 
-### 🌱 Milestone 4 — Structural Plasticity (Constrained Growth + Pruning)
+## 🌱 Milestone 5 — Structural Plasticity (Growth + Pruning)
 
-Topology change is the mechanism for capacity allocation and long-term adaptation.
+Introduce constrained topology adaptation.
 
-- [ ] Synapse pruning rules (low weight + low contribution over time)
-- [ ] Synapse growth rules (co-activity-driven, bounded)
-- [ ] Bounded fan-in / fan-out constraints
-- [ ] Churn metrics (edges added/removed per episode)
-- [ ] Topology visualisation + snapshots
-- [ ] Comparison: static topology vs plastic topology
+- [ ] Synapse pruning rules
+- [ ] Synapse growth rules (co-activity driven)
+- [ ] Bounded fan-in / fan-out
+- [ ] Churn metrics (edges added/removed)
+- [ ] Topology visualisation
 
 **Success criteria:**
-Structural plasticity improves stability, adaptability, or sample efficiency without graph blow-up.
+Structural adaptation improves efficiency or stability without graph explosion.
 
 ---
 
-### 🗺️ Milestone 5 — Generalisation (Multiple Tracks + Continual Learning)
+## 🗺️ Milestone 6 — Generalisation & Continual Learning
 
-Generalisation is where “learning a behaviour” diverges from memorising geometry.
-
-- [ ] Multiple curated tracks (A/B/C)
-- [ ] Track cycling on episode reset (configurable)
+- [ ] Multiple curated tracks
 - [ ] Interleaved training across tracks
-- [ ] Held-out evaluation track (train on A/B, test on C)
-- [ ] Metrics per-track + forgetting indicators
-- [ ] Difficulty progression (curriculum ordering)
+- [ ] Held-out evaluation track
+- [ ] Forgetting metrics
+- [ ] Curriculum progression
 
 **Success criteria:**
-Driving skill transfers across tracks; forgetting is measurable and mitigated.
+Skill transfers across tracks without catastrophic forgetting.
 
 ---
 
-### 💤 Milestone 6 — Replay & Consolidation (Hippocampus-Inspired)
+## 💤 Milestone 7 — Replay & Consolidation
 
-Replay is a strong candidate mechanism for improving continual learning.
-
-- [ ] Trajectory buffer (state/action/reward/spikes)
-- [ ] Offline replay phase between episodes (“sleep”)
-- [ ] Replay scheduling (recent vs diverse)
-- [ ] Consolidation rules (reduce churn, stabilise useful circuits)
-- [ ] Quantify sample efficiency improvements
+- [ ] Trajectory buffer
+- [ ] Offline replay (“sleep phase”)
+- [ ] Consolidation rules
+- [ ] Sample efficiency analysis
 
 **Success criteria:**
-Replay improves learning speed and reduces catastrophic forgetting.
+Replay improves learning speed or stability.
 
 ---
 
-### 🧬 Milestone 7 — Robustness (Noise, Perturbations, and Realistic Imperfections)
+## 🧬 Milestone 8 — Robustness & Perturbation Testing
 
-Brains learn under noise; robustness is part of the claim.
-
-- [ ] Sensor noise and latency
-- [ ] Domain randomisation (friction, mass, grip)
-- [ ] Track perturbations (minor boundary shifts)
-- [ ] Stability under long-run training (hours)
-- [ ] Regression suite for learning + sim correctness
+- [ ] Sensor noise
+- [ ] Physics randomisation
+- [ ] Track perturbations
+- [ ] Long-run stability testing
+- [ ] Regression test suite
 
 **Success criteria:**
-Behaviour remains stable and learning persists under controlled perturbations.
+Learning remains stable under controlled noise.
 
 ---
 
-### 🔬 Milestone 8 — “Explain the Brain” Mode (Interpretability & Mechanism)
+## 🔬 Milestone 9 — Interpretability & Mechanistic Analysis
 
-If the goal is brain-inspired learning, you should be able to inspect mechanisms.
-
-- [ ] Identify “motor primitives” emerging in circuits
-- [ ] Visualise synapses that dominate steering vs throttle
-- [ ] Activity clustering across situations (turns vs straights)
-- [ ] Track which synapses are pruned/grown most
-- [ ] Export topology + activity traces for analysis
+- [ ] Identify emergent motor primitives
+- [ ] Synapse importance visualisation
+- [ ] Activity clustering (turns vs straights)
+- [ ] Export topology + activity traces
 
 **Success criteria:**
-The system becomes explainable as a learning mechanism, not just a black box.
+The system becomes inspectable as a learning mechanism, not just a black box.
 
 ---
 

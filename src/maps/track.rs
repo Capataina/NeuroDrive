@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::maps::grid::TrackGrid;
+use crate::maps::centerline::TrackCenterline;
 
 /// Component attached to the single track entity.
 ///
@@ -21,4 +22,7 @@ pub struct Track {
     /// Heading angle in radians at which the car spawns.
     /// 0.0 means facing east (+X). Derived from `SpawnPoint` connectivity.
     pub spawn_rotation: f32,
+
+    /// Closed centreline polyline used for progress measurement.
+    pub centerline: TrackCenterline,
 }

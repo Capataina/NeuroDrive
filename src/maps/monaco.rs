@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::maps::centerline::{GridDir, TrackCenterline};
 use crate::maps::grid::{TrackGrid, render_tile_grid};
 use crate::maps::parts::TilePart;
 use crate::maps::track::Track;
@@ -41,9 +42,16 @@ fn spawn_track(
 
     let grid = TrackGrid::new(tiles, TILE_SIZE, origin);
 
+    let spawn_cell = grid
+        .find_spawn_cell()
+        .expect("Track grid must contain exactly one SpawnPoint tile.");
+
     let (spawn_pos, spawn_rot) = grid
         .find_spawn()
         .expect("Track grid must contain exactly one SpawnPoint tile.");
+
+    let centerline = TrackCenterline::build_closed_loop(&grid, spawn_cell, GridDir::East)
+        .expect("Track grid connectivity must form a single closed loop.");
 
     info!(
         "Sepang track spawned. Grid {}×{}. Car spawn ({:.0},{:.0}) rot {:.2}.",
@@ -53,6 +61,7 @@ fn spawn_track(
         spawn_pos.y,
         spawn_rot
     );
+    info!("Centreline length: {:.0}px.", centerline.total_length());
 
     render_tile_grid(&mut commands, &grid, &mut meshes, &mut materials);
     render_finish_line(&mut commands, &grid);
@@ -61,6 +70,7 @@ fn spawn_track(
         grid,
         spawn_position: spawn_pos,
         spawn_rotation: spawn_rot,
+        centerline,
     });
 }
 
@@ -129,6 +139,7 @@ fn spawn_track(
 /// ```
 ///
 /// Every open edge of every road tile matches its neighbour's open edge.
+#[allow(non_snake_case)]
 fn build_tiles() -> Vec<Vec<TilePart>> {
     use TilePart::*;
 
