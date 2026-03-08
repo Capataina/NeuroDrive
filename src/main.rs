@@ -1,6 +1,8 @@
 mod game;
 mod maps;
 mod agent;
+mod brain;
+mod analytics;
 mod debug;
 mod sim;
 
@@ -9,6 +11,8 @@ use bevy::time::Fixed;
 use game::GamePlugin;
 use maps::MonacoPlugin;
 use agent::AgentPlugin;
+use brain::plugin::BrainPlugin;
+use analytics::plugin::AnalyticsPlugin;
 use debug::DebugPlugin;
 
 fn main() {
@@ -26,6 +30,8 @@ fn main() {
         // Track must be spawned before game systems query it
         .add_plugins(MonacoPlugin)
         .add_plugins(AgentPlugin)
+        .add_plugins(BrainPlugin)
+        .add_plugins(AnalyticsPlugin)
         .add_plugins(GamePlugin)
         .add_plugins(DebugPlugin)
         .run();

@@ -2,34 +2,39 @@
 
 ## Scope / Purpose
 
-- Provide a continuous progress metric based on projecting the car onto a centreline parameterisation.
-- Implement lap completion and episode termination conditions that are stable and visually verifiable.
+- Provide a continuous progress measure for reward shaping, telemetry, and lap completion without exposing that measure as a privileged policy input.
+- Keep lap logic deterministic, inspectable, and derived from track geometry rather than ad hoc counters.
 
 ## Current Implemented System
 
-- A closed centreline polyline is derived from `TrackGrid` connectivity and stored on the `Track` component (`src/maps/centerline.rs`, `src/maps/track.rs`, `src/maps/monaco.rs::spawn_track`).
-- The car has a `TrackProgress` component that stores closest projection point, tangent, arc-length `s`, and progress fraction (`src/game/progress.rs::TrackProgress`, `src/game/progress.rs::update_track_progress_system`).
-- Lap completion is detected from progress wrap (armed threshold + wrap window) in the episode loop (`src/game/episode.rs::episode_loop_system`).
-- A finish line stripe is still rendered as a visual marker (`src/maps/monaco.rs::render_finish_line`).
+- A closed centreline polyline is derived from tile-grid connectivity and stored on the `Track` component (`src/maps/centerline.rs`, `src/maps/track.rs`, `src/maps/monaco.rs`).
+- The car carries a `TrackProgress` component holding closest point, tangent, arc-length `s`, fraction, and distance to the centreline (`src/game/progress.rs`).
+- Progress is recomputed every fixed tick by projecting the current car position onto the centreline (`src/game/progress.rs::update_track_progress_system`).
+- Lap completion is detected in the episode loop through an armed wrap rule using `lap_arm_fraction`, `lap_wrap_from_fraction`, and `lap_wrap_to_fraction` (`src/game/episode.rs`).
+- Reward shaping already consumes signed progress delta each tick, with wrap-aware handling to avoid false large jumps at the start/finish seam (`src/game/episode.rs`).
 
 ## Implemented Outputs / Artifacts (if applicable)
 
-- Visible: finish line stripe (visual-only) (`src/maps/monaco.rs::render_finish_line`).
-- Debug: F1 geometry overlay draws the centreline, projection point, and tangent arrow (`src/debug/overlays.rs`).
+- Runtime `TrackProgress` component on the car (`src/game/progress.rs`).
+- F1 geometry overlay visualising the centreline, closest projection point, tangent vector, car forward vector, and projection line (`src/debug/overlays.rs`).
+- HUD progress percentage derived from `TrackProgress.fraction` (`src/debug/hud.rs`).
 
 ## In Progress / Partially Implemented
 
-- None tracked in `context/` yet.
+- Progress is now used in more places than before: reward accumulation, HUD telemetry, episode summaries, analytics records, and A2C reward collection all depend on it.
+- The current implementation assumes one unbranched closed loop; that assumption is enforced by centreline construction but not yet surfaced as a richer validation/reporting layer.
 
 ## Planned / Missing / To Be Changed
 
-- Finish-line geometry is not yet directly used for crossing checks (lap logic is progress-wrap based).
+- Finish-line geometry is still not used directly for crossing checks; lap completion remains progress-wrap based.
+- There is still no dedicated regression test for progress continuity or lap detection under resets and edge cases.
+- Multi-track support is missing, so the progress subsystem has not yet been validated against alternative layouts or branch-capable tiles.
 
 ## Notes / Design Considerations (optional)
 
-- The current centreline is grid-derived and assumes a single closed-loop (degree-2) track; ambiguous branches are rejected rather than guessed (`src/maps/centerline.rs::TrackCenterline::build_closed_loop`).
-- Corner tiles contribute quarter-circle arc samples (radius = half tile) so the centreline matches curved turns rather than cutting chords through the corner.
+- The centreline builder rejects ambiguous branches rather than guessing, which keeps progress meaning stable for the current single-loop environment.
+- `TrackProgress` is environment truth, not observation truth, and that separation should be preserved as learning systems expand.
 
 ## Discarded / Obsolete / No Longer Relevant
 
-- None tracked in `context/` yet.
+- Earlier context that treated progress mainly as a debug metric is obsolete; it is now a central dependency for reward, telemetry, analytics, and controller training.

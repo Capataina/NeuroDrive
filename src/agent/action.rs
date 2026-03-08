@@ -67,9 +67,16 @@ impl Default for ActionSmoothing {
 /// This is a temporary controller used for Milestone 0 manual validation.
 /// It is intentionally minimal: A/D steer, W throttle.
 pub fn keyboard_action_input_system(
+    mode: Option<Res<crate::brain::types::AgentMode>>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut action_state: ResMut<ActionState>,
 ) {
+    if let Some(m) = mode {
+        if *m != crate::brain::types::AgentMode::Keyboard {
+            return;
+        }
+    }
+
     let mut steering = 0.0;
     if keyboard.pressed(KeyCode::KeyA) {
         steering -= 1.0;

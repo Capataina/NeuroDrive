@@ -1,0 +1,1032 @@
+{
+  "episodes": [
+    {
+      "episode_id": 1,
+      "progress": 0.027678045,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.6634321,
+      "progress_reward_sum": 0.6634321,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 92,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.041647445,
+      "steering_std": 0.7584602,
+      "throttle_mean": 0.2758504,
+      "throttle_std": 0.3846663
+    },
+    {
+      "episode_id": 2,
+      "progress": 0.050719928,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.66343164,
+      "progress_reward_sum": 0.66343164,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 129,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": -0.024794057,
+      "steering_std": 0.712485,
+      "throttle_mean": 0.34015667,
+      "throttle_std": 0.39304247
+    },
+    {
+      "episode_id": 3,
+      "progress": 0.031944297,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.6634319,
+      "progress_reward_sum": 0.6634319,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 101,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": -0.033319917,
+      "steering_std": 0.7147925,
+      "throttle_mean": 0.3088209,
+      "throttle_std": 0.39838588
+    },
+    {
+      "episode_id": 4,
+      "progress": 0.025016692,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.663432,
+      "progress_reward_sum": 0.663432,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 89,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.08649089,
+      "steering_std": 0.7452962,
+      "throttle_mean": 0.26544985,
+      "throttle_std": 0.38548338
+    },
+    {
+      "episode_id": 5,
+      "progress": 0.0802128,
+      "reward": -9.336567,
+      "pre_terminal_return": 0.6634326,
+      "progress_reward_sum": 0.6634326,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 191,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.0364155,
+      "steering_std": 0.703248,
+      "throttle_mean": 0.30446926,
+      "throttle_std": 0.37860343
+    },
+    {
+      "episode_id": 6,
+      "progress": 0.06996297,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.6634321,
+      "progress_reward_sum": 0.6634321,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 155,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.009475088,
+      "steering_std": 0.71595556,
+      "throttle_mean": 0.36998478,
+      "throttle_std": 0.406172
+    },
+    {
+      "episode_id": 7,
+      "progress": 0.077715844,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.6634326,
+      "progress_reward_sum": 0.6634326,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 194,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": -0.040256187,
+      "steering_std": 0.7167415,
+      "throttle_mean": 0.29939678,
+      "throttle_std": 0.3890497
+    },
+    {
+      "episode_id": 8,
+      "progress": 0.024005728,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.66343284,
+      "progress_reward_sum": 0.66343284,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 81,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.20367801,
+      "steering_std": 0.664391,
+      "throttle_mean": 0.28264716,
+      "throttle_std": 0.37735543
+    },
+    {
+      "episode_id": 9,
+      "progress": 0.03250283,
+      "reward": -9.336567,
+      "pre_terminal_return": 0.6634333,
+      "progress_reward_sum": 0.6634333,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 110,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.032218568,
+      "steering_std": 0.7122616,
+      "throttle_mean": 0.28239194,
+      "throttle_std": 0.38001212
+    },
+    {
+      "episode_id": 10,
+      "progress": 0.02558231,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.6634321,
+      "progress_reward_sum": 0.6634321,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 78,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": -0.06473223,
+      "steering_std": 0.6955129,
+      "throttle_mean": 0.3343893,
+      "throttle_std": 0.41023213
+    },
+    {
+      "episode_id": 11,
+      "progress": 0.08202761,
+      "reward": -9.336564,
+      "pre_terminal_return": 0.66343546,
+      "progress_reward_sum": 0.66343546,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 187,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.009016682,
+      "steering_std": 0.7221785,
+      "throttle_mean": 0.3222635,
+      "throttle_std": 0.40739864
+    },
+    {
+      "episode_id": 12,
+      "progress": 0.033338036,
+      "reward": -9.336567,
+      "pre_terminal_return": 0.6634331,
+      "progress_reward_sum": 0.6634331,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 112,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.07325499,
+      "steering_std": 0.68899965,
+      "throttle_mean": 0.26319787,
+      "throttle_std": 0.3620667
+    },
+    {
+      "episode_id": 13,
+      "progress": 0.077916756,
+      "reward": -9.336569,
+      "pre_terminal_return": 0.66343117,
+      "progress_reward_sum": 0.66343117,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 163,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": -0.0058376966,
+      "steering_std": 0.73139,
+      "throttle_mean": 0.37031603,
+      "throttle_std": 0.42096838
+    },
+    {
+      "episode_id": 14,
+      "progress": 0.027053013,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.66343236,
+      "progress_reward_sum": 0.66343236,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 84,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.0867257,
+      "steering_std": 0.7016108,
+      "throttle_mean": 0.30719164,
+      "throttle_std": 0.37527248
+    },
+    {
+      "episode_id": 15,
+      "progress": 0.070274726,
+      "reward": -9.336569,
+      "pre_terminal_return": 0.66343117,
+      "progress_reward_sum": 0.66343117,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 178,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.040075522,
+      "steering_std": 0.75139946,
+      "throttle_mean": 0.2940769,
+      "throttle_std": 0.40162456
+    },
+    {
+      "episode_id": 16,
+      "progress": 0.1016247,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.6634321,
+      "progress_reward_sum": 0.6634321,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 243,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.036889546,
+      "steering_std": 0.7168571,
+      "throttle_mean": 0.302875,
+      "throttle_std": 0.38711986
+    },
+    {
+      "episode_id": 17,
+      "progress": 0.026081176,
+      "reward": -9.336567,
+      "pre_terminal_return": 0.6634326,
+      "progress_reward_sum": 0.6634326,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 92,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": -0.055329107,
+      "steering_std": 0.74942887,
+      "throttle_mean": 0.2757681,
+      "throttle_std": 0.3660996
+    },
+    {
+      "episode_id": 18,
+      "progress": 0.056647006,
+      "reward": -9.336567,
+      "pre_terminal_return": 0.6634331,
+      "progress_reward_sum": 0.6634331,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 154,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.006955535,
+      "steering_std": 0.71820927,
+      "throttle_mean": 0.2875541,
+      "throttle_std": 0.38990867
+    },
+    {
+      "episode_id": 19,
+      "progress": 0.045249414,
+      "reward": -9.336567,
+      "pre_terminal_return": 0.6634331,
+      "progress_reward_sum": 0.6634331,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 95,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.030139456,
+      "steering_std": 0.7112263,
+      "throttle_mean": 0.45996836,
+      "throttle_std": 0.44417283
+    },
+    {
+      "episode_id": 20,
+      "progress": 0.029819537,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.6634321,
+      "progress_reward_sum": 0.6634321,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 103,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": -0.021314362,
+      "steering_std": 0.7255524,
+      "throttle_mean": 0.2803506,
+      "throttle_std": 0.39391342
+    },
+    {
+      "episode_id": 21,
+      "progress": 0.028414084,
+      "reward": -9.336567,
+      "pre_terminal_return": 0.66343284,
+      "progress_reward_sum": 0.66343284,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 86,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": -0.08539912,
+      "steering_std": 0.704306,
+      "throttle_mean": 0.28850156,
+      "throttle_std": 0.38422373
+    },
+    {
+      "episode_id": 22,
+      "progress": 0.033142287,
+      "reward": -9.336567,
+      "pre_terminal_return": 0.6634331,
+      "progress_reward_sum": 0.6634331,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 108,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.07202352,
+      "steering_std": 0.7110108,
+      "throttle_mean": 0.29866868,
+      "throttle_std": 0.39680323
+    },
+    {
+      "episode_id": 23,
+      "progress": 0.074522056,
+      "reward": -9.336567,
+      "pre_terminal_return": 0.6634326,
+      "progress_reward_sum": 0.6634326,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 180,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.021898858,
+      "steering_std": 0.67837614,
+      "throttle_mean": 0.29890764,
+      "throttle_std": 0.3814478
+    },
+    {
+      "episode_id": 24,
+      "progress": 0.020907216,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.6634319,
+      "progress_reward_sum": 0.6634319,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 83,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.15405102,
+      "steering_std": 0.65845525,
+      "throttle_mean": 0.24858572,
+      "throttle_std": 0.35686544
+    },
+    {
+      "episode_id": 25,
+      "progress": 0.10151841,
+      "reward": -9.336563,
+      "pre_terminal_return": 0.66343594,
+      "progress_reward_sum": 0.66343594,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 246,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.055971663,
+      "steering_std": 0.7354958,
+      "throttle_mean": 0.29685533,
+      "throttle_std": 0.39076933
+    },
+    {
+      "episode_id": 26,
+      "progress": 0.024925308,
+      "reward": -9.336567,
+      "pre_terminal_return": 0.6634326,
+      "progress_reward_sum": 0.6634326,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 93,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.084350884,
+      "steering_std": 0.7202922,
+      "throttle_mean": 0.23912783,
+      "throttle_std": 0.36855868
+    },
+    {
+      "episode_id": 27,
+      "progress": 0.022918444,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.6634327,
+      "progress_reward_sum": 0.6634327,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 86,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.020407762,
+      "steering_std": 0.69721705,
+      "throttle_mean": 0.2757842,
+      "throttle_std": 0.35995856
+    },
+    {
+      "episode_id": 28,
+      "progress": 0.033562247,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.6634321,
+      "progress_reward_sum": 0.6634321,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 99,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.10674686,
+      "steering_std": 0.69094706,
+      "throttle_mean": 0.3500246,
+      "throttle_std": 0.41764587
+    },
+    {
+      "episode_id": 29,
+      "progress": 0.04157489,
+      "reward": -9.336566,
+      "pre_terminal_return": 0.663434,
+      "progress_reward_sum": 0.663434,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 126,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.06471149,
+      "steering_std": 0.71823514,
+      "throttle_mean": 0.30779317,
+      "throttle_std": 0.38331458
+    },
+    {
+      "episode_id": 30,
+      "progress": 0.04004735,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.66343236,
+      "progress_reward_sum": 0.66343236,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 127,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.038621183,
+      "steering_std": 0.7377017,
+      "throttle_mean": 0.28630006,
+      "throttle_std": 0.37375098
+    },
+    {
+      "episode_id": 31,
+      "progress": 0.112651974,
+      "reward": -9.336572,
+      "pre_terminal_return": 0.6634283,
+      "progress_reward_sum": 0.6634283,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 290,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": -0.012811988,
+      "steering_std": 0.7172773,
+      "throttle_mean": 0.2781382,
+      "throttle_std": 0.38432026
+    },
+    {
+      "episode_id": 32,
+      "progress": 0.050049987,
+      "reward": -9.336567,
+      "pre_terminal_return": 0.6634326,
+      "progress_reward_sum": 0.6634326,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 125,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.029166957,
+      "steering_std": 0.7137746,
+      "throttle_mean": 0.33539915,
+      "throttle_std": 0.39146242
+    },
+    {
+      "episode_id": 33,
+      "progress": 0.04131125,
+      "reward": -9.336567,
+      "pre_terminal_return": 0.66343355,
+      "progress_reward_sum": 0.66343355,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 115,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": -0.057051692,
+      "steering_std": 0.6769767,
+      "throttle_mean": 0.35570464,
+      "throttle_std": 0.41440028
+    },
+    {
+      "episode_id": 34,
+      "progress": 0.026492788,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.6634319,
+      "progress_reward_sum": 0.6634319,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 104,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.07686172,
+      "steering_std": 0.72068495,
+      "throttle_mean": 0.21456352,
+      "throttle_std": 0.3332284
+    },
+    {
+      "episode_id": 35,
+      "progress": 0.035384048,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.6634319,
+      "progress_reward_sum": 0.6634319,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 102,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.14428073,
+      "steering_std": 0.67175597,
+      "throttle_mean": 0.34296194,
+      "throttle_std": 0.41331562
+    },
+    {
+      "episode_id": 36,
+      "progress": 0.03887227,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.6634326,
+      "progress_reward_sum": 0.6634326,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 109,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.075963005,
+      "steering_std": 0.7234667,
+      "throttle_mean": 0.345708,
+      "throttle_std": 0.39533785
+    },
+    {
+      "episode_id": 37,
+      "progress": 0.05437127,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.6634326,
+      "progress_reward_sum": 0.6634326,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 158,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.07233757,
+      "steering_std": 0.7113169,
+      "throttle_mean": 0.29144838,
+      "throttle_std": 0.38917997
+    },
+    {
+      "episode_id": 38,
+      "progress": 0.06643369,
+      "reward": -9.336567,
+      "pre_terminal_return": 0.66343355,
+      "progress_reward_sum": 0.66343355,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 167,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.06097551,
+      "steering_std": 0.7139162,
+      "throttle_mean": 0.3105469,
+      "throttle_std": 0.39516303
+    },
+    {
+      "episode_id": 39,
+      "progress": 0.023965906,
+      "reward": -9.336567,
+      "pre_terminal_return": 0.6634326,
+      "progress_reward_sum": 0.6634326,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 84,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.046065375,
+      "steering_std": 0.6427818,
+      "throttle_mean": 0.24934421,
+      "throttle_std": 0.36740044
+    },
+    {
+      "episode_id": 40,
+      "progress": 0.09134858,
+      "reward": -9.33657,
+      "pre_terminal_return": 0.6634302,
+      "progress_reward_sum": 0.6634302,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 229,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.036904663,
+      "steering_std": 0.7331341,
+      "throttle_mean": 0.30964655,
+      "throttle_std": 0.40082493
+    },
+    {
+      "episode_id": 41,
+      "progress": 0.01583027,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.66343266,
+      "progress_reward_sum": 0.66343266,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 65,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": 0.20365472,
+      "steering_std": 0.70115787,
+      "throttle_mean": 0.27458945,
+      "throttle_std": 0.37869695
+    },
+    {
+      "episode_id": 42,
+      "progress": 0.06513099,
+      "reward": -9.336568,
+      "pre_terminal_return": 0.66343164,
+      "progress_reward_sum": 0.66343164,
+      "terminal_reward_sum": -10.0,
+      "crash_penalty_sum": -10.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 166,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        -250.0,
+        300.0
+      ],
+      "steering_mean": -0.0162795,
+      "steering_std": 0.7405574,
+      "throttle_mean": 0.32239914,
+      "throttle_std": 0.38737127
+    }
+  ],
+  "a2c_updates": [
+    {
+      "update_index": 1,
+      "batch_size": 2048,
+      "policy_loss": -0.0031763313,
+      "value_loss": 6.1300783,
+      "policy_entropy": 1.4189451,
+      "explained_variance": -0.13877273,
+      "steering_mean": 0.021768382,
+      "steering_std": 0.71964467,
+      "throttle_mean": 0.31206772,
+      "throttle_std": 0.39500338,
+      "clamped_action_fraction": 0.0,
+      "layer_health": [
+        {
+          "layer_name": "actor_fc1",
+          "weight_l2_norm": 4.7964115,
+          "gradient_l2_norm": 0.07235704,
+          "dead_relu_fraction": 0.44989014
+        },
+        {
+          "layer_name": "actor_fc2",
+          "weight_l2_norm": 8.113981,
+          "gradient_l2_norm": 0.070202984,
+          "dead_relu_fraction": 0.5360184
+        },
+        {
+          "layer_name": "actor_mean",
+          "weight_l2_norm": 1.7773354,
+          "gradient_l2_norm": 0.044503864,
+          "dead_relu_fraction": null
+        },
+        {
+          "layer_name": "critic_fc1",
+          "weight_l2_norm": 4.789312,
+          "gradient_l2_norm": 0.7340693,
+          "dead_relu_fraction": 0.53621674
+        },
+        {
+          "layer_name": "critic_fc2",
+          "weight_l2_norm": 7.9970293,
+          "gradient_l2_norm": 1.2182065,
+          "dead_relu_fraction": 0.5203476
+        },
+        {
+          "layer_name": "critic_value",
+          "weight_l2_norm": 1.2282698,
+          "gradient_l2_norm": 1.425425,
+          "dead_relu_fraction": null
+        }
+      ]
+    },
+    {
+      "update_index": 2,
+      "batch_size": 2048,
+      "policy_loss": -0.00905463,
+      "value_loss": 5.851246,
+      "policy_entropy": 1.4192717,
+      "explained_variance": -0.14334226,
+      "steering_mean": 0.031489108,
+      "steering_std": 0.71544075,
+      "throttle_mean": 0.2962593,
+      "throttle_std": 0.38855362,
+      "clamped_action_fraction": 0.0,
+      "layer_health": [
+        {
+          "layer_name": "actor_fc1",
+          "weight_l2_norm": 4.79644,
+          "gradient_l2_norm": 0.08667396,
+          "dead_relu_fraction": 0.4503708
+        },
+        {
+          "layer_name": "actor_fc2",
+          "weight_l2_norm": 8.114155,
+          "gradient_l2_norm": 0.09107409,
+          "dead_relu_fraction": 0.5422287
+        },
+        {
+          "layer_name": "actor_mean",
+          "weight_l2_norm": 1.7775166,
+          "gradient_l2_norm": 0.07603116,
+          "dead_relu_fraction": null
+        },
+        {
+          "layer_name": "critic_fc1",
+          "weight_l2_norm": 4.7888613,
+          "gradient_l2_norm": 0.75755006,
+          "dead_relu_fraction": 0.53959656
+        },
+        {
+          "layer_name": "critic_fc2",
+          "weight_l2_norm": 7.9977784,
+          "gradient_l2_norm": 1.2286431,
+          "dead_relu_fraction": 0.5214691
+        },
+        {
+          "layer_name": "critic_value",
+          "weight_l2_norm": 1.2280953,
+          "gradient_l2_norm": 1.4029849,
+          "dead_relu_fraction": null
+        }
+      ]
+    }
+  ]
+}

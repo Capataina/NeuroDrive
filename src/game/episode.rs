@@ -27,8 +27,10 @@ pub struct EpisodeConfig {
     pub lap_wrap_from_fraction: f32,
     /// Post-wrap threshold used for lap completion.
     pub lap_wrap_to_fraction: f32,
-    /// Reward scaling for signed progress delta per tick.
+    /// Reward scaling for positive gain in episode-best progress per tick.
     pub progress_reward_scale: f32,
+    /// Small per-tick time penalty to discourage stalling.
+    pub time_penalty_per_tick: f32,
     /// Crash penalty applied once on crash episode end.
     pub crash_penalty: f32,
     /// Lap-complete bonus applied once on lap episode end.
@@ -44,8 +46,9 @@ impl Default for EpisodeConfig {
             lap_arm_fraction: 0.25,
             lap_wrap_from_fraction: 0.85,
             lap_wrap_to_fraction: 0.15,
-            progress_reward_scale: 100.0,
-            crash_penalty: -10.0,
+            progress_reward_scale: 200.0,
+            time_penalty_per_tick: -0.005,
+            crash_penalty: -2.5,
             lap_bonus: 100.0,
             moving_average_window: 20,
         }
@@ -60,12 +63,30 @@ pub struct EpisodeState {
     pub previous_progress_fraction: f32,
     pub lap_armed: bool,
     pub current_return: f32,
+    pub current_tick_reward: f32,
+    pub current_tick_progress_reward: f32,
+    pub current_tick_time_penalty: f32,
+    pub current_tick_terminal_reward: f32,
+    pub current_tick_end_reason: Option<EpisodeEndReason>,
+    pub current_progress_reward_sum: f32,
+    pub current_time_penalty_sum: f32,
+    pub current_terminal_reward_sum: f32,
+    pub current_crash_penalty_sum: f32,
+    pub current_lap_bonus_sum: f32,
     pub current_best_progress_fraction: f32,
     pub current_crashes: u32,
     pub last_end_reason: Option<EpisodeEndReason>,
     pub last_episode_return: f32,
+    pub last_episode_pre_terminal_return: f32,
+    pub last_episode_progress_reward_sum: f32,
+    pub last_episode_time_penalty_sum: f32,
+    pub last_episode_terminal_reward_sum: f32,
+    pub last_episode_crash_penalty_sum: f32,
+    pub last_episode_lap_bonus_sum: f32,
     pub last_episode_best_progress_fraction: f32,
     pub last_episode_crashes: u32,
+    pub last_episode_ticks: u32,
+    pub last_episode_crash_position: Option<Vec2>,
 }
 
 impl Default for EpisodeState {
@@ -76,12 +97,30 @@ impl Default for EpisodeState {
             previous_progress_fraction: 0.0,
             lap_armed: false,
             current_return: 0.0,
+            current_tick_reward: 0.0,
+            current_tick_progress_reward: 0.0,
+            current_tick_time_penalty: 0.0,
+            current_tick_terminal_reward: 0.0,
+            current_tick_end_reason: None,
+            current_progress_reward_sum: 0.0,
+            current_time_penalty_sum: 0.0,
+            current_terminal_reward_sum: 0.0,
+            current_crash_penalty_sum: 0.0,
+            current_lap_bonus_sum: 0.0,
             current_best_progress_fraction: 0.0,
             current_crashes: 0,
             last_end_reason: None,
             last_episode_return: 0.0,
+            last_episode_pre_terminal_return: 0.0,
+            last_episode_progress_reward_sum: 0.0,
+            last_episode_time_penalty_sum: 0.0,
+            last_episode_terminal_reward_sum: 0.0,
+            last_episode_crash_penalty_sum: 0.0,
+            last_episode_lap_bonus_sum: 0.0,
             last_episode_best_progress_fraction: 0.0,
             last_episode_crashes: 0,
+            last_episode_ticks: 0,
+            last_episode_crash_position: None,
         }
     }
 }
@@ -128,27 +167,31 @@ pub fn episode_loop_system(
         return;
     };
 
+    episode_state.current_tick_reward = 0.0;
+    episode_state.current_tick_progress_reward = 0.0;
+    episode_state.current_tick_time_penalty = 0.0;
+    episode_state.current_tick_terminal_reward = 0.0;
+    episode_state.current_tick_end_reason = None;
     episode_state.ticks_in_episode = episode_state.ticks_in_episode.saturating_add(1);
     episode_state.current_best_progress_fraction = episode_state
         .current_best_progress_fraction
         .max(progress.fraction);
 
-    let mut progress_delta = progress.fraction - episode_state.previous_progress_fraction;
-    if progress_delta > 0.5 {
-        progress_delta -= 1.0;
-    } else if progress_delta < -0.5 {
-        progress_delta += 1.0;
-    }
-    episode_state.current_return += progress_delta * config.progress_reward_scale;
+    let progress_gain = (progress.fraction - episode_state.current_best_progress_fraction).max(0.0);
+    let progress_reward = progress_gain * config.progress_reward_scale;
+    let time_penalty = config.time_penalty_per_tick;
+    let mut terminal_reward = 0.0;
 
     if progress.fraction >= config.lap_arm_fraction {
         episode_state.lap_armed = true;
     }
 
     let crashed = collision_events.read().next().is_some();
+    let mut crash_position = None;
     if crashed {
         episode_state.current_crashes = episode_state.current_crashes.saturating_add(1);
-        episode_state.current_return += config.crash_penalty;
+        terminal_reward += config.crash_penalty;
+        crash_position = Some(transform.translation.truncate());
     }
 
     let timed_out =
@@ -158,8 +201,24 @@ pub fn episode_loop_system(
         && progress.fraction <= config.lap_wrap_to_fraction;
 
     if lap_complete {
-        episode_state.current_return += config.lap_bonus;
+        terminal_reward += config.lap_bonus;
     }
+    let tick_reward = progress_reward + time_penalty + terminal_reward;
+
+    episode_state.current_tick_reward = tick_reward;
+    episode_state.current_tick_progress_reward = progress_reward;
+    episode_state.current_tick_time_penalty = time_penalty;
+    episode_state.current_tick_terminal_reward = terminal_reward;
+    episode_state.current_progress_reward_sum += progress_reward;
+    episode_state.current_time_penalty_sum += time_penalty;
+    episode_state.current_terminal_reward_sum += terminal_reward;
+    if crashed {
+        episode_state.current_crash_penalty_sum += config.crash_penalty;
+    }
+    if lap_complete {
+        episode_state.current_lap_bonus_sum += config.lap_bonus;
+    }
+    episode_state.current_return += tick_reward;
 
     let end_reason = if crashed {
         Some(EpisodeEndReason::Crash)
@@ -172,11 +231,18 @@ pub fn episode_loop_system(
     };
 
     if let Some(reason) = end_reason {
+        episode_state.current_tick_end_reason = Some(reason);
         if reason != EpisodeEndReason::Crash {
             reset_car_to_spawn(&mut transform, &mut car, track);
         }
 
-        finalize_episode(&config, &mut episode_state, &mut moving_avg, reason);
+        finalize_episode(
+            &config,
+            &mut episode_state,
+            &mut moving_avg,
+            reason,
+            crash_position,
+        );
     } else {
         episode_state.previous_progress_fraction = progress.fraction;
     }
@@ -194,11 +260,21 @@ fn finalize_episode(
     episode_state: &mut EpisodeState,
     moving_avg: &mut EpisodeMovingAverages,
     reason: EpisodeEndReason,
+    crash_position: Option<Vec2>,
 ) {
     episode_state.last_end_reason = Some(reason);
     episode_state.last_episode_return = episode_state.current_return;
+    episode_state.last_episode_pre_terminal_return =
+        episode_state.current_progress_reward_sum + episode_state.current_time_penalty_sum;
+    episode_state.last_episode_progress_reward_sum = episode_state.current_progress_reward_sum;
+    episode_state.last_episode_time_penalty_sum = episode_state.current_time_penalty_sum;
+    episode_state.last_episode_terminal_reward_sum = episode_state.current_terminal_reward_sum;
+    episode_state.last_episode_crash_penalty_sum = episode_state.current_crash_penalty_sum;
+    episode_state.last_episode_lap_bonus_sum = episode_state.current_lap_bonus_sum;
     episode_state.last_episode_best_progress_fraction = episode_state.current_best_progress_fraction;
     episode_state.last_episode_crashes = episode_state.current_crashes;
+    episode_state.last_episode_ticks = episode_state.ticks_in_episode;
+    episode_state.last_episode_crash_position = crash_position;
 
     push_with_limit(
         &mut moving_avg.returns,
@@ -224,6 +300,14 @@ fn finalize_episode(
     episode_state.previous_progress_fraction = 0.0;
     episode_state.lap_armed = false;
     episode_state.current_return = 0.0;
+    episode_state.current_tick_progress_reward = 0.0;
+    episode_state.current_tick_time_penalty = 0.0;
+    episode_state.current_tick_terminal_reward = 0.0;
+    episode_state.current_progress_reward_sum = 0.0;
+    episode_state.current_time_penalty_sum = 0.0;
+    episode_state.current_terminal_reward_sum = 0.0;
+    episode_state.current_crash_penalty_sum = 0.0;
+    episode_state.current_lap_bonus_sum = 0.0;
     episode_state.current_best_progress_fraction = 0.0;
     episode_state.current_crashes = 0;
 }
@@ -241,4 +325,3 @@ fn mean(values: &VecDeque<f32>) -> f32 {
     }
     values.iter().sum::<f32>() / values.len() as f32
 }
-
