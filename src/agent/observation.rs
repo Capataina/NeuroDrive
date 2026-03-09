@@ -9,6 +9,12 @@ use crate::maps::track::Track;
 
 /// Number of ray sensors in the observation model.
 pub const NUM_RAYS: usize = 11;
+/// Number of lookahead samples taken from the centreline.
+pub const NUM_LOOKAHEAD_SAMPLES: usize = 4;
+/// Number of scalar lookahead features per sample.
+pub const LOOKAHEAD_FEATURES_PER_SAMPLE: usize = 2;
+/// Total observation dimension consumed by controllers.
+pub const OBSERVATION_DIM: usize = NUM_RAYS + 3 + NUM_LOOKAHEAD_SAMPLES * LOOKAHEAD_FEATURES_PER_SAMPLE;
 
 /// Raycast sensor readings and derived kinematics for one car.
 #[derive(Component, Clone, Debug)]
@@ -27,6 +33,10 @@ pub struct SensorReadings {
     pub angular_velocity: f32,
     /// Last heading sample used for yaw rate estimation.
     pub previous_heading: f32,
+    /// Signed heading deltas (radians) at configured lookahead distances.
+    pub lookahead_heading_deltas: [f32; NUM_LOOKAHEAD_SAMPLES],
+    /// Approximate curvature (radians/world-unit) at lookahead distances.
+    pub lookahead_curvatures: [f32; NUM_LOOKAHEAD_SAMPLES],
 }
 
 impl Default for SensorReadings {
@@ -39,6 +49,8 @@ impl Default for SensorReadings {
             heading_error: 0.0,
             angular_velocity: 0.0,
             previous_heading: 0.0,
+            lookahead_heading_deltas: [0.0; NUM_LOOKAHEAD_SAMPLES],
+            lookahead_curvatures: [0.0; NUM_LOOKAHEAD_SAMPLES],
         }
     }
 }
@@ -47,14 +59,15 @@ impl Default for SensorReadings {
 #[derive(Component, Clone, Debug)]
 pub struct ObservationVector {
     /// Feature vector in stable order:
-    /// [ray distances..., speed, heading_error, angular_velocity]
-    pub values: [f32; NUM_RAYS + 3],
+    /// [ray distances..., speed, heading_error, angular_velocity,
+    ///  lookahead_heading_delta_i, lookahead_curvature_i...]
+    pub values: [f32; OBSERVATION_DIM],
 }
 
 impl Default for ObservationVector {
     fn default() -> Self {
         Self {
-            values: [0.0; NUM_RAYS + 3],
+            values: [0.0; OBSERVATION_DIM],
         }
     }
 }
@@ -72,6 +85,10 @@ pub struct ObservationConfig {
     pub angular_velocity_norm_max: f32,
     /// Relative ray angles around the car forward vector, in radians.
     pub ray_angles: [f32; NUM_RAYS],
+    /// Centreline lookahead distances in world units.
+    pub lookahead_distances: [f32; NUM_LOOKAHEAD_SAMPLES],
+    /// Curvature normalisation scale in radians / world-unit.
+    pub curvature_norm_max: f32,
 }
 
 impl Default for ObservationConfig {
@@ -94,6 +111,8 @@ impl Default for ObservationConfig {
                 90f32.to_radians(),
                 150f32.to_radians(),
             ],
+            lookahead_distances: [50.0, 100.0, 175.0, 260.0],
+            curvature_norm_max: 0.05,
         }
     }
 }
@@ -134,6 +153,17 @@ pub fn update_sensor_readings_system(
             sensors.ray_hits[index] = hit;
             sensors.ray_directions[index] = dir;
         }
+
+        for (index, lookahead_distance) in config.lookahead_distances.iter().enumerate() {
+            let lookahead_s = progress.s + *lookahead_distance;
+            let lookahead_tangent = track.centerline.tangent_at_s(lookahead_s);
+            let heading_delta = signed_angle_between(forward, lookahead_tangent);
+            let turn_delta = signed_angle_between(progress.tangent, lookahead_tangent);
+            let curvature = turn_delta / lookahead_distance.max(1.0);
+
+            sensors.lookahead_heading_deltas[index] = heading_delta;
+            sensors.lookahead_curvatures[index] = curvature;
+        }
     }
 }
 
@@ -143,7 +173,7 @@ pub fn build_observation_vector_system(
     mut query: Query<(&SensorReadings, &mut ObservationVector)>,
 ) {
     for (sensors, mut observation) in &mut query {
-        let mut values = [0.0; NUM_RAYS + 3];
+        let mut values = [0.0; OBSERVATION_DIM];
 
         for (index, distance) in sensors.ray_distances.iter().enumerate() {
             values[index] = (*distance / config.ray_max_range).clamp(0.0, 1.0);
@@ -153,6 +183,15 @@ pub fn build_observation_vector_system(
         values[NUM_RAYS + 1] = (sensors.heading_error / PI).clamp(-1.0, 1.0);
         values[NUM_RAYS + 2] =
             (sensors.angular_velocity / config.angular_velocity_norm_max).clamp(-1.0, 1.0);
+
+        let mut cursor = NUM_RAYS + 3;
+        for i in 0..NUM_LOOKAHEAD_SAMPLES {
+            values[cursor] = (sensors.lookahead_heading_deltas[i] / PI).clamp(-1.0, 1.0);
+            cursor += 1;
+            values[cursor] =
+                (sensors.lookahead_curvatures[i] / config.curvature_norm_max).clamp(-1.0, 1.0);
+            cursor += 1;
+        }
 
         observation.values = values;
     }

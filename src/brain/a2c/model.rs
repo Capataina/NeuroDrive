@@ -44,7 +44,7 @@ impl ActorCritic {
         let c_value = Linear::new(hidden_dim, 1, rng);
 
         let a_opt = AdamOptimizer::new(&[&a_fc1, &a_fc2, &a_mean], 3e-4);
-        let c_opt = AdamOptimizer::new(&[&c_fc1, &c_fc2, &c_value], 1e-3);
+        let c_opt = AdamOptimizer::new(&[&c_fc1, &c_fc2, &c_value], 5e-4);
 
         Self {
             a_fc1,

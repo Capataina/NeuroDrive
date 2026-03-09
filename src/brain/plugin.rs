@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::brain::a2c::A2cBrain;
 use crate::brain::types::AgentMode;
 
 pub struct BrainPlugin;
@@ -18,6 +19,7 @@ impl Plugin for BrainPlugin {
 fn toggle_agent_mode_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut mode: ResMut<AgentMode>,
+    a2c_brain: Option<ResMut<A2cBrain>>,
 ) {
     if keyboard.just_pressed(KeyCode::F4) {
         *mode = match *mode {
@@ -30,5 +32,11 @@ fn toggle_agent_mode_system(
                 AgentMode::Keyboard
             }
         };
+
+        if let Some(mut brain) = a2c_brain {
+            brain.buffer.clear();
+            brain.step_counter = 0;
+            info!("A2C rollout buffer reset after mode switch.");
+        }
     }
 }

@@ -9,10 +9,11 @@
 
 - A fixed-layout raycast sensor system samples road-boundary distances against `TrackGrid::is_road_at()` every fixed tick (`src/agent/observation.rs::update_sensor_readings_system`).
 - The car stores raw `SensorReadings` and a normalised `ObservationVector` as components attached at spawn (`src/game/car.rs::spawn_car`).
-- The observation contract is currently `11` ray distances plus speed, signed heading error, and angular velocity for a total input size of `14` (`src/agent/observation.rs`).
+- The observation contract now includes `11` ray distances, speed, signed heading error, angular velocity, and `4` centreline lookahead samples with heading-delta and curvature features for a total input size of `22` (`src/agent/observation.rs`).
 - Heading, signed heading error, and angular velocity are derived from world-space forward vectors and centreline tangent rather than Euler decomposition (`src/agent/observation.rs`, `src/game/progress.rs`).
-- A stable `ObservationConfig` resource defines max ray range, ray march step, normalisation scales, and the fixed list of ray angles (`src/agent/observation.rs::ObservationConfig`).
-- The brain subsystem already depends on this exact `14`-dimensional observation size when constructing the A2C model (`src/brain/a2c/mod.rs::A2cBrain::default`).
+- A stable `ObservationConfig` resource defines max ray range, ray march step, lookahead distances, and normalisation scales (`src/agent/observation.rs::ObservationConfig`).
+- The brain subsystem now depends on `OBSERVATION_DIM` directly when constructing the A2C model, reducing hard-coded input-size drift risk (`src/agent/observation.rs`, `src/brain/a2c/mod.rs`).
+- Sensor/observation rebuild now runs after episode finalisation, and episode resets explicitly resynchronise `TrackProgress`, so post-terminal observations align with the reset spawn state instead of stale crash state (`src/agent/plugin.rs`, `src/game/episode.rs`).
 
 ## Implemented Outputs / Artifacts (if applicable)
 
@@ -35,6 +36,7 @@
 ## Notes / Design Considerations (optional)
 
 - `TrackProgress` exists in runtime state but is intentionally excluded from the observation vector to avoid privileged progress leakage into the policy input.
+- The new lookahead features remain ego-relative and geometry-derived (heading/curvature ahead), which provides turn anticipation without exposing absolute track progress as a direct scalar.
 - Because the A2C code now consumes this vector directly, any future observation change must be coordinated with brain-model construction, snapshot compatibility, and analytics output.
 - The current design keeps raw sensor measurements and the normalised policy input separate, which is useful for debugging and future exporter work.
 

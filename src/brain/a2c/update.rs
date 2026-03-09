@@ -1,18 +1,51 @@
 use crate::brain::a2c::{A2cBrain, A2cLayerHealth, A2cTrainingStats};
 use crate::brain::common::math::{normal_entropy, normal_log_prob};
+use crate::brain::common::mlp::Linear;
+
+const VALUE_HUBER_DELTA: f32 = 1.0;
+const ACTOR_GRAD_CLIP_NORM: f32 = 0.5;
+const CRITIC_GRAD_CLIP_NORM: f32 = 0.5;
 
 /// Runs one full A2C update from the currently buffered rollout and records
 /// learning and network-health metrics for analytics export.
-pub fn a2c_update(brain: &mut A2cBrain, stats: &mut A2cTrainingStats) {
+pub fn a2c_update(
+    brain: &mut A2cBrain,
+    stats: &mut A2cTrainingStats,
+    bootstrap_state: Option<&[f32]>,
+) {
     if brain.buffer.rewards.is_empty() {
+        return;
+    }
+
+    let batch_size = brain.buffer.rewards.len();
+    if brain.buffer.states.len() != batch_size
+        || brain.buffer.actions.len() != batch_size
+        || brain.buffer.latent_actions.len() != batch_size
+        || brain.buffer.values.len() != batch_size
+        || brain.buffer.dones.len() != batch_size
+        || brain.buffer.safety_clamp_hits.len() != batch_size
+    {
+        bevy::log::warn!(
+            "A2C rollout misalignment detected (s={}, a={}, z={}, v={}, r={}, d={}, c={}); skipping update.",
+            brain.buffer.states.len(),
+            brain.buffer.actions.len(),
+            brain.buffer.latent_actions.len(),
+            brain.buffer.values.len(),
+            brain.buffer.rewards.len(),
+            brain.buffer.dones.len(),
+            brain.buffer.safety_clamp_hits.len(),
+        );
+        brain.buffer.clear();
         return;
     }
 
     let mut next_value = 0.0;
     if !brain.buffer.dones.last().unwrap_or(&false) {
-        if let Some(last_state) = brain.buffer.states.last() {
-            let (_, val) = brain.model.forward(last_state);
+        if let Some(bootstrap_state) = bootstrap_state {
+            let (_, val) = brain.model.forward(bootstrap_state);
             next_value = val;
+        } else {
+            bevy::log::warn!("Missing bootstrap observation for non-terminal A2C rollout; using zero bootstrap value.");
         }
     }
 
@@ -23,7 +56,6 @@ pub fn a2c_update(brain: &mut A2cBrain, stats: &mut A2cTrainingStats) {
 
     brain.model.zero_grad();
 
-    let batch_size = brain.buffer.states.len();
     let batch_size_f32 = batch_size as f32;
     let mut policy_loss_sum = 0.0;
     let mut value_loss_sum = 0.0;
@@ -39,6 +71,7 @@ pub fn a2c_update(brain: &mut A2cBrain, stats: &mut A2cTrainingStats) {
     for i in 0..batch_size {
         let state = &brain.buffer.states[i];
         let action = &brain.buffer.actions[i];
+        let latent_action = &brain.buffer.latent_actions[i];
         let adv = advantages[i];
         let ret = returns[i];
 
@@ -64,8 +97,18 @@ pub fn a2c_update(brain: &mut A2cBrain, stats: &mut A2cTrainingStats) {
             &mut critic_seen[1],
         );
 
-        let d_value = vec![(value - ret) / batch_size_f32];
-        value_loss_sum += 0.5 * (value - ret).powi(2);
+        let value_error = value - ret;
+        let value_grad = if value_error.abs() <= VALUE_HUBER_DELTA {
+            value_error
+        } else {
+            VALUE_HUBER_DELTA * value_error.signum()
+        };
+        value_loss_sum += if value_error.abs() <= VALUE_HUBER_DELTA {
+            0.5 * value_error.powi(2)
+        } else {
+            VALUE_HUBER_DELTA * (value_error.abs() - 0.5 * VALUE_HUBER_DELTA)
+        };
+        let d_value = vec![value_grad / batch_size_f32];
 
         let c2_g = brain.model.c_value.backward(&d_value);
         let c2_r_g = brain.model.c_relu2.backward(&c2_g);
@@ -76,14 +119,16 @@ pub fn a2c_update(brain: &mut A2cBrain, stats: &mut A2cTrainingStats) {
         let mut d_mean = vec![0.0; 2];
 
         for j in 0..2 {
+            let latent = latent_action[j];
             let a = action[j];
+            let squashed = if j == 0 { a } else { 2.0 * a - 1.0 };
             let mean = action_dist.mean[j];
             let std = action_dist.std[j];
-            let log_prob = normal_log_prob(a, mean, std);
+            let log_prob = squashed_gaussian_log_prob(latent, squashed, mean, std, j);
             let entropy = normal_entropy(std);
 
-            let d_lp_d_mean = (a - mean) / (std * std + 1e-8);
-            let d_lp_d_log_std = ((a - mean).powi(2) / (std * std + 1e-8)) - 1.0;
+            let d_lp_d_mean = (latent - mean) / (std * std + 1e-8);
+            let d_lp_d_log_std = ((latent - mean).powi(2) / (std * std + 1e-8)) - 1.0;
 
             let d_loss_d_mean = -adv * d_lp_d_mean;
             let d_loss_d_log_std = -adv * d_lp_d_log_std - entropy_coef;
@@ -95,7 +140,7 @@ pub fn a2c_update(brain: &mut A2cBrain, stats: &mut A2cTrainingStats) {
             entropy_sum += entropy;
             action_sum[j] += a;
             action_sumsq[j] += a * a;
-            if is_clamped_action_component(j, a) {
+            if brain.buffer.safety_clamp_hits[i][j] {
                 clamped_action_count += 1;
             }
         }
@@ -106,6 +151,15 @@ pub fn a2c_update(brain: &mut A2cBrain, stats: &mut A2cTrainingStats) {
         let a1_r_g = brain.model.a_relu1.backward(&a1_g);
         brain.model.a_fc1.backward(&a1_r_g);
     }
+
+    clip_linear_gradients(
+        &mut [&mut brain.model.a_fc1, &mut brain.model.a_fc2, &mut brain.model.a_mean],
+        ACTOR_GRAD_CLIP_NORM,
+    );
+    clip_linear_gradients(
+        &mut [&mut brain.model.c_fc1, &mut brain.model.c_fc2, &mut brain.model.c_value],
+        CRITIC_GRAD_CLIP_NORM,
+    );
 
     brain
         .model
@@ -234,10 +288,53 @@ fn fraction(numerator: usize, denominator: usize) -> f32 {
     }
 }
 
-fn is_clamped_action_component(index: usize, value: f32) -> bool {
-    match index {
-        0 => !(-1.0..=1.0).contains(&value),
-        1 => !(0.0..=1.0).contains(&value),
-        _ => false,
+fn squashed_gaussian_log_prob(
+    latent: f32,
+    squashed: f32,
+    mean: f32,
+    std: f32,
+    component_idx: usize,
+) -> f32 {
+    let gaussian_log_prob = normal_log_prob(latent, mean, std);
+    let log_det_jacobian = (1.0 - squashed * squashed + 1e-6).ln();
+    let affine_log_det = if component_idx == 1 { (2.0f32).ln() } else { 0.0 };
+    gaussian_log_prob - log_det_jacobian + affine_log_det
+}
+
+fn clip_linear_gradients(layers: &mut [&mut Linear], max_norm: f32) {
+    if max_norm <= 0.0 {
+        return;
+    }
+
+    let mut sumsq = 0.0;
+    for layer in layers.iter() {
+        sumsq += layer
+            .grad_weights
+            .iter()
+            .flat_map(|row| row.iter())
+            .map(|grad| grad * grad)
+            .sum::<f32>();
+        sumsq += layer
+            .grad_biases
+            .iter()
+            .map(|grad| grad * grad)
+            .sum::<f32>();
+    }
+
+    let norm = sumsq.sqrt();
+    if norm <= max_norm || norm <= 1e-8 {
+        return;
+    }
+
+    let scale = max_norm / norm;
+    for layer in layers.iter_mut() {
+        for row in &mut layer.grad_weights {
+            for grad in row {
+                *grad *= scale;
+            }
+        }
+        for grad in &mut layer.grad_biases {
+            *grad *= scale;
+        }
     }
 }

@@ -14,10 +14,13 @@
 - Each stored episode record now captures episode id, best progress, total return, pre-terminal return, reward decomposition terms including progress reward and time penalty, tick count, crash count, end reason, lap-complete flag, crash position when applicable, and per-episode steering/throttle summary statistics (`src/analytics/trackers/episode.rs`).
 - Chunked summary metrics now compute progress mean/std/median/p90, reward mean/std, reward-decomposition means, average ticks, crash rate, lap-completion rate, and chunked steering/throttle summaries (`src/analytics/metrics/chunking.rs`).
 - The analytics layer now also stores `A2cUpdateRecord` snapshots containing policy entropy, value loss, explained variance, action-distribution statistics, clamped-action fraction, and per-layer weight/gradient/dead-ReLU health (`src/analytics/trackers/episode.rs`, `src/brain/a2c/mod.rs`, `src/brain/a2c/update.rs`).
+- The analytics layer now captures per-tick episode traces (`EpisodeTrace`) with progress, speed, heading error, applied controls, reward decomposition, terminal reason, sector index, lookahead-derived curvature context, and critic value predictions (`src/analytics/trackers/episode.rs`).
+- Episode records now include derived action-vs-demand mismatch metrics: turn-in latency, throttle-release latency, steering adequacy, and high-curvature throttle behaviour (`src/analytics/trackers/episode.rs`).
 - JSON export now serialises the full run report, including both episode records and A2C update records (`src/analytics/exporters/json.rs`).
-- Markdown export now includes performance summaries, reward-dynamics summaries including time-penalty terms, crash-location summaries, chunked behaviour summaries, chunked reward-decomposition tables, recent A2C update metrics, and latest layer-health tables (`src/analytics/exporters/markdown.rs`).
+- Markdown export now includes performance summaries, reward-dynamics summaries including time-penalty terms, crash-location summaries, chunked behaviour summaries, chunked reward-decomposition tables, policy-vs-required-action mismatch metrics, sector diagnostics, critic quality by context, failure-signature flags, trajectory snapshots, recent A2C update metrics, and latest layer-health tables (`src/analytics/exporters/markdown.rs`).
 - Export triggering on shutdown is now compile-correct and runs from `Last` using Bevy 0.18 `AppExit` messages (`src/analytics/plugin.rs`).
 - Episode action statistics are now snapshotted on the fixed tick after episode finalisation, avoiding contamination from the next episode before `Update` tracking runs (`src/analytics/plugin.rs`, `src/analytics/trackers/episode.rs`).
+- Per-tick trace capture is now ordered after episode finalisation and before A2C reward-collection/update, so terminal-step diagnostics and pre-update value predictions are retained (`src/analytics/plugin.rs`).
 
 ## Implemented Outputs / Artifacts (if applicable)
 
@@ -29,8 +32,7 @@
 - Export triggering is implemented as an on-exit path only; there is no periodic checkpointing, manual export command, or crash-safe flush path.
 - The tracked schema now includes first-wave learning-health signals, but it still lacks run metadata such as seed, config snapshot, git revision, and track identity.
 - Crash location reporting is currently coarse and summary-oriented rather than a full heatmap representation.
-- The current reports are still descriptive rather than diagnostic-by-default; they expose health metrics but do not yet flag failure conditions automatically.
-- The latest reward-dynamics reports exposed a live environment bug rather than a reporting bug: `progress_reward_sum` is currently zero across episodes because the best-progress reward term is being computed after best-progress state is already advanced.
+- Historical reports generated before the latest environment fix can still show `progress_reward_sum == 0.0`; those reports should be treated as pre-fix baselines and re-run after the reward-order correction.
 
 ## Planned / Missing / To Be Changed
 
@@ -38,7 +40,7 @@
 - There is no directory/index policy for multiple runs beyond timestamped filenames.
 - There is no validation ensuring episode records are recorded exactly once across all end-reason paths.
 - There is no offline comparison tooling beyond one Markdown summary report.
-- The current implementation covers only the first high-value slice of analytics; it still lacks richer visitation-diversity metrics, TD-error distributions, run-to-run comparison tooling, and track-sector diagnostics.
+- The current implementation still lacks richer visitation-diversity metrics, discounted TD-error distributions, and dedicated run-to-run comparison tooling.
 - A task-specific driving diagnostics layer is still desirable because the same reward can arise from very different driving pathologies.
 
 ## Notes / Design Considerations (optional)
@@ -75,7 +77,7 @@
   - gradient spikes suggest unstable updates
   - flat median progress with rare high-max episodes suggests lucky outliers rather than stable learning
   - low visitation diversity with fast apparent convergence suggests policy collapse rather than mastery
-- A useful recent example of analytics value in this repository: the reward-decomposition tables showed `progress_reward_sum == 0.0` and `time_penalty_sum` carrying the full pre-terminal return, which revealed that the reward implementation itself was wrong even though the tracker/exporters were behaving consistently.
+- A useful recent example of analytics value in this repository: reward-decomposition tables exposed an environment reward-ordering bug (`progress_reward_sum == 0.0`), which has now been corrected in `episode.rs` and should be validated with fresh reports.
 
 - This subsystem should stay focused on data capture and export orchestration, not on deriving environment truth.
 - Tracker logic should remain append-only and idempotent per episode; duplicate records would invalidate chunk metrics quickly.

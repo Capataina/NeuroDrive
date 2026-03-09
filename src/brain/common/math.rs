@@ -19,11 +19,6 @@ pub fn zeros(size: usize) -> Vec<f32> {
     vec![0.0; size]
 }
 
-/// Dot product of two vectors.
-pub fn dot(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
-}
-
 /// Computes the log probability of a value given mean and std deviation (normal distribution).
 pub fn normal_log_prob(value: f32, mean: f32, std: f32) -> f32 {
     let variance = std * std;

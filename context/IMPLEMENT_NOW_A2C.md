@@ -6,6 +6,30 @@
 - [ ] Scope: Stabilise the current A2C baseline so it is compile-safe, schedule-correct, observable, and testable as a real learnability validation layer.
 - [ ] Exit rule: stop when A2C control, reward collection, rollout updates, and verification paths are coherent, documented, and this file is archived or removed.
 
+## Execution TODO (2026-03-09)
+
+- [x] Fix reward-ordering bug so progress gain is computed before best-progress state is advanced.
+- [x] Remove crash-reset side effects from collision handling so terminal reward/progress are computed from true crash state.
+- [x] Enforce fixed-tick input ordering so AI action selection runs before action smoothing applies controls.
+- [x] Correct GAE bootstrap source so non-terminal rollouts bootstrap from the current next observation rather than the last state.
+- [x] Replace clamp-after-Gaussian training contract with bounded tanh-squashed action semantics.
+- [x] Repair clamped-action telemetry by recording real safety clamp hits rather than checking already-clamped stored actions.
+- [x] Resolve post-terminal observation ambiguity by ordering sensor rebuild after episode finalisation and resyncing track progress on reset.
+- [x] Add dual-trigger A2C updates (rollout horizon and terminal-batch trigger) plus exit-time flush for partial rollouts.
+- [x] Reset A2C rollout state on mode switches to prevent mixed keyboard/AI trajectories in one buffer.
+- [x] Stabilise critic updates with lower learning rate, Huber value loss, and gradient clipping.
+- [x] Rebalance reward defaults to reduce “sprint then crash” incentives.
+
+## Future Vision Roadmap (Ranked)
+
+- [x] 1. Add ego-relative centreline lookahead scalars (heading delta and curvature at multiple distances ahead).
+- [ ] 2. Add an ego-relative waypoint bundle (next K centreline points in car frame) to improve compound-turn anticipation.
+- [ ] 3. Add curvature-aware speed assist (target-speed governor) while keeping steering policy-driven.
+- [ ] 4. Extend forward sensor coverage (longer range + denser front rays) as a low-complexity anticipatory boost.
+- [ ] 5. Add a small egocentric occupancy patch around the car only if lookahead features saturate.
+- [ ] 6. Add recurrent memory (GRU/LSTM) only after geometric lookahead is validated and stable.
+- [ ] 7. Consider minimap/image-style encoders only as a late-stage option after lower-complexity options fail.
+
 ## Implementation Structure
 
 - [ ] Modules / files affected (expected):
@@ -161,8 +185,8 @@ The recommended default is to add light verification around the current handwrit
 
 ## Current Reality Note
 
-- [ ] The current reward redesign is not finished correctly: recent analytics reports show `progress_reward_sum == 0.0` across episodes because best-progress reward is being computed after best-progress state is advanced in `src/game/episode.rs`.
-- [ ] Do not evaluate A2C learning quality again until that environment reward-ordering bug is fixed and a fresh report confirms non-zero progress reward variance.
+- [x] Reward-ordering bug is fixed: progress gain is now computed before best-progress state is advanced.
+- [x] Fresh reports now show non-zero progress reward variance; remaining bottleneck is first-turn anticipation and critic quality.
 
 ## Debugging / Verification
 

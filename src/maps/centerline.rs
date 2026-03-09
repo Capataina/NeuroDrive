@@ -74,6 +74,66 @@ impl TrackCenterline {
         self.total_length
     }
 
+    /// Returns the interpolated world-space point at arc length `s` on the closed loop.
+    pub fn point_at_s(&self, s: f32) -> Vec2 {
+        let n = self.points.len();
+        if n < 2 || self.total_length <= 1e-6 {
+            return self.points.first().copied().unwrap_or(Vec2::ZERO);
+        }
+
+        let s_wrapped = s.rem_euclid(self.total_length);
+        for i in 0..n {
+            let seg_start = self.cumulative_lengths[i];
+            let seg_end = if i + 1 < n {
+                self.cumulative_lengths[i + 1]
+            } else {
+                self.total_length
+            };
+            let seg_len = (seg_end - seg_start).max(1e-6);
+
+            let in_segment = (s_wrapped >= seg_start && s_wrapped < seg_end)
+                || (i == n - 1 && (s_wrapped - self.total_length).abs() <= 1e-6);
+            if in_segment {
+                let t = ((s_wrapped - seg_start) / seg_len).clamp(0.0, 1.0);
+                let a = self.points[i];
+                let b = self.points[(i + 1) % n];
+                return a.lerp(b, t);
+            }
+        }
+
+        self.points[0]
+    }
+
+    /// Returns the unit tangent direction at arc length `s` on the closed loop.
+    pub fn tangent_at_s(&self, s: f32) -> Vec2 {
+        let n = self.points.len();
+        if n < 2 || self.total_length <= 1e-6 {
+            return Vec2::X;
+        }
+
+        let s_wrapped = s.rem_euclid(self.total_length);
+        for i in 0..n {
+            let seg_start = self.cumulative_lengths[i];
+            let seg_end = if i + 1 < n {
+                self.cumulative_lengths[i + 1]
+            } else {
+                self.total_length
+            };
+
+            let in_segment = (s_wrapped >= seg_start && s_wrapped < seg_end)
+                || (i == n - 1 && (s_wrapped - self.total_length).abs() <= 1e-6);
+            if in_segment {
+                let a = self.points[i];
+                let b = self.points[(i + 1) % n];
+                let tangent = (b - a).normalize_or_zero();
+                return if tangent == Vec2::ZERO { Vec2::X } else { tangent };
+            }
+        }
+
+        let fallback = (self.points[1] - self.points[0]).normalize_or_zero();
+        if fallback == Vec2::ZERO { Vec2::X } else { fallback }
+    }
+
     /// Builds a closed centreline by traversing grid connectivity.
     ///
     /// This assumes a single closed loop (degree-2 track). If junction tiles

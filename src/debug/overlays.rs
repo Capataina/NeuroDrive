@@ -54,6 +54,7 @@ pub fn debug_overlay_toggle_system(
 /// Draws centreline and projection debug geometry using gizmos.
 pub fn draw_geometry_overlay_system(
     overlay: Res<DebugOverlayState>,
+    observation_config: Res<ObservationConfig>,
     track_query: Query<&Track>,
     car_query: Query<(&Transform, &TrackProgress, &Car), With<Car>>,
     mut gizmos: Gizmos,
@@ -102,6 +103,40 @@ pub fn draw_geometry_overlay_system(
                 car_pos + velocity.normalize() * velocity.length().min(70.0),
                 Color::srgb(1.0, 0.2, 0.7),
             );
+        }
+
+        // Centreline lookahead preview used by the observation vector.
+        let lookahead_count = observation_config.lookahead_distances.len();
+        let mut previous_point = car_pos;
+        for (index, distance) in observation_config.lookahead_distances.iter().enumerate() {
+            let lookahead_s = progress.s + *distance;
+            let lookahead_point = track.centerline.point_at_s(lookahead_s);
+            let lookahead_tangent = track.centerline.tangent_at_s(lookahead_s);
+
+            let t = if lookahead_count <= 1 {
+                0.0
+            } else {
+                index as f32 / (lookahead_count as f32 - 1.0)
+            };
+            let lookahead_color = Color::srgb(
+                1.0 - 0.75 * t,
+                0.45 + 0.45 * t,
+                0.15 + 0.75 * t,
+            );
+
+            gizmos.line_2d(previous_point, lookahead_point, lookahead_color);
+            gizmos.circle_2d(
+                Isometry2d::from_translation(lookahead_point),
+                5.0,
+                lookahead_color,
+            );
+            gizmos.arrow_2d(
+                lookahead_point,
+                lookahead_point + lookahead_tangent * 28.0,
+                lookahead_color,
+            );
+
+            previous_point = lookahead_point;
         }
     }
 }

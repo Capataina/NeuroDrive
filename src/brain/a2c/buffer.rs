@@ -2,7 +2,8 @@
 pub struct RolloutBuffer {
     pub states: Vec<Vec<f32>>,
     pub actions: Vec<Vec<f32>>,
-    pub log_probs: Vec<Vec<f32>>,
+    pub latent_actions: Vec<Vec<f32>>,
+    pub safety_clamp_hits: Vec<[bool; 2]>,
     pub rewards: Vec<f32>,
     pub values: Vec<f32>,
     pub dones: Vec<bool>,
@@ -16,7 +17,8 @@ impl RolloutBuffer {
     pub fn clear(&mut self) {
         self.states.clear();
         self.actions.clear();
-        self.log_probs.clear();
+        self.latent_actions.clear();
+        self.safety_clamp_hits.clear();
         self.rewards.clear();
         self.values.clear();
         self.dones.clear();

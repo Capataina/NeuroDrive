@@ -4,13 +4,17 @@ use bevy::ecs::message::MessageReader;
 
 use crate::analytics::trackers::episode::{
     EpisodeActionAccumulator,
+    EpisodeTraceAccumulator,
     EpisodeTracker,
     capture_episode_action_stats_system,
+    capture_episode_tick_trace_system,
     episode_tracker_system,
     snapshot_completed_episode_action_stats_system,
+    snapshot_completed_episode_trace_system,
 };
 use crate::analytics::exporters::json::export_to_json;
 use crate::analytics::exporters::markdown::export_to_markdown;
+use crate::brain::a2c::a2c_collect_reward_system;
 use crate::game::episode::episode_loop_system;
 use crate::sim::sets::SimSet;
 
@@ -20,9 +24,23 @@ impl Plugin for AnalyticsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EpisodeTracker>()
            .init_resource::<EpisodeActionAccumulator>()
+           .init_resource::<EpisodeTraceAccumulator>()
            .add_systems(
                FixedUpdate,
                capture_episode_action_stats_system.in_set(SimSet::Physics),
+           )
+           .add_systems(
+               FixedUpdate,
+               capture_episode_tick_trace_system
+                   .after(episode_loop_system)
+                   .before(a2c_collect_reward_system)
+                   .in_set(SimSet::Measurement),
+           )
+           .add_systems(
+               FixedUpdate,
+               snapshot_completed_episode_trace_system
+                   .after(capture_episode_tick_trace_system)
+                   .in_set(SimSet::Measurement),
            )
            .add_systems(
                FixedUpdate,

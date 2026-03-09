@@ -2,11 +2,18 @@ pub mod buffer;
 pub mod model;
 pub mod update;
 
+use bevy::app::AppExit;
+use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::agent::action::{ActionState, CarAction};
-use crate::agent::observation::ObservationVector;
+use crate::agent::action::{
+    ActionState,
+    CarAction,
+    action_smoothing_system,
+    keyboard_action_input_system,
+};
+use crate::agent::observation::{OBSERVATION_DIM, ObservationVector};
 use crate::brain::types::{AgentMode, Brain};
 use crate::game::episode::EpisodeState;
 
@@ -21,6 +28,7 @@ pub struct A2cBrain {
     pub gamma: f32,
     pub gae_lambda: f32,
     pub max_steps: usize,
+    pub min_update_steps: usize,
     pub step_counter: usize,
 }
 
@@ -28,11 +36,12 @@ impl Default for A2cBrain {
     fn default() -> Self {
         let mut rng = rand::rng();
         Self {
-            model: ActorCritic::new(14, 64, 2, &mut rng),
+            model: ActorCritic::new(OBSERVATION_DIM, 64, 2, &mut rng),
             buffer: RolloutBuffer::new(),
             gamma: 0.99,
             gae_lambda: 0.95,
-            max_steps: 2048,
+            max_steps: 512,
+            min_update_steps: 128,
             step_counter: 0,
         }
     }
@@ -70,31 +79,39 @@ impl Brain for A2cBrain {
         let (action_dist, value) = self.model.forward(&obs.values);
 
         let mut actions = vec![0.0; 2];
-        let mut log_probs = vec![0.0; 2];
+        let mut latent_actions = vec![0.0; 2];
 
         for i in 0..2 {
             let mean = action_dist.mean[i];
             let std = action_dist.std[i];
-            let sampled_action = crate::brain::common::math::sample_normal(mean, std, &mut rng);
-            actions[i] = sampled_action;
-            log_probs[i] = crate::brain::common::math::normal_log_prob(sampled_action, mean, std);
+            let latent = crate::brain::common::math::sample_normal(mean, std, &mut rng);
+            latent_actions[i] = latent;
+
+            let squashed = latent.tanh();
+            actions[i] = if i == 0 {
+                squashed
+            } else {
+                0.5 * (squashed + 1.0)
+            };
         }
 
-        let applied_action = CarAction {
+        let raw_action = CarAction {
             steering: actions[0],
             throttle: actions[1],
-        }
-        .clamped();
+        };
+        let applied_action = raw_action.clamped();
+        let safety_clamp_hits = [
+            (applied_action.steering - raw_action.steering).abs() > 1e-6,
+            (applied_action.throttle - raw_action.throttle).abs() > 1e-6,
+        ];
+
         actions[0] = applied_action.steering;
         actions[1] = applied_action.throttle;
-        log_probs[0] =
-            crate::brain::common::math::normal_log_prob(actions[0], action_dist.mean[0], action_dist.std[0]);
-        log_probs[1] =
-            crate::brain::common::math::normal_log_prob(actions[1], action_dist.mean[1], action_dist.std[1]);
 
         self.buffer.states.push(obs.values.to_vec());
         self.buffer.actions.push(actions.clone());
-        self.buffer.log_probs.push(log_probs);
+        self.buffer.latent_actions.push(latent_actions);
+        self.buffer.safety_clamp_hits.push(safety_clamp_hits);
         self.buffer.values.push(value);
 
         applied_action
@@ -109,14 +126,19 @@ impl Plugin for A2cPlugin {
             .init_resource::<A2cTrainingStats>()
             .add_systems(
                 FixedUpdate,
-                a2c_act_system.in_set(crate::sim::sets::SimSet::Input),
+                a2c_act_system
+                    .after(keyboard_action_input_system)
+                    .before(action_smoothing_system)
+                    .in_set(crate::sim::sets::SimSet::Input),
             )
             .add_systems(
                 FixedUpdate,
                 a2c_collect_reward_system
                     .after(crate::game::episode::episode_loop_system)
+                    .after(crate::agent::observation::build_observation_vector_system)
                     .in_set(crate::sim::sets::SimSet::Measurement),
-            );
+            )
+            .add_systems(Last, a2c_flush_on_exit_system);
     }
 }
 
@@ -139,6 +161,7 @@ pub fn a2c_act_system(
 
 pub fn a2c_collect_reward_system(
     mode: Res<AgentMode>,
+    obs_query: Query<&ObservationVector>,
     episode_state: Res<EpisodeState>,
     mut brain: ResMut<A2cBrain>,
     mut stats: ResMut<A2cTrainingStats>,
@@ -153,8 +176,50 @@ pub fn a2c_collect_reward_system(
         let done = episode_state.current_tick_end_reason.is_some();
         brain.buffer.dones.push(done);
 
-        if brain.buffer.states.len() >= brain.max_steps {
-            a2c_update(&mut brain, &mut stats);
+        debug_assert_eq!(brain.buffer.states.len(), brain.buffer.actions.len());
+        debug_assert_eq!(brain.buffer.states.len(), brain.buffer.latent_actions.len());
+        debug_assert_eq!(brain.buffer.states.len(), brain.buffer.values.len());
+        debug_assert_eq!(brain.buffer.states.len(), brain.buffer.safety_clamp_hits.len());
+        debug_assert_eq!(brain.buffer.rewards.len(), brain.buffer.dones.len());
+
+        let reached_horizon = brain.buffer.states.len() >= brain.max_steps;
+        let reached_terminal_batch = done && brain.buffer.states.len() >= brain.min_update_steps;
+
+        if reached_horizon || reached_terminal_batch {
+            let bootstrap_state = if done {
+                None
+            } else {
+                obs_query.single().ok().map(|obs| obs.values.to_vec())
+            };
+            a2c_update(&mut brain, &mut stats, bootstrap_state.as_deref());
         }
     }
+}
+
+pub fn a2c_flush_on_exit_system(
+    mut exit_events: MessageReader<AppExit>,
+    mode: Res<AgentMode>,
+    obs_query: Query<&ObservationVector>,
+    mut brain: ResMut<A2cBrain>,
+    mut stats: ResMut<A2cTrainingStats>,
+) {
+    if exit_events.read().next().is_none() {
+        return;
+    }
+
+    if *mode != AgentMode::Ai {
+        brain.buffer.clear();
+        return;
+    }
+
+    if brain.buffer.rewards.is_empty() {
+        return;
+    }
+
+    let bootstrap_state = if brain.buffer.dones.last().copied().unwrap_or(true) {
+        None
+    } else {
+        obs_query.single().ok().map(|obs| obs.values.to_vec())
+    };
+    a2c_update(&mut brain, &mut stats, bootstrap_state.as_deref());
 }

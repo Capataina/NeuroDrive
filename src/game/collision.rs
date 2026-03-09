@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::ecs::message::{MessageReader, MessageWriter};
+use bevy::ecs::message::MessageWriter;
 
 use crate::game::car::{Car, CAR_HEIGHT, CAR_WIDTH};
 use crate::maps::track::Track;
@@ -45,29 +45,5 @@ pub fn collision_detection_system(
             collision_events.write(CollisionEvent);
             return;
         }
-    }
-}
-
-/// Handles a `CollisionEvent` by resetting the car to the track spawn pose.
-pub fn handle_collision_system(
-    mut collision_events: MessageReader<CollisionEvent>,
-    mut car_query: Query<(&mut Transform, &mut Car)>,
-    track_query: Query<&Track>,
-) {
-    if collision_events.read().next().is_none() {
-        return;
-    }
-
-    info!("Car off-track — resetting to spawn.");
-
-    let Ok(track) = track_query.single() else {
-        return;
-    };
-
-    for (mut transform, mut car) in car_query.iter_mut() {
-        transform.translation.x = track.spawn_position.x;
-        transform.translation.y = track.spawn_position.y;
-        transform.rotation = Quat::from_rotation_z(track.spawn_rotation);
-        car.velocity = Vec2::ZERO;
     }
 }

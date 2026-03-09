@@ -11,6 +11,7 @@ use crate::agent::observation::{
     build_observation_vector_system,
     update_sensor_readings_system,
 };
+use crate::game::episode::episode_loop_system;
 use crate::game::progress::update_track_progress_system;
 use crate::sim::sets::SimSet;
 
@@ -35,7 +36,9 @@ impl Plugin for AgentPlugin {
             .add_systems(
                 FixedUpdate,
                 (
-                    update_sensor_readings_system.after(update_track_progress_system),
+                    update_sensor_readings_system
+                        .after(update_track_progress_system)
+                        .after(episode_loop_system),
                     build_observation_vector_system,
                 )
                     .chain()

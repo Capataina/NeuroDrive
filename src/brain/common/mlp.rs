@@ -111,27 +111,3 @@ impl Relu {
             .collect()
     }
 }
-
-#[derive(Clone, Debug)]
-pub struct Tanh {
-    pub output_cache: Option<Vec<f32>>,
-}
-
-impl Tanh {
-    pub fn new() -> Self {
-        Self { output_cache: None }
-    }
-
-    pub fn forward(&mut self, input: &[f32]) -> Vec<f32> {
-        let out: Vec<f32> = input.iter().map(|&x| x.tanh()).collect();
-        self.output_cache = Some(out.clone());
-        out
-    }
-
-    pub fn backward(&mut self, grad_output: &[f32]) -> Vec<f32> {
-        let out = self.output_cache.as_ref().unwrap();
-        out.iter().zip(grad_output.iter())
-            .map(|(&y, &g)| g * (1.0 - y * y))
-            .collect()
-    }
-}

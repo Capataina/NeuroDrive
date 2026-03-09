@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use crate::game::car::spawn_car;
-use crate::game::collision::{CollisionEvent, collision_detection_system, handle_collision_system};
+use crate::game::collision::{CollisionEvent, collision_detection_system};
 use crate::game::episode::{EpisodeConfig, EpisodeMovingAverages, EpisodeState, episode_loop_system};
 use crate::game::physics::car_physics_system;
 use crate::game::progress::update_track_progress_system;
@@ -31,12 +31,7 @@ impl Plugin for GamePlugin {
             .add_systems(FixedUpdate, car_physics_system.in_set(SimSet::Physics))
             .add_systems(
                 FixedUpdate,
-                (
-                    collision_detection_system,
-                    handle_collision_system,
-                )
-                    .chain()
-                    .in_set(SimSet::Collision),
+                collision_detection_system.in_set(SimSet::Collision),
             )
             .add_systems(
                 FixedUpdate,

@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::f32::consts::PI;
 
 use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
@@ -31,6 +32,10 @@ pub struct EpisodeConfig {
     pub progress_reward_scale: f32,
     /// Small per-tick time penalty to discourage stalling.
     pub time_penalty_per_tick: f32,
+    /// Extra per-tick penalty for high-speed heading misalignment.
+    pub heading_speed_penalty_scale: f32,
+    /// Speed scale used to normalise heading-risk penalty.
+    pub speed_norm_max_for_penalty: f32,
     /// Crash penalty applied once on crash episode end.
     pub crash_penalty: f32,
     /// Lap-complete bonus applied once on lap episode end.
@@ -46,9 +51,11 @@ impl Default for EpisodeConfig {
             lap_arm_fraction: 0.25,
             lap_wrap_from_fraction: 0.85,
             lap_wrap_to_fraction: 0.15,
-            progress_reward_scale: 200.0,
+            progress_reward_scale: 140.0,
             time_penalty_per_tick: -0.005,
-            crash_penalty: -2.5,
+            heading_speed_penalty_scale: 0.02,
+            speed_norm_max_for_penalty: 900.0,
+            crash_penalty: -5.0,
             lap_bonus: 100.0,
             moving_average_window: 20,
         }
@@ -68,6 +75,12 @@ pub struct EpisodeState {
     pub current_tick_time_penalty: f32,
     pub current_tick_terminal_reward: f32,
     pub current_tick_end_reason: Option<EpisodeEndReason>,
+    pub current_tick_progress_fraction: f32,
+    pub current_tick_progress_s: f32,
+    pub current_tick_speed: f32,
+    pub current_tick_heading_error: f32,
+    pub current_tick_forward: Vec2,
+    pub current_tick_tangent: Vec2,
     pub current_progress_reward_sum: f32,
     pub current_time_penalty_sum: f32,
     pub current_terminal_reward_sum: f32,
@@ -102,6 +115,12 @@ impl Default for EpisodeState {
             current_tick_time_penalty: 0.0,
             current_tick_terminal_reward: 0.0,
             current_tick_end_reason: None,
+            current_tick_progress_fraction: 0.0,
+            current_tick_progress_s: 0.0,
+            current_tick_speed: 0.0,
+            current_tick_heading_error: 0.0,
+            current_tick_forward: Vec2::X,
+            current_tick_tangent: Vec2::X,
             current_progress_reward_sum: 0.0,
             current_time_penalty_sum: 0.0,
             current_terminal_reward_sum: 0.0,
@@ -158,14 +177,15 @@ pub fn episode_loop_system(
     mut moving_avg: ResMut<EpisodeMovingAverages>,
     mut collision_events: MessageReader<CollisionEvent>,
     track_query: Query<&Track>,
-    mut car_query: Query<(&mut Transform, &mut Car, &TrackProgress)>,
+    mut car_query: Query<(&mut Transform, &mut Car, &mut TrackProgress)>,
 ) {
     let Ok(track) = track_query.single() else {
         return;
     };
-    let Ok((mut transform, mut car, progress)) = car_query.single_mut() else {
+    let Ok((mut transform, mut car, mut progress)) = car_query.single_mut() else {
         return;
     };
+    let forward = (transform.rotation * Vec3::X).truncate().normalize_or_zero();
 
     episode_state.current_tick_reward = 0.0;
     episode_state.current_tick_progress_reward = 0.0;
@@ -173,13 +193,15 @@ pub fn episode_loop_system(
     episode_state.current_tick_terminal_reward = 0.0;
     episode_state.current_tick_end_reason = None;
     episode_state.ticks_in_episode = episode_state.ticks_in_episode.saturating_add(1);
-    episode_state.current_best_progress_fraction = episode_state
-        .current_best_progress_fraction
-        .max(progress.fraction);
-
-    let progress_gain = (progress.fraction - episode_state.current_best_progress_fraction).max(0.0);
+    let previous_best_progress = episode_state.current_best_progress_fraction;
+    let progress_gain = (progress.fraction - previous_best_progress).max(0.0);
+    episode_state.current_best_progress_fraction = previous_best_progress.max(progress.fraction);
     let progress_reward = progress_gain * config.progress_reward_scale;
-    let time_penalty = config.time_penalty_per_tick;
+    let heading_error = signed_angle_between(forward, progress.tangent);
+    let heading_error_norm = (heading_error.abs() / PI).clamp(0.0, 1.0);
+    let speed_norm = (car.velocity.length() / config.speed_norm_max_for_penalty).clamp(0.0, 1.0);
+    let heading_speed_penalty = -config.heading_speed_penalty_scale * heading_error_norm * speed_norm;
+    let time_penalty = config.time_penalty_per_tick + heading_speed_penalty;
     let mut terminal_reward = 0.0;
 
     if progress.fraction >= config.lap_arm_fraction {
@@ -209,6 +231,12 @@ pub fn episode_loop_system(
     episode_state.current_tick_progress_reward = progress_reward;
     episode_state.current_tick_time_penalty = time_penalty;
     episode_state.current_tick_terminal_reward = terminal_reward;
+    episode_state.current_tick_progress_fraction = progress.fraction;
+    episode_state.current_tick_progress_s = progress.s;
+    episode_state.current_tick_speed = car.velocity.length();
+    episode_state.current_tick_heading_error = heading_error;
+    episode_state.current_tick_forward = forward;
+    episode_state.current_tick_tangent = progress.tangent;
     episode_state.current_progress_reward_sum += progress_reward;
     episode_state.current_time_penalty_sum += time_penalty;
     episode_state.current_terminal_reward_sum += terminal_reward;
@@ -232,10 +260,6 @@ pub fn episode_loop_system(
 
     if let Some(reason) = end_reason {
         episode_state.current_tick_end_reason = Some(reason);
-        if reason != EpisodeEndReason::Crash {
-            reset_car_to_spawn(&mut transform, &mut car, track);
-        }
-
         finalize_episode(
             &config,
             &mut episode_state,
@@ -243,6 +267,8 @@ pub fn episode_loop_system(
             reason,
             crash_position,
         );
+        reset_car_to_spawn(&mut transform, &mut car, track);
+        sync_progress_to_transform(track, &transform, &mut progress);
     } else {
         episode_state.previous_progress_fraction = progress.fraction;
     }
@@ -253,6 +279,15 @@ fn reset_car_to_spawn(transform: &mut Transform, car: &mut Car, track: &Track) {
     transform.translation.y = track.spawn_position.y;
     transform.rotation = Quat::from_rotation_z(track.spawn_rotation);
     car.velocity = Vec2::ZERO;
+}
+
+fn sync_progress_to_transform(track: &Track, transform: &Transform, progress: &mut TrackProgress) {
+    let projection = track.centerline.project(transform.translation.truncate());
+    progress.s = projection.s;
+    progress.fraction = projection.fraction;
+    progress.closest_point = projection.closest_point;
+    progress.tangent = projection.tangent;
+    progress.distance = projection.distance;
 }
 
 fn finalize_episode(
@@ -300,9 +335,6 @@ fn finalize_episode(
     episode_state.previous_progress_fraction = 0.0;
     episode_state.lap_armed = false;
     episode_state.current_return = 0.0;
-    episode_state.current_tick_progress_reward = 0.0;
-    episode_state.current_tick_time_penalty = 0.0;
-    episode_state.current_tick_terminal_reward = 0.0;
     episode_state.current_progress_reward_sum = 0.0;
     episode_state.current_time_penalty_sum = 0.0;
     episode_state.current_terminal_reward_sum = 0.0;
@@ -324,4 +356,23 @@ fn mean(values: &VecDeque<f32>) -> f32 {
         return 0.0;
     }
     values.iter().sum::<f32>() / values.len() as f32
+}
+
+fn wrap_angle(mut angle: f32) -> f32 {
+    while angle > PI {
+        angle -= 2.0 * PI;
+    }
+    while angle < -PI {
+        angle += 2.0 * PI;
+    }
+    angle
+}
+
+fn signed_angle_between(from: Vec2, to: Vec2) -> f32 {
+    let from_n = from.normalize_or_zero();
+    let to_n = to.normalize_or_zero();
+    if from_n == Vec2::ZERO || to_n == Vec2::ZERO {
+        return 0.0;
+    }
+    wrap_angle(to_n.to_angle() - from_n.to_angle())
 }
