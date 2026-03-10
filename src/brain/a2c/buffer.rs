@@ -36,19 +36,20 @@ impl RolloutBuffer {
                 next_value
             };
             let mask = if self.dones[t] { 0.0 } else { 1.0 };
-            
+
             let delta = self.rewards[t] + gamma * next_val * mask - self.values[t];
             gae = delta + gamma * lambda * mask * gae;
-            
+
             advantages[t] = gae;
             returns[t] = gae + self.values[t];
         }
 
         // Normalize advantages
         let mean: f32 = advantages.iter().sum::<f32>() / advantages.len() as f32;
-        let variance: f32 = advantages.iter().map(|a| (a - mean).powi(2)).sum::<f32>() / advantages.len() as f32;
+        let variance: f32 =
+            advantages.iter().map(|a| (a - mean).powi(2)).sum::<f32>() / advantages.len() as f32;
         let std = (variance + 1e-8).sqrt();
-        
+
         for a in &mut advantages {
             *a = (*a - mean) / std;
         }

@@ -1,5 +1,5 @@
-use rand::Rng;
 use crate::brain::common::math::{glorot_uniform, zeros};
+use rand::Rng;
 
 #[derive(Clone, Debug)]
 pub struct Linear {
@@ -101,12 +101,17 @@ impl Relu {
 
     pub fn forward(&mut self, input: &[f32]) -> Vec<f32> {
         self.input_cache = Some(input.to_vec());
-        input.iter().map(|&x| if x > 0.0 { x } else { 0.0 }).collect()
+        input
+            .iter()
+            .map(|&x| if x > 0.0 { x } else { 0.0 })
+            .collect()
     }
 
     pub fn backward(&mut self, grad_output: &[f32]) -> Vec<f32> {
         let input = self.input_cache.as_ref().unwrap();
-        input.iter().zip(grad_output.iter())
+        input
+            .iter()
+            .zip(grad_output.iter())
             .map(|(&x, &g)| if x > 0.0 { g } else { 0.0 })
             .collect()
     }

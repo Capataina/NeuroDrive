@@ -8,15 +8,19 @@
 ## Current Implemented System
 
 - Overlay state is managed by a single `DebugOverlayState` resource with independent booleans for geometry, sensors, and telemetry (`src/debug/overlays.rs`).
+- Geometry overlays (`F1`) and the diagnostics HUD (`F3`) now default to on, so each run starts with immediate visual and textual debugging enabled (`src/debug/overlays.rs`).
 - `F1` toggles geometry overlays, `F2` toggles sensor overlays, and `F3` toggles the driving HUD (`src/debug/overlays.rs::debug_overlay_toggle_system`).
 - Geometry overlay draws the centreline polyline, closest projection point, tangent arrow, line from car to projection point, car forward vector, velocity vector, and lookahead preview markers/tangents at configured observation distances (`src/debug/overlays.rs::draw_geometry_overlay_system`).
 - Sensor overlay draws ray segments and hit markers using the same `SensorReadings` data consumed by the observation builder (`src/debug/overlays.rs::draw_sensor_overlay_system`).
-- The telemetry toggle controls the visibility of the UI HUD rooted in `DrivingHudRoot` (`src/debug/hud.rs`).
+- The telemetry toggle controls the visibility of a redesigned UI diagnostics panel rooted in `DrivingHudRoot` (`src/debug/hud.rs`).
+- The HUD now shows a run assessment line, current centreline gap and heading error, current life duration, recent moving averages, a compact live A2C health line, and four rolling quarter summaries over the recent episode window so run quality can be judged without waiting for offline analytics (`src/debug/hud.rs`).
+- Quarter summaries are updated automatically on each completed episode from debug-owned per-tick accumulators, including mean centreline distance, mean absolute heading error, mean best progress, mean episode duration, mean return, and crash/lap/timeout counts (`src/debug/hud.rs`).
+- The quarter summaries are now rendered as a fixed-column grid with smaller text and per-cell layout nodes rather than a single freeform text block, which keeps the table readable when values differ in length (`src/debug/hud.rs`).
 
 ## Implemented Outputs / Artifacts (if applicable)
 
 - World-space gizmo overlays for geometry and sensors (`src/debug/overlays.rs`).
-- A screen-space driving HUD panel for textual runtime state (`src/debug/hud.rs`).
+- A screen-space diagnostics HUD panel for live run assessment and rolling quarter summaries (`src/debug/hud.rs`).
 
 ## In Progress / Partially Implemented
 

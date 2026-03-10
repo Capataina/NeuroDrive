@@ -1,7 +1,7 @@
-use bevy::prelude::*;
 use bevy::ecs::message::MessageWriter;
+use bevy::prelude::*;
 
-use crate::game::car::{Car, CAR_HEIGHT, CAR_WIDTH};
+use crate::game::car::{CAR_HEIGHT, CAR_WIDTH, Car};
 use crate::maps::track::Track;
 
 /// Message emitted when the car leaves the driveable road surface.
@@ -33,9 +33,9 @@ pub fn collision_detection_system(
     let half_h = CAR_HEIGHT * 0.5;
 
     let local_corners = [
-        Vec2::new( half_w,  half_h),
-        Vec2::new( half_w, -half_h),
-        Vec2::new(-half_w,  half_h),
+        Vec2::new(half_w, half_h),
+        Vec2::new(half_w, -half_h),
+        Vec2::new(-half_w, half_h),
         Vec2::new(-half_w, -half_h),
     ];
 

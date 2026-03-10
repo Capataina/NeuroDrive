@@ -77,6 +77,7 @@ pub struct EpisodeState {
     pub current_tick_end_reason: Option<EpisodeEndReason>,
     pub current_tick_progress_fraction: f32,
     pub current_tick_progress_s: f32,
+    pub current_tick_centerline_distance: f32,
     pub current_tick_speed: f32,
     pub current_tick_heading_error: f32,
     pub current_tick_forward: Vec2,
@@ -117,6 +118,7 @@ impl Default for EpisodeState {
             current_tick_end_reason: None,
             current_tick_progress_fraction: 0.0,
             current_tick_progress_s: 0.0,
+            current_tick_centerline_distance: 0.0,
             current_tick_speed: 0.0,
             current_tick_heading_error: 0.0,
             current_tick_forward: Vec2::X,
@@ -185,7 +187,9 @@ pub fn episode_loop_system(
     let Ok((mut transform, mut car, mut progress)) = car_query.single_mut() else {
         return;
     };
-    let forward = (transform.rotation * Vec3::X).truncate().normalize_or_zero();
+    let forward = (transform.rotation * Vec3::X)
+        .truncate()
+        .normalize_or_zero();
 
     episode_state.current_tick_reward = 0.0;
     episode_state.current_tick_progress_reward = 0.0;
@@ -200,7 +204,8 @@ pub fn episode_loop_system(
     let heading_error = signed_angle_between(forward, progress.tangent);
     let heading_error_norm = (heading_error.abs() / PI).clamp(0.0, 1.0);
     let speed_norm = (car.velocity.length() / config.speed_norm_max_for_penalty).clamp(0.0, 1.0);
-    let heading_speed_penalty = -config.heading_speed_penalty_scale * heading_error_norm * speed_norm;
+    let heading_speed_penalty =
+        -config.heading_speed_penalty_scale * heading_error_norm * speed_norm;
     let time_penalty = config.time_penalty_per_tick + heading_speed_penalty;
     let mut terminal_reward = 0.0;
 
@@ -216,8 +221,7 @@ pub fn episode_loop_system(
         crash_position = Some(transform.translation.truncate());
     }
 
-    let timed_out =
-        (episode_state.ticks_in_episode as f32) * time.delta_secs() >= config.timeout_s;
+    let timed_out = (episode_state.ticks_in_episode as f32) * time.delta_secs() >= config.timeout_s;
     let lap_complete = episode_state.lap_armed
         && episode_state.previous_progress_fraction >= config.lap_wrap_from_fraction
         && progress.fraction <= config.lap_wrap_to_fraction;
@@ -233,6 +237,7 @@ pub fn episode_loop_system(
     episode_state.current_tick_terminal_reward = terminal_reward;
     episode_state.current_tick_progress_fraction = progress.fraction;
     episode_state.current_tick_progress_s = progress.s;
+    episode_state.current_tick_centerline_distance = progress.distance;
     episode_state.current_tick_speed = car.velocity.length();
     episode_state.current_tick_heading_error = heading_error;
     episode_state.current_tick_forward = forward;
@@ -306,7 +311,8 @@ fn finalize_episode(
     episode_state.last_episode_terminal_reward_sum = episode_state.current_terminal_reward_sum;
     episode_state.last_episode_crash_penalty_sum = episode_state.current_crash_penalty_sum;
     episode_state.last_episode_lap_bonus_sum = episode_state.current_lap_bonus_sum;
-    episode_state.last_episode_best_progress_fraction = episode_state.current_best_progress_fraction;
+    episode_state.last_episode_best_progress_fraction =
+        episode_state.current_best_progress_fraction;
     episode_state.last_episode_crashes = episode_state.current_crashes;
     episode_state.last_episode_ticks = episode_state.ticks_in_episode;
     episode_state.last_episode_crash_position = crash_position;

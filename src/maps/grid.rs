@@ -48,7 +48,11 @@ impl TrackGrid {
     /// All rows must have the same length; behaviour is undefined otherwise.
     /// `origin` is the world-space top-left corner of cell `[0][0]`.
     pub fn new(tiles: Vec<Vec<TilePart>>, tile_size: f32, origin: Vec2) -> Self {
-        Self { tiles, tile_size, origin }
+        Self {
+            tiles,
+            tile_size,
+            origin,
+        }
     }
 
     /// Number of rows in the grid.
@@ -133,10 +137,18 @@ impl TrackGrid {
 
         let (open_n, open_s, open_e, open_w) = tile.open_edges();
 
-        if !open_n && world.y > center.y + half - margin { return false; }
-        if !open_s && world.y < center.y - half + margin { return false; }
-        if !open_e && world.x > center.x + half - margin { return false; }
-        if !open_w && world.x < center.x - half + margin { return false; }
+        if !open_n && world.y > center.y + half - margin {
+            return false;
+        }
+        if !open_s && world.y < center.y - half + margin {
+            return false;
+        }
+        if !open_e && world.x > center.x + half - margin {
+            return false;
+        }
+        if !open_w && world.x < center.x - half + margin {
+            return false;
+        }
 
         true
     }
@@ -207,11 +219,11 @@ pub fn render_tile_grid(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<ColorMaterial>>,
 ) {
-    let road_color     = Color::srgb(0.28, 0.28, 0.28);
-    let wall_color     = Color::srgb(0.88, 0.88, 0.88);
+    let road_color = Color::srgb(0.28, 0.28, 0.28);
+    let wall_color = Color::srgb(0.88, 0.88, 0.88);
     let wall_thickness = WALL_THICKNESS;
 
-    let ts   = grid.tile_size;
+    let ts = grid.tile_size;
     let half = ts * 0.5;
     let road_material = materials.add(ColorMaterial::from(road_color));
     let wall_material = materials.add(ColorMaterial::from(wall_color));
@@ -344,7 +356,10 @@ fn spawn_corner_surface(
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(segments * 3);
     let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(segments * 3);
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     let center = [arc_center_local.x, arc_center_local.y, 0.0];
 
     for i in 0..segments {
@@ -388,9 +403,9 @@ fn corner_arc_params(tile: TilePart, cell_center: Vec2, half: f32) -> (Vec2, f32
 
     match tile {
         // Outer arc curves around NW. Centre at SE corner of tile.
-        TilePart::CornerNW => (Vec2::new(cx + half, cy - half),  90.0, 180.0),
+        TilePart::CornerNW => (Vec2::new(cx + half, cy - half), 90.0, 180.0),
         // Outer arc curves around NE. Centre at SW corner of tile.
-        TilePart::CornerNE => (Vec2::new(cx - half, cy - half),   0.0,  90.0),
+        TilePart::CornerNE => (Vec2::new(cx - half, cy - half), 0.0, 90.0),
         // Outer arc curves around SW. Centre at NE corner of tile.
         TilePart::CornerSW => (Vec2::new(cx + half, cy + half), 180.0, 270.0),
         // Outer arc curves around SE. Centre at NW corner of tile.
@@ -438,33 +453,35 @@ fn spawn_line_segment_mesh(
     thickness: f32,
     z: f32,
 ) {
-    let delta     = end - start;
-    let length    = delta.length();
-    let midpoint  = (start + end) * 0.5;
-    let angle     = delta.y.atan2(delta.x);
-    let half_len  = length * 0.5;
-    let half_thk  = thickness * 0.5;
+    let delta = end - start;
+    let length = delta.length();
+    let midpoint = (start + end) * 0.5;
+    let angle = delta.y.atan2(delta.x);
+    let half_len = length * 0.5;
+    let half_thk = thickness * 0.5;
 
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(6);
     let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(6);
 
     let v0 = [-half_len, -half_thk, 0.0];
-    let v1 = [ half_len, -half_thk, 0.0];
-    let v2 = [ half_len,  half_thk, 0.0];
-    let v3 = [-half_len,  half_thk, 0.0];
+    let v1 = [half_len, -half_thk, 0.0];
+    let v2 = [half_len, half_thk, 0.0];
+    let v3 = [-half_len, half_thk, 0.0];
 
     positions.extend_from_slice(&[v0, v1, v2, v0, v2, v3]);
     uvs.extend_from_slice(&[[0.0, 0.0]; 6]);
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
 
     commands.spawn((
         Mesh2d(meshes.add(mesh)),
         MeshMaterial2d(material),
-        Transform::from_xyz(midpoint.x, midpoint.y, z)
-            .with_rotation(Quat::from_rotation_z(angle)),
+        Transform::from_xyz(midpoint.x, midpoint.y, z).with_rotation(Quat::from_rotation_z(angle)),
         GlobalTransform::default(),
         Visibility::Visible,
     ));

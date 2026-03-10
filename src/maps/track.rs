@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
-use crate::maps::grid::TrackGrid;
 use crate::maps::centerline::TrackCenterline;
+use crate::maps::grid::TrackGrid;
 
 /// Component attached to the single track entity.
 ///

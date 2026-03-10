@@ -1,6 +1,6 @@
-use rand::Rng;
 use crate::brain::common::mlp::{Linear, Relu};
 use crate::brain::common::optim::AdamOptimizer;
+use rand::Rng;
 
 #[derive(Clone, Debug)]
 pub struct ActionDist {
@@ -38,7 +38,7 @@ impl ActorCritic {
         let a_fc1 = Linear::new(in_dim, hidden_dim, rng);
         let a_fc2 = Linear::new(hidden_dim, hidden_dim, rng);
         let a_mean = Linear::new(hidden_dim, act_dim, rng);
-        
+
         let c_fc1 = Linear::new(in_dim, hidden_dim, rng);
         let c_fc2 = Linear::new(hidden_dim, hidden_dim, rng);
         let c_value = Linear::new(hidden_dim, 1, rng);
@@ -95,6 +95,8 @@ impl ActorCritic {
         self.c_fc1.zero_grad();
         self.c_fc2.zero_grad();
         self.c_value.zero_grad();
-        for g in &mut self.a_log_std_grad { *g = 0.0; }
+        for g in &mut self.a_log_std_grad {
+            *g = 0.0;
+        }
     }
 }

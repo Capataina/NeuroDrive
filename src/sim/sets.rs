@@ -12,4 +12,3 @@ pub enum SimSet {
     /// Compute derived measurements (progress, sensors, telemetry sources).
     Measurement,
 }
-

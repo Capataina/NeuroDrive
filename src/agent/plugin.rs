@@ -1,15 +1,10 @@
 use bevy::prelude::*;
 
 use crate::agent::action::{
-    ActionSmoothing,
-    ActionState,
-    action_smoothing_system,
-    keyboard_action_input_system,
+    ActionSmoothing, ActionState, action_smoothing_system, keyboard_action_input_system,
 };
 use crate::agent::observation::{
-    ObservationConfig,
-    build_observation_vector_system,
-    update_sensor_readings_system,
+    ObservationConfig, build_observation_vector_system, update_sensor_readings_system,
 };
 use crate::game::episode::episode_loop_system;
 use crate::game::progress::update_track_progress_system;
@@ -26,10 +21,7 @@ impl Plugin for AgentPlugin {
             // Actions must be updated on the fixed simulation tick.
             .add_systems(
                 FixedUpdate,
-                (
-                    keyboard_action_input_system,
-                    action_smoothing_system,
-                )
+                (keyboard_action_input_system, action_smoothing_system)
                     .chain()
                     .in_set(SimSet::Input),
             )

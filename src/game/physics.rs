@@ -105,14 +105,22 @@ mod tests {
         let mut first_seed = seed;
         for _ in 0..steps {
             let steering = lcg_next(&mut first_seed) * 2.0 - 1.0;
-            let throttle = if lcg_next(&mut first_seed) > 0.35 { 1.0 } else { 0.0 };
+            let throttle = if lcg_next(&mut first_seed) > 0.35 {
+                1.0
+            } else {
+                0.0
+            };
             step_car_dynamics(&mut first_run_state, steering, throttle, dt, params);
         }
 
         let mut second_seed = seed;
         for _ in 0..steps {
             let steering = lcg_next(&mut second_seed) * 2.0 - 1.0;
-            let throttle = if lcg_next(&mut second_seed) > 0.35 { 1.0 } else { 0.0 };
+            let throttle = if lcg_next(&mut second_seed) > 0.35 {
+                1.0
+            } else {
+                0.0
+            };
             step_car_dynamics(&mut second_run_state, steering, throttle, dt, params);
         }
 

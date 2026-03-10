@@ -1,0 +1,4334 @@
+{
+  "episodes": [
+    {
+      "episode_id": 1,
+      "progress": 0.0823039,
+      "reward": 5.697229,
+      "pre_terminal_return": 10.697231,
+      "progress_reward_sum": 11.522544,
+      "time_penalty_sum": -0.82531244,
+      "terminal_reward_sum": -5.0,
+      "crash_penalty_sum": -5.0,
+      "lap_bonus_sum": 0.0,
+      "ticks": 146,
+      "crashes": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "crash_position": [
+        320.28833,
+        257.40173
+      ],
+      "steering_mean": 0.10654465,
+      "steering_std": 0.6262652,
+      "throttle_mean": 0.5106015,
+      "throttle_std": 0.31123525,
+      "turn_in_latency_fraction": null,
+      "throttle_release_latency_fraction": null,
+      "steering_adequacy": 0.0,
+      "high_curvature_throttle_mean": 0.0
+    }
+  ],
+  "a2c_updates": [
+    {
+      "update_index": 1,
+      "batch_size": 146,
+      "policy_loss": -0.019766254,
+      "value_loss": 0.7150552,
+      "policy_entropy": 1.418943,
+      "explained_variance": -0.24604523,
+      "steering_mean": 0.10654465,
+      "steering_std": 0.6262652,
+      "throttle_mean": 0.5106015,
+      "throttle_std": 0.31123525,
+      "clamped_action_fraction": 0.0,
+      "layer_health": [
+        {
+          "layer_name": "actor_fc1",
+          "weight_l2_norm": 5.4959292,
+          "gradient_l2_norm": 0.17653067,
+          "dead_relu_fraction": 0.43471748
+        },
+        {
+          "layer_name": "actor_fc2",
+          "weight_l2_norm": 7.9155254,
+          "gradient_l2_norm": 0.22970775,
+          "dead_relu_fraction": 0.5568279
+        },
+        {
+          "layer_name": "actor_mean",
+          "weight_l2_norm": 2.0107214,
+          "gradient_l2_norm": 0.21309559,
+          "dead_relu_fraction": null
+        },
+        {
+          "layer_name": "critic_fc1",
+          "weight_l2_norm": 5.733216,
+          "gradient_l2_norm": 0.2452323,
+          "dead_relu_fraction": 0.47838184
+        },
+        {
+          "layer_name": "critic_fc2",
+          "weight_l2_norm": 8.120558,
+          "gradient_l2_norm": 0.31905586,
+          "dead_relu_fraction": 0.541524
+        },
+        {
+          "layer_name": "critic_value",
+          "weight_l2_norm": 1.3189019,
+          "gradient_l2_norm": 0.29675657,
+          "dead_relu_fraction": null
+        }
+      ]
+    }
+  ],
+  "episode_traces": [
+    {
+      "episode_id": 1,
+      "end_reason": "Crash",
+      "lap_completed": false,
+      "best_progress": 0.0823039,
+      "ticks": [
+        {
+          "tick_index": 1,
+          "progress_fraction": 0.006641613,
+          "progress_s": 50.05492,
+          "speed": 3.3011527,
+          "heading_error": -0.059749126,
+          "steering": -0.89623684,
+          "throttle": 0.2681139,
+          "reward": 0.9248244,
+          "progress_reward": 0.9298258,
+          "time_penalty": -0.005001395,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.059749126,
+            -0.059749126,
+            -0.059749126,
+            -0.059749126
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.0
+        },
+        {
+          "tick_index": 2,
+          "progress_fraction": 0.006662023,
+          "progress_s": 50.20874,
+          "speed": 9.2316475,
+          "heading_error": -0.00096706674,
+          "steering": 0.88173085,
+          "throttle": 0.48598182,
+          "reward": -0.0021426724,
+          "progress_reward": 0.0028573908,
+          "time_penalty": -0.005000063,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.00096706674,
+            -0.00096706674,
+            -0.00096706674,
+            -0.00096706674
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.005472881
+        },
+        {
+          "tick_index": 3,
+          "progress_fraction": 0.006694212,
+          "progress_s": 50.45134,
+          "speed": 14.556286,
+          "heading_error": 0.059448488,
+          "steering": 0.90623325,
+          "throttle": 0.44461733,
+          "reward": -0.0004996187,
+          "progress_reward": 0.0045065023,
+          "time_penalty": -0.005006121,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.059448488,
+            0.059448488,
+            0.059448488,
+            0.059448488
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.0074946056
+        },
+        {
+          "tick_index": 4,
+          "progress_fraction": 0.006727048,
+          "progress_s": 50.69881,
+          "speed": 14.848744,
+          "heading_error": 0.022797644,
+          "steering": -0.5497626,
+          "throttle": 0.041490436,
+          "reward": -0.00040533952,
+          "progress_reward": 0.004597055,
+          "time_penalty": -0.0050023943,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.022797644,
+            0.022797644,
+            0.022797644,
+            0.022797644
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.00062870653
+        },
+        {
+          "tick_index": 5,
+          "progress_fraction": 0.0067804055,
+          "progress_s": 51.10094,
+          "speed": 24.128202,
+          "heading_error": -0.034127712,
+          "steering": -0.8538803,
+          "throttle": 0.77219254,
+          "reward": 0.0024642022,
+          "progress_reward": 0.0074700266,
+          "time_penalty": -0.0050058244,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.034127712,
+            -0.034127712,
+            -0.034127712,
+            -0.034127712
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.024897601
+        },
+        {
+          "tick_index": 6,
+          "progress_fraction": 0.0068580643,
+          "progress_s": 51.686222,
+          "speed": 35.12415,
+          "heading_error": -0.046115298,
+          "steering": -0.17981379,
+          "throttle": 0.9229243,
+          "reward": 0.0058607743,
+          "progress_reward": 0.010872232,
+          "time_penalty": -0.0050114575,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.046115298,
+            -0.046115298,
+            -0.046115298,
+            -0.046115298
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.007753088
+        },
+        {
+          "tick_index": 7,
+          "progress_fraction": 0.006953268,
+          "progress_s": 52.40373,
+          "speed": 43.077724,
+          "heading_error": -0.09773815,
+          "steering": -0.77434254,
+          "throttle": 0.69043213,
+          "reward": 0.008298711,
+          "progress_reward": 0.013328493,
+          "time_penalty": -0.0050297817,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.09773815,
+            -0.09773815,
+            -0.09773815,
+            -0.09773815
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.0047617294
+        },
+        {
+          "tick_index": 8,
+          "progress_fraction": 0.0070701893,
+          "progress_s": 53.284912,
+          "speed": 52.906445,
+          "heading_error": -0.04171106,
+          "steering": 0.8404062,
+          "throttle": 0.8507651,
+          "reward": 0.0113534,
+          "progress_reward": 0.01636901,
+          "time_penalty": -0.00501561,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.04171106,
+            -0.04171106,
+            -0.04171106,
+            -0.04171106
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.015576353
+        },
+        {
+          "tick_index": 9,
+          "progress_fraction": 0.007186622,
+          "progress_s": 54.162415,
+          "speed": 52.684822,
+          "heading_error": 0.011162748,
+          "steering": 0.79310703,
+          "throttle": 0.046507508,
+          "reward": 0.011296397,
+          "progress_reward": 0.016300557,
+          "time_penalty": -0.00500416,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.011162748,
+            0.011162748,
+            0.011162748,
+            0.011162748
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.014393726
+        },
+        {
+          "tick_index": 10,
+          "progress_fraction": 0.0073047187,
+          "progress_s": 55.05246,
+          "speed": 53.43278,
+          "heading_error": 0.050410766,
+          "steering": 0.5887203,
+          "throttle": 0.12538901,
+          "reward": 0.011514502,
+          "progress_reward": 0.016533555,
+          "time_penalty": -0.0050190534,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.050410766,
+            0.050410766,
+            0.050410766,
+            0.050410766
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.006292026
+        },
+        {
+          "tick_index": 11,
+          "progress_fraction": 0.0074482006,
+          "progress_s": 56.13382,
+          "speed": 64.90677,
+          "heading_error": -0.0035839677,
+          "steering": -0.80992097,
+          "throttle": 0.997359,
+          "reward": 0.015085818,
+          "progress_reward": 0.020087464,
+          "time_penalty": -0.0050016455,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.0035839677,
+            -0.0035839677,
+            -0.0035839677,
+            -0.0035839677
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.0065223165
+        },
+        {
+          "tick_index": 12,
+          "progress_fraction": 0.0075985193,
+          "progress_s": 57.266705,
+          "speed": 67.99272,
+          "heading_error": 0.03881514,
+          "steering": 0.63598657,
+          "throttle": 0.33040386,
+          "reward": 0.016025953,
+          "progress_reward": 0.021044621,
+          "time_penalty": -0.0050186682,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.03881514,
+            0.03881514,
+            0.03881514,
+            0.03881514
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.0070817126
+        },
+        {
+          "tick_index": 13,
+          "progress_fraction": 0.007766804,
+          "progress_s": 58.534992,
+          "speed": 76.112816,
+          "heading_error": 0.004941076,
+          "steering": -0.50811094,
+          "throttle": 0.742608,
+          "reward": 0.01855722,
+          "progress_reward": 0.023559881,
+          "time_penalty": -0.00500266,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.004941076,
+            0.004941076,
+            0.004941076,
+            0.004941076
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.0007749009
+        },
+        {
+          "tick_index": 14,
+          "progress_fraction": 0.0079437,
+          "progress_s": 59.86818,
+          "speed": 80.01061,
+          "heading_error": -0.041568235,
+          "steering": -0.69763964,
+          "throttle": 0.40938303,
+          "reward": 0.019741897,
+          "progress_reward": 0.024765423,
+          "time_penalty": -0.005023526,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.041568235,
+            -0.041568235,
+            -0.041568235,
+            -0.041568235
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.009359887
+        },
+        {
+          "tick_index": 15,
+          "progress_fraction": 0.008129301,
+          "progress_s": 61.26697,
+          "speed": 83.95703,
+          "heading_error": -0.0986112,
+          "steering": -0.8556444,
+          "throttle": 0.41915488,
+          "reward": 0.020925505,
+          "progress_reward": 0.025984067,
+          "time_penalty": -0.0050585624,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.0986112,
+            -0.0986112,
+            -0.0986112,
+            -0.0986112
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.00310275
+        },
+        {
+          "tick_index": 16,
+          "progress_fraction": 0.008337731,
+          "progress_s": 62.837814,
+          "speed": 94.288635,
+          "heading_error": -0.040119365,
+          "steering": 0.87737745,
+          "throttle": 0.94147325,
+          "reward": 0.024153441,
+          "progress_reward": 0.029180199,
+          "time_penalty": -0.0050267577,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.040119365,
+            -0.040119365,
+            -0.040119365,
+            -0.040119365
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.017464783
+        },
+        {
+          "tick_index": 17,
+          "progress_fraction": 0.008543967,
+          "progress_s": 64.39213,
+          "speed": 93.29732,
+          "heading_error": -0.10590712,
+          "steering": -0.9868162,
+          "throttle": 0.03445965,
+          "reward": 0.023803249,
+          "progress_reward": 0.028873142,
+          "time_penalty": -0.0050698924,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.10590712,
+            -0.10590712,
+            -0.10590712,
+            -0.10590712
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.013911455
+        },
+        {
+          "tick_index": 18,
+          "progress_fraction": 0.00876359,
+          "progress_s": 66.04733,
+          "speed": 99.38062,
+          "heading_error": -0.14258453,
+          "steering": -0.55016124,
+          "throttle": 0.61140513,
+          "reward": 0.025646934,
+          "progress_reward": 0.030747168,
+          "time_penalty": -0.005100233,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.14258453,
+            -0.14258453,
+            -0.14258453,
+            -0.14258453
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.017746985
+        },
+        {
+          "tick_index": 19,
+          "progress_fraction": 0.00900045,
+          "progress_s": 67.83244,
+          "speed": 107.22642,
+          "heading_error": -0.15278345,
+          "steering": -0.15298374,
+          "throttle": 0.7629405,
+          "reward": 0.028044585,
+          "progress_reward": 0.033160467,
+          "time_penalty": -0.005115882,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.15278345,
+            -0.15278345,
+            -0.15278345,
+            -0.15278345
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.03571127
+        },
+        {
+          "tick_index": 20,
+          "progress_fraction": 0.00924893,
+          "progress_s": 69.705124,
+          "speed": 112.51845,
+          "heading_error": -0.13919225,
+          "steering": 0.203868,
+          "throttle": 0.56266826,
+          "reward": 0.029676368,
+          "progress_reward": 0.034787152,
+          "time_penalty": -0.0051107835,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.13919225,
+            -0.13919225,
+            -0.13919225,
+            -0.13919225
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.03151533
+        },
+        {
+          "tick_index": 21,
+          "progress_fraction": 0.0095198015,
+          "progress_s": 71.74657,
+          "speed": 122.753075,
+          "heading_error": -0.18586278,
+          "steering": -0.7000578,
+          "throttle": 0.97608525,
+          "reward": 0.032760616,
+          "progress_reward": 0.037922002,
+          "time_penalty": -0.0051613846,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.18586278,
+            -0.18586278,
+            -0.18586278,
+            -0.18586278
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.045967057
+        },
+        {
+          "tick_index": 22,
+          "progress_fraction": 0.009794389,
+          "progress_s": 73.81601,
+          "speed": 124.45812,
+          "heading_error": -0.15298644,
+          "steering": 0.49314526,
+          "throttle": 0.28909102,
+          "reward": 0.033307556,
+          "progress_reward": 0.03844224,
+          "time_penalty": -0.005134683,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.15298644,
+            -0.15298644,
+            -0.15298644,
+            -0.15298644
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.006655073
+        },
+        {
+          "tick_index": 23,
+          "progress_fraction": 0.010070667,
+          "progress_s": 75.89819,
+          "speed": 125.22882,
+          "heading_error": -0.09372511,
+          "steering": 0.8889198,
+          "throttle": 0.21428564,
+          "reward": 0.033595867,
+          "progress_reward": 0.03867889,
+          "time_penalty": -0.0050830226,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.09372511,
+            -0.09372511,
+            -0.09372511,
+            -0.09372511
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.042373784
+        },
+        {
+          "tick_index": 24,
+          "progress_fraction": 0.0103502,
+          "progress_s": 78.00491,
+          "speed": 126.70755,
+          "heading_error": -0.08375025,
+          "steering": 0.1496228,
+          "throttle": 0.27269238,
+          "reward": 0.03405965,
+          "progress_reward": 0.039134715,
+          "time_penalty": -0.005075063,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.08375025,
+            -0.08375025,
+            -0.08375025,
+            -0.08375025
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.02665561
+        },
+        {
+          "tick_index": 25,
+          "progress_fraction": 0.010633246,
+          "progress_s": 80.13811,
+          "speed": 128.31969,
+          "heading_error": -0.14737019,
+          "steering": -0.9542989,
+          "throttle": 0.28614524,
+          "reward": 0.034492634,
+          "progress_reward": 0.039626397,
+          "time_penalty": -0.0051337644,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.14737019,
+            -0.14737019,
+            -0.14737019,
+            -0.14737019
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.044224
+        },
+        {
+          "tick_index": 26,
+          "progress_fraction": 0.010929687,
+          "progress_s": 82.37225,
+          "speed": 134.40146,
+          "heading_error": -0.0875647,
+          "steering": 0.89708245,
+          "throttle": 0.65035963,
+          "reward": 0.03641848,
+          "progress_reward": 0.041501727,
+          "time_penalty": -0.005083247,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.0875647,
+            -0.0875647,
+            -0.0875647,
+            -0.0875647
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.02220909
+        },
+        {
+          "tick_index": 27,
+          "progress_fraction": 0.011228394,
+          "progress_s": 84.623474,
+          "speed": 135.4232,
+          "heading_error": -0.049315564,
+          "steering": 0.5737371,
+          "throttle": 0.2467854,
+          "reward": 0.036771715,
+          "progress_reward": 0.041818954,
+          "time_penalty": -0.0050472403,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.049315564,
+            -0.049315564,
+            -0.049315564,
+            -0.049315564
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.02476796
+        },
+        {
+          "tick_index": 28,
+          "progress_fraction": 0.011527793,
+          "progress_s": 86.87991,
+          "speed": 135.73465,
+          "heading_error": -0.057142425,
+          "steering": -0.1174029,
+          "throttle": 0.19029778,
+          "reward": 0.036860965,
+          "progress_reward": 0.04191583,
+          "time_penalty": -0.0050548636,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.057142425,
+            -0.057142425,
+            -0.057142425,
+            -0.057142425
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.022568911
+        },
+        {
+          "tick_index": 29,
+          "progress_fraction": 0.0118358005,
+          "progress_s": 89.20123,
+          "speed": 139.65381,
+          "heading_error": -0.10865183,
+          "steering": -0.772641,
+          "throttle": 0.48398596,
+          "reward": 0.03801378,
+          "progress_reward": 0.04312111,
+          "time_penalty": -0.0051073316,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.10865183,
+            -0.10865183,
+            -0.10865183,
+            -0.10865183
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.027453724
+        },
+        {
+          "tick_index": 30,
+          "progress_fraction": 0.012158488,
+          "progress_s": 91.63319,
+          "speed": 146.37335,
+          "heading_error": -0.1692925,
+          "steering": -0.90961,
+          "throttle": 0.71900105,
+          "reward": 0.04000096,
+          "progress_reward": 0.04517624,
+          "time_penalty": -0.005175282,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.1692925,
+            -0.1692925,
+            -0.1692925,
+            -0.1692925
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.03217498
+        },
+        {
+          "tick_index": 31,
+          "progress_fraction": 0.012496294,
+          "progress_s": 94.179085,
+          "speed": 153.2636,
+          "heading_error": -0.121214464,
+          "steering": 0.7211704,
+          "throttle": 0.73855394,
+          "reward": 0.042161502,
+          "progress_reward": 0.047292914,
+          "time_penalty": -0.005131411,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.121214464,
+            -0.121214464,
+            -0.121214464,
+            -0.121214464
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.014591072
+        },
+        {
+          "tick_index": 32,
+          "progress_fraction": 0.012839433,
+          "progress_s": 96.76517,
+          "speed": 155.71736,
+          "heading_error": -0.16883108,
+          "steering": -0.71424925,
+          "throttle": 0.387437,
+          "reward": 0.042853408,
+          "progress_reward": 0.04803937,
+          "time_penalty": -0.005185963,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.16883108,
+            -0.16883108,
+            -0.16883108,
+            -0.16883108
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.042614862
+        },
+        {
+          "tick_index": 33,
+          "progress_fraction": 0.013194817,
+          "progress_s": 99.44354,
+          "speed": 161.29092,
+          "heading_error": -0.10993108,
+          "steering": 0.8835,
+          "throttle": 0.6425832,
+          "reward": 0.04462838,
+          "progress_reward": 0.049753804,
+          "time_penalty": -0.00512542,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.10993108,
+            -0.10993108,
+            -0.10993108,
+            -0.10993108
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.020380802
+        },
+        {
+          "tick_index": 34,
+          "progress_fraction": 0.013567534,
+          "progress_s": 102.25255,
+          "speed": 169.17287,
+          "heading_error": -0.10196664,
+          "steering": 0.11946667,
+          "throttle": 0.8367611,
+          "reward": 0.047058385,
+          "progress_reward": 0.052180402,
+          "time_penalty": -0.0051220185,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.10196664,
+            -0.10196664,
+            -0.10196664,
+            -0.10196664
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.03313832
+        },
+        {
+          "tick_index": 35,
+          "progress_fraction": 0.013961208,
+          "progress_s": 105.2195,
+          "speed": 178.76274,
+          "heading_error": -0.15815432,
+          "steering": -0.8428151,
+          "throttle": 0.987334,
+          "reward": 0.049914345,
+          "progress_reward": 0.05511433,
+          "time_penalty": -0.005199984,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.15815432,
+            -0.15815432,
+            -0.15815432,
+            -0.15815432
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.057976596
+        },
+        {
+          "tick_index": 36,
+          "progress_fraction": 0.014354135,
+          "progress_s": 108.18082,
+          "speed": 178.44391,
+          "heading_error": -0.18558285,
+          "steering": -0.411428,
+          "throttle": 0.19273198,
+          "reward": 0.04977551,
+          "progress_reward": 0.05500976,
+          "time_penalty": -0.0052342485,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.18558285,
+            -0.18558285,
+            -0.18558285,
+            -0.18558285
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.025841713
+        },
+        {
+          "tick_index": 37,
+          "progress_fraction": 0.014767626,
+          "progress_s": 111.29712,
+          "speed": 187.82404,
+          "heading_error": -0.12882699,
+          "steering": 0.8513378,
+          "throttle": 0.97983146,
+          "reward": 0.052717637,
+          "progress_reward": 0.057888795,
+          "time_penalty": -0.0051711574,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.12882699,
+            -0.12882699,
+            -0.12882699,
+            -0.12882699
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.020953547
+        },
+        {
+          "tick_index": 38,
+          "progress_fraction": 0.01517509,
+          "progress_s": 114.368,
+          "speed": 185.08664,
+          "heading_error": -0.13355598,
+          "steering": -0.07093471,
+          "throttle": 0.0064990222,
+          "reward": 0.05187009,
+          "progress_reward": 0.057044942,
+          "time_penalty": -0.005174854,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.13355598,
+            -0.13355598,
+            -0.13355598,
+            -0.13355598
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.047386248
+        },
+        {
+          "tick_index": 39,
+          "progress_fraction": 0.015581129,
+          "progress_s": 117.42813,
+          "speed": 184.43677,
+          "heading_error": -0.08657645,
+          "steering": 0.7046929,
+          "throttle": 0.17271018,
+          "reward": 0.051732503,
+          "progress_reward": 0.056845453,
+          "time_penalty": -0.0051129498,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.08657645,
+            -0.08657645,
+            -0.08657645,
+            -0.08657645
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.054020703
+        },
+        {
+          "tick_index": 40,
+          "progress_fraction": 0.015996171,
+          "progress_s": 120.55612,
+          "speed": 188.52988,
+          "heading_error": -0.0989907,
+          "steering": -0.18621385,
+          "throttle": 0.55713373,
+          "reward": 0.052973874,
+          "progress_reward": 0.058105886,
+          "time_penalty": -0.0051320116,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.0989907,
+            -0.0989907,
+            -0.0989907,
+            -0.0989907
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.032098304
+        },
+        {
+          "tick_index": 41,
+          "progress_fraction": 0.01642732,
+          "progress_s": 123.8055,
+          "speed": 195.85725,
+          "heading_error": -0.10676485,
+          "steering": -0.11661225,
+          "throttle": 0.8248519,
+          "reward": 0.055212855,
+          "progress_reward": 0.060360767,
+          "time_penalty": -0.0051479125,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.10676485,
+            -0.10676485,
+            -0.10676485,
+            -0.10676485
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.059582483
+        },
+        {
+          "tick_index": 42,
+          "progress_fraction": 0.016873721,
+          "progress_s": 127.16983,
+          "speed": 202.76895,
+          "heading_error": -0.076824285,
+          "steering": 0.44910854,
+          "throttle": 0.8000993,
+          "reward": 0.057386026,
+          "progress_reward": 0.062496215,
+          "time_penalty": -0.005110189,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.076824285,
+            -0.076824285,
+            -0.076824285,
+            -0.076824285
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.06550314
+        },
+        {
+          "tick_index": 43,
+          "progress_fraction": 0.01733825,
+          "progress_s": 130.67078,
+          "speed": 210.91447,
+          "heading_error": -0.010815418,
+          "steering": 0.9901329,
+          "throttle": 0.9116289,
+          "reward": 0.060017895,
+          "progress_reward": 0.06503403,
+          "time_penalty": -0.0050161355,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.010815418,
+            -0.010815418,
+            -0.010815418,
+            -0.010815418
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.0419912
+        },
+        {
+          "tick_index": 44,
+          "progress_fraction": 0.017822485,
+          "progress_s": 134.32025,
+          "speed": 219.81506,
+          "heading_error": -0.045321755,
+          "steering": -0.517595,
+          "throttle": 0.98077655,
+          "reward": 0.06272251,
+          "progress_reward": 0.06779298,
+          "time_penalty": -0.0050704693,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.045321755,
+            -0.045321755,
+            -0.045321755,
+            -0.045321755
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.007901994
+        },
+        {
+          "tick_index": 45,
+          "progress_fraction": 0.01830841,
+          "progress_s": 137.98245,
+          "speed": 220.5635,
+          "heading_error": -0.03901905,
+          "steering": 0.09454065,
+          "throttle": 0.32896474,
+          "reward": 0.06296863,
+          "progress_reward": 0.0680295,
+          "time_penalty": -0.0050608763,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.03901905,
+            -0.03901905,
+            -0.03901905,
+            -0.03901905
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.03380446
+        },
+        {
+          "tick_index": 46,
+          "progress_fraction": 0.018801026,
+          "progress_s": 141.69508,
+          "speed": 223.59023,
+          "heading_error": -0.0673091,
+          "steering": -0.42435077,
+          "throttle": 0.5146272,
+          "reward": 0.06385973,
+          "progress_reward": 0.06896619,
+          "time_penalty": -0.0051064542,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.0673091,
+            -0.0673091,
+            -0.0673091,
+            -0.0673091
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.034942813
+        },
+        {
+          "tick_index": 47,
+          "progress_fraction": 0.019311288,
+          "progress_s": 145.54071,
+          "speed": 231.62854,
+          "heading_error": -0.11470209,
+          "steering": -0.7108948,
+          "throttle": 0.92560613,
+          "reward": 0.0662488,
+          "progress_reward": 0.071436726,
+          "time_penalty": -0.005187932,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.11470209,
+            -0.11470209,
+            -0.11470209,
+            -0.11470209
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.043222394
+        },
+        {
+          "tick_index": 48,
+          "progress_fraction": 0.019824706,
+          "progress_s": 149.41011,
+          "speed": 233.07057,
+          "heading_error": -0.11262907,
+          "steering": 0.031095367,
+          "throttle": 0.3994268,
+          "reward": 0.066692784,
+          "progress_reward": 0.07187847,
+          "time_penalty": -0.005185684,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.11262907,
+            -0.11262907,
+            -0.11262907,
+            -0.11262907
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.054842338
+        },
+        {
+          "tick_index": 49,
+          "progress_fraction": 0.020340014,
+          "progress_s": 153.29376,
+          "speed": 233.94781,
+          "heading_error": -0.13544874,
+          "steering": -0.34229508,
+          "throttle": 0.35558128,
+          "reward": 0.06691901,
+          "progress_reward": 0.07214315,
+          "time_penalty": -0.005224146,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.13544874,
+            -0.13544874,
+            -0.13544874,
+            -0.13544874
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.06651298
+        },
+        {
+          "tick_index": 50,
+          "progress_fraction": 0.020867601,
+          "progress_s": 157.26994,
+          "speed": 239.53873,
+          "heading_error": -0.1100351,
+          "steering": 0.38120458,
+          "throttle": 0.7392508,
+          "reward": 0.06867571,
+          "progress_reward": 0.07386215,
+          "time_penalty": -0.0051864423,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.1100351,
+            -0.1100351,
+            -0.1100351,
+            -0.1100351
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.05451435
+        },
+        {
+          "tick_index": 51,
+          "progress_fraction": 0.021406302,
+          "progress_s": 161.32991,
+          "speed": 244.64795,
+          "heading_error": -0.16681266,
+          "steering": -0.8516634,
+          "throttle": 0.70880467,
+          "reward": 0.07012949,
+          "progress_reward": 0.07541817,
+          "time_penalty": -0.005288674,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.16681266,
+            -0.16681266,
+            -0.16681266,
+            -0.16681266
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.05845625
+        },
+        {
+          "tick_index": 52,
+          "progress_fraction": 0.021959243,
+          "progress_s": 165.49718,
+          "speed": 251.2323,
+          "heading_error": -0.21406306,
+          "steering": -0.7087559,
+          "throttle": 0.83873856,
+          "reward": 0.07203134,
+          "progress_reward": 0.077411756,
+          "time_penalty": -0.0053804126,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.21406306,
+            -0.21406306,
+            -0.21406306,
+            -0.21406306
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.025759261
+        },
+        {
+          "tick_index": 53,
+          "progress_fraction": 0.022523478,
+          "progress_s": 169.74956,
+          "speed": 256.52576,
+          "heading_error": -0.27302408,
+          "steering": -0.88441527,
+          "throttle": 0.7470476,
+          "reward": 0.07349739,
+          "progress_reward": 0.07899281,
+          "time_penalty": -0.005495415,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.27302408,
+            -0.27302408,
+            -0.27302408,
+            -0.27302408
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.011427674
+        },
+        {
+          "tick_index": 54,
+          "progress_fraction": 0.02309905,
+          "progress_s": 174.0874,
+          "speed": 261.8029,
+          "heading_error": -0.22785378,
+          "steering": 0.6775548,
+          "throttle": 0.7466463,
+          "reward": 0.07515816,
+          "progress_reward": 0.080580115,
+          "time_penalty": -0.005421957,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.22785378,
+            -0.22785378,
+            -0.22785378,
+            -0.22785378
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.00015360862
+        },
+        {
+          "tick_index": 55,
+          "progress_fraction": 0.02366702,
+          "progress_s": 178.36795,
+          "speed": 258.34793,
+          "heading_error": -0.16459803,
+          "steering": 0.948836,
+          "throttle": 0.03840345,
+          "reward": 0.07421512,
+          "progress_reward": 0.07951591,
+          "time_penalty": -0.0053007924,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.16459803,
+            -0.16459803,
+            -0.16459803,
+            -0.16459803
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.04032938
+        },
+        {
+          "tick_index": 56,
+          "progress_fraction": 0.024229005,
+          "progress_s": 182.60338,
+          "speed": 255.63773,
+          "heading_error": -0.2144293,
+          "steering": -0.74746877,
+          "throttle": 0.0951539,
+          "reward": 0.07329005,
+          "progress_reward": 0.078677796,
+          "time_penalty": -0.0053877453,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.2144293,
+            -0.2144293,
+            -0.2144293,
+            -0.2144293
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.04694322
+        },
+        {
+          "tick_index": 57,
+          "progress_fraction": 0.024783067,
+          "progress_s": 186.7791,
+          "speed": 252.03583,
+          "heading_error": -0.15900752,
+          "steering": 0.83132684,
+          "throttle": 0.018919766,
+          "reward": 0.072285265,
+          "progress_reward": 0.07756874,
+          "time_penalty": -0.005283477,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.15900752,
+            -0.15900752,
+            -0.15900752,
+            -0.15900752
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.010438027
+        },
+        {
+          "tick_index": 58,
+          "progress_fraction": 0.02533496,
+          "progress_s": 190.93848,
+          "speed": 251.04398,
+          "heading_error": -0.09572922,
+          "steering": 0.9491746,
+          "throttle": 0.2265119,
+          "reward": 0.07209495,
+          "progress_reward": 0.07726494,
+          "time_penalty": -0.0051699933,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.09572922,
+            -0.09572922,
+            -0.09572922,
+            -0.09572922
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.04810641
+        },
+        {
+          "tick_index": 59,
+          "progress_fraction": 0.025888087,
+          "progress_s": 195.10715,
+          "speed": 251.59496,
+          "heading_error": -0.08326891,
+          "steering": 0.18690461,
+          "throttle": 0.35070136,
+          "reward": 0.072289646,
+          "progress_reward": 0.07743783,
+          "time_penalty": -0.005148191,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.08326891,
+            -0.08326891,
+            -0.08326891,
+            -0.08326891
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.042741712
+        },
+        {
+          "tick_index": 60,
+          "progress_fraction": 0.026448231,
+          "progress_s": 199.3287,
+          "speed": 254.77087,
+          "heading_error": -0.08918176,
+          "steering": -0.088692546,
+          "throttle": 0.56455356,
+          "reward": 0.073259436,
+          "progress_reward": 0.078420155,
+          "time_penalty": -0.0051607173,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.08918176,
+            -0.08918176,
+            -0.08918176,
+            -0.08918176
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.059714757
+        },
+        {
+          "tick_index": 61,
+          "progress_fraction": 0.02700719,
+          "progress_s": 203.54134,
+          "speed": 254.22101,
+          "heading_error": -0.07449394,
+          "steering": 0.22031721,
+          "throttle": 0.2658674,
+          "reward": 0.07312035,
+          "progress_reward": 0.078254305,
+          "time_penalty": -0.005133958,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.07449394,
+            -0.07449394,
+            -0.07449394,
+            -0.07449394
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.069046296
+        },
+        {
+          "tick_index": 62,
+          "progress_fraction": 0.02756762,
+          "progress_s": 207.76505,
+          "speed": 254.85202,
+          "heading_error": -0.028110646,
+          "steering": 0.69574934,
+          "throttle": 0.3620764,
+          "reward": 0.07340938,
+          "progress_reward": 0.07846005,
+          "time_penalty": -0.005050675,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            -0.028110646,
+            -0.028110646,
+            -0.028110646,
+            -0.028110646
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.05583456
+        },
+        {
+          "tick_index": 63,
+          "progress_fraction": 0.028129261,
+          "progress_s": 211.9979,
+          "speed": 255.3388,
+          "heading_error": 0.0341252,
+          "steering": 0.9335376,
+          "throttle": 0.3534188,
+          "reward": 0.07356818,
+          "progress_reward": 0.078629814,
+          "time_penalty": -0.0050616353,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.0341252,
+            0.0341252,
+            0.0341252,
+            0.0341252
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.02057005
+        },
+        {
+          "tick_index": 64,
+          "progress_fraction": 0.028687604,
+          "progress_s": 216.20587,
+          "speed": 253.81117,
+          "heading_error": 0.010615561,
+          "steering": -0.3526446,
+          "throttle": 0.18821448,
+          "reward": 0.07314893,
+          "progress_reward": 0.07816799,
+          "time_penalty": -0.0050190585,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.010615561,
+            0.010615561,
+            0.010615561,
+            0.010615561
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.002234809
+        },
+        {
+          "tick_index": 65,
+          "progress_fraction": 0.029242493,
+          "progress_s": 220.38783,
+          "speed": 252.20433,
+          "heading_error": 0.06661062,
+          "steering": 0.8399259,
+          "throttle": 0.18126953,
+          "reward": 0.07256569,
+          "progress_reward": 0.07768452,
+          "time_penalty": -0.005118832,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.06661062,
+            0.06661062,
+            0.06661062,
+            0.06661062
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.0342398
+        },
+        {
+          "tick_index": 66,
+          "progress_fraction": 0.0297904,
+          "progress_s": 224.51717,
+          "speed": 249.0217,
+          "heading_error": 0.041331436,
+          "steering": -0.37918764,
+          "throttle": 0.049262762,
+          "reward": 0.07163409,
+          "progress_reward": 0.076706894,
+          "time_penalty": -0.0050728037,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.041331436,
+            0.041331436,
+            0.041331436,
+            0.041331436
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.0051194243
+        },
+        {
+          "tick_index": 67,
+          "progress_fraction": 0.030341122,
+          "progress_s": 228.66772,
+          "speed": 250.24634,
+          "heading_error": 0.011473917,
+          "steering": -0.44786274,
+          "throttle": 0.40533593,
+          "reward": 0.072080866,
+          "progress_reward": 0.07710118,
+          "time_penalty": -0.00502031,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.011473917,
+            0.011473917,
+            0.011473917,
+            0.011473917
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.026703354
+        },
+        {
+          "tick_index": 68,
+          "progress_fraction": 0.030887365,
+          "progress_s": 232.78452,
+          "speed": 248.18477,
+          "heading_error": 0.047995083,
+          "steering": 0.5478174,
+          "throttle": 0.13890931,
+          "reward": 0.071389765,
+          "progress_reward": 0.076474026,
+          "time_penalty": -0.0050842576,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.047995083,
+            0.047995083,
+            0.047995083,
+            0.047995083
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.033672683
+        },
+        {
+          "tick_index": 69,
+          "progress_fraction": 0.031440865,
+          "progress_s": 236.956,
+          "speed": 251.41602,
+          "heading_error": 0.0016945265,
+          "steering": -0.6945083,
+          "throttle": 0.56750274,
+          "reward": 0.072486974,
+          "progress_reward": 0.07748999,
+          "time_penalty": -0.0050030136,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.0016945265,
+            0.0016945265,
+            0.0016945265,
+            0.0016945265
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.001022453
+        },
+        {
+          "tick_index": 70,
+          "progress_fraction": 0.032011937,
+          "progress_s": 241.25993,
+          "speed": 259.26395,
+          "heading_error": 0.030518107,
+          "steering": 0.43235368,
+          "throttle": 0.9508009,
+          "reward": 0.07489413,
+          "progress_reward": 0.079950094,
+          "time_penalty": -0.0050559677,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.030518107,
+            0.030518107,
+            0.030518107,
+            0.030518107
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.033015188
+        },
+        {
+          "tick_index": 71,
+          "progress_fraction": 0.03259047,
+          "progress_s": 245.62007,
+          "speed": 262.57944,
+          "heading_error": 0.021114327,
+          "steering": -0.14105669,
+          "throttle": 0.5886034,
+          "reward": 0.075955525,
+          "progress_reward": 0.08099474,
+          "time_penalty": -0.005039217,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.021114327,
+            0.021114327,
+            0.021114327,
+            0.021114327
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.010582084
+        },
+        {
+          "tick_index": 72,
+          "progress_fraction": 0.03316176,
+          "progress_s": 249.92561,
+          "speed": 259.2832,
+          "heading_error": 0.06293456,
+          "steering": 0.62730354,
+          "throttle": 0.052764088,
+          "reward": 0.07486492,
+          "progress_reward": 0.07998034,
+          "time_penalty": -0.005115425,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.06293456,
+            0.06293456,
+            0.06293456,
+            0.06293456
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.02547887
+        },
+        {
+          "tick_index": 73,
+          "progress_fraction": 0.03373484,
+          "progress_s": 254.24469,
+          "speed": 260.01395,
+          "heading_error": 0.1279794,
+          "steering": 0.9756724,
+          "throttle": 0.38379467,
+          "reward": 0.07499582,
+          "progress_reward": 0.080231205,
+          "time_penalty": -0.0052353824,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.1279794,
+            0.1279794,
+            0.1279794,
+            0.1279794
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.0047480743
+        },
+        {
+          "tick_index": 74,
+          "progress_fraction": 0.03430007,
+          "progress_s": 258.50458,
+          "speed": 256.44638,
+          "heading_error": 0.08029216,
+          "steering": -0.7153084,
+          "throttle": 0.027372926,
+          "reward": 0.07398667,
+          "progress_reward": 0.07913232,
+          "time_penalty": -0.005145649,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.08029216,
+            0.08029216,
+            0.08029216,
+            0.08029216
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.016245121
+        },
+        {
+          "tick_index": 75,
+          "progress_fraction": 0.03486699,
+          "progress_s": 262.7772,
+          "speed": 257.12936,
+          "heading_error": 0.14570752,
+          "steering": 0.9812305,
+          "throttle": 0.37742883,
+          "reward": 0.074103564,
+          "progress_reward": 0.07936858,
+          "time_penalty": -0.005265015,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.14570752,
+            0.14570752,
+            0.14570752,
+            0.14570752
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.020527031
+        },
+        {
+          "tick_index": 76,
+          "progress_fraction": 0.035426825,
+          "progress_s": 266.99643,
+          "speed": 253.90407,
+          "heading_error": 0.17389406,
+          "steering": 0.422798,
+          "throttle": 0.05295992,
+          "reward": 0.07306481,
+          "progress_reward": 0.07837713,
+          "time_penalty": -0.0053123143,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.17389406,
+            0.17389406,
+            0.17389406,
+            0.17389406
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.022505747
+        },
+        {
+          "tick_index": 77,
+          "progress_fraction": 0.035985246,
+          "progress_s": 271.20502,
+          "speed": 253.19618,
+          "heading_error": 0.20670824,
+          "steering": 0.49221277,
+          "throttle": 0.26217175,
+          "reward": 0.07280873,
+          "progress_reward": 0.07817894,
+          "time_penalty": -0.0053702137,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.20670824,
+            0.20670824,
+            0.20670824,
+            0.20670824
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.050249398
+        },
+        {
+          "tick_index": 78,
+          "progress_fraction": 0.03655785,
+          "progress_s": 275.52048,
+          "speed": 259.39508,
+          "heading_error": 0.25889334,
+          "steering": 0.78277606,
+          "throttle": 0.8569251,
+          "reward": 0.07468942,
+          "progress_reward": 0.08016445,
+          "time_penalty": -0.005475029,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.25889334,
+            0.25889334,
+            0.25889334,
+            0.25889334
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.0797079
+        },
+        {
+          "tick_index": 79,
+          "progress_fraction": 0.037129037,
+          "progress_s": 279.82526,
+          "speed": 258.6987,
+          "heading_error": 0.22173381,
+          "steering": -0.55739284,
+          "throttle": 0.26996845,
+          "reward": 0.07456051,
+          "progress_reward": 0.07996626,
+          "time_penalty": -0.005405755,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.22173381,
+            0.22173381,
+            0.22173381,
+            0.22173381
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.10277163
+        },
+        {
+          "tick_index": 80,
+          "progress_fraction": 0.037699345,
+          "progress_s": 284.1234,
+          "speed": 258.2612,
+          "heading_error": 0.15720159,
+          "steering": -0.9679835,
+          "throttle": 0.28605485,
+          "reward": 0.074556,
+          "progress_reward": 0.07984318,
+          "time_penalty": -0.0052871797,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.15720159,
+            0.15720159,
+            0.15720159,
+            0.15720159
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.046524752
+        },
+        {
+          "tick_index": 81,
+          "progress_fraction": 0.03826395,
+          "progress_s": 288.3786,
+          "speed": 255.66566,
+          "heading_error": 0.12894748,
+          "steering": -0.42381167,
+          "throttle": 0.10557136,
+          "reward": 0.0738115,
+          "progress_reward": 0.0790447,
+          "time_penalty": -0.005233197,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.12894748,
+            0.12894748,
+            0.12894748,
+            0.12894748
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.004138466
+        },
+        {
+          "tick_index": 82,
+          "progress_fraction": 0.038828757,
+          "progress_s": 292.63528,
+          "speed": 255.71577,
+          "heading_error": 0.14099492,
+          "steering": 0.18071163,
+          "throttle": 0.32145703,
+          "reward": 0.07381783,
+          "progress_reward": 0.07907286,
+          "time_penalty": -0.005255034,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.14099492,
+            0.14099492,
+            0.14099492,
+            0.14099492
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": -0.0029560868
+        },
+        {
+          "tick_index": 83,
+          "progress_fraction": 0.03940963,
+          "progress_s": 297.0131,
+          "speed": 262.88074,
+          "heading_error": 0.17431507,
+          "steering": 0.49980208,
+          "throttle": 0.9153575,
+          "reward": 0.07599813,
+          "progress_reward": 0.08132227,
+          "time_penalty": -0.005324139,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.17431507,
+            0.17431507,
+            0.17431507,
+            0.17431507
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.01965074
+        },
+        {
+          "tick_index": 84,
+          "progress_fraction": 0.03999229,
+          "progress_s": 301.40436,
+          "speed": 263.638,
+          "heading_error": 0.23538518,
+          "steering": 0.9160516,
+          "throttle": 0.39644775,
+          "reward": 0.076133646,
+          "progress_reward": 0.08157261,
+          "time_penalty": -0.0054389597,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.23538518,
+            0.23538518,
+            0.23538518,
+            0.23538518
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.050297044
+        },
+        {
+          "tick_index": 85,
+          "progress_fraction": 0.040569317,
+          "progress_s": 305.75314,
+          "speed": 261.07776,
+          "heading_error": 0.20401949,
+          "steering": -0.47048542,
+          "throttle": 0.11654353,
+          "reward": 0.075406745,
+          "progress_reward": 0.080783516,
+          "time_penalty": -0.0053767725,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.20401949,
+            0.20401949,
+            0.20401949,
+            0.20401949
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.096528195
+        },
+        {
+          "tick_index": 86,
+          "progress_fraction": 0.041151594,
+          "progress_s": 310.1415,
+          "speed": 263.39767,
+          "heading_error": 0.24690107,
+          "steering": 0.6432238,
+          "throttle": 0.52660006,
+          "reward": 0.07605887,
+          "progress_reward": 0.08151889,
+          "time_penalty": -0.0054600155,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.24690107,
+            0.24690107,
+            0.24690107,
+            0.24690107
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.044191644
+        },
+        {
+          "tick_index": 87,
+          "progress_fraction": 0.041742835,
+          "progress_s": 314.5974,
+          "speed": 267.40347,
+          "heading_error": 0.22129524,
+          "steering": -0.38408756,
+          "throttle": 0.6660453,
+          "reward": 0.07735514,
+          "progress_reward": 0.082773715,
+          "time_penalty": -0.005418578,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.22129524,
+            0.22129524,
+            0.22129524,
+            0.22129524
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.09643321
+        },
+        {
+          "tick_index": 88,
+          "progress_fraction": 0.042326238,
+          "progress_s": 318.99426,
+          "speed": 263.85968,
+          "heading_error": 0.20800182,
+          "steering": -0.19940123,
+          "throttle": 0.03895104,
+          "reward": 0.07628817,
+          "progress_reward": 0.081676394,
+          "time_penalty": -0.00538822,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.20800182,
+            0.20800182,
+            0.20800182,
+            0.20800182
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.058249623
+        },
+        {
+          "tick_index": 89,
+          "progress_fraction": 0.042926524,
+          "progress_s": 323.51837,
+          "speed": 271.46033,
+          "heading_error": 0.19395511,
+          "steering": -0.21070088,
+          "throttle": 0.9595163,
+          "reward": 0.07866759,
+          "progress_reward": 0.084040016,
+          "time_penalty": -0.00537243,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.19395511,
+            0.19395511,
+            0.19395511,
+            0.19395511
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.06586564
+        },
+        {
+          "tick_index": 90,
+          "progress_fraction": 0.04354218,
+          "progress_s": 328.1583,
+          "speed": 278.39496,
+          "heading_error": 0.17078085,
+          "steering": -0.34761378,
+          "throttle": 0.90811765,
+          "reward": 0.080855586,
+          "progress_reward": 0.08619189,
+          "time_penalty": -0.0053363084,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.17078085,
+            0.17078085,
+            0.17078085,
+            0.17078085
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.05652652
+        },
+        {
+          "tick_index": 91,
+          "progress_fraction": 0.044152983,
+          "progress_s": 332.76166,
+          "speed": 276.20184,
+          "heading_error": 0.22176525,
+          "steering": 0.7647658,
+          "throttle": 0.16515079,
+          "reward": 0.08007906,
+          "progress_reward": 0.085512325,
+          "time_penalty": -0.005433269,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.22176525,
+            0.22176525,
+            0.22176525,
+            0.22176525
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.01662346
+        },
+        {
+          "tick_index": 92,
+          "progress_fraction": 0.04477729,
+          "progress_s": 337.46677,
+          "speed": 282.3185,
+          "heading_error": 0.26448295,
+          "steering": 0.6407657,
+          "throttle": 0.86237085,
+          "reward": 0.081874736,
+          "progress_reward": 0.08740291,
+          "time_penalty": -0.005528171,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.26448295,
+            0.26448295,
+            0.26448295,
+            0.26448295
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.08590053
+        },
+        {
+          "tick_index": 93,
+          "progress_fraction": 0.045412567,
+          "progress_s": 342.25458,
+          "speed": 287.30457,
+          "heading_error": 0.22766061,
+          "steering": -0.55233526,
+          "throttle": 0.7665853,
+          "reward": 0.08347618,
+          "progress_reward": 0.08893885,
+          "time_penalty": -0.0054626665,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.22766061,
+            0.22766061,
+            0.22766061,
+            0.22766061
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.10324582
+        },
+        {
+          "tick_index": 94,
+          "progress_fraction": 0.046048395,
+          "progress_s": 347.04654,
+          "speed": 287.57797,
+          "heading_error": 0.2848491,
+          "steering": 0.8578277,
+          "throttle": 0.3858564,
+          "reward": 0.08343659,
+          "progress_reward": 0.089016035,
+          "time_penalty": -0.0055794395,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.2848491,
+            0.2848491,
+            0.2848491,
+            0.2848491
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.048443757
+        },
+        {
+          "tick_index": 95,
+          "progress_fraction": 0.046681408,
+          "progress_s": 351.8173,
+          "speed": 286.32556,
+          "heading_error": 0.30949727,
+          "steering": 0.36972222,
+          "throttle": 0.25927183,
+          "reward": 0.082994916,
+          "progress_reward": 0.08862175,
+          "time_penalty": -0.005626837,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.30949727,
+            0.30949727,
+            0.30949727,
+            0.30949727
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.12000917
+        },
+        {
+          "tick_index": 96,
+          "progress_fraction": 0.047306873,
+          "progress_s": 356.53113,
+          "speed": 282.915,
+          "heading_error": 0.34374818,
+          "steering": 0.513764,
+          "throttle": 0.075656295,
+          "reward": 0.081877194,
+          "progress_reward": 0.08756511,
+          "time_penalty": -0.005687914,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.34374818,
+            0.34374818,
+            0.34374818,
+            0.34374818
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.10664902
+        },
+        {
+          "tick_index": 97,
+          "progress_fraction": 0.047932487,
+          "progress_s": 361.24612,
+          "speed": 283.02975,
+          "heading_error": 0.37914127,
+          "steering": 0.53089577,
+          "throttle": 0.37706578,
+          "reward": 0.08182692,
+          "progress_reward": 0.08758597,
+          "time_penalty": -0.0057590506,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.37914127,
+            0.37914127,
+            0.37914127,
+            0.37914127
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.12403501
+        },
+        {
+          "tick_index": 98,
+          "progress_fraction": 0.048568495,
+          "progress_s": 366.03943,
+          "speed": 287.8338,
+          "heading_error": 0.34335482,
+          "steering": -0.5367968,
+          "throttle": 0.7712671,
+          "reward": 0.08334199,
+          "progress_reward": 0.08904107,
+          "time_penalty": -0.005699073,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.34335482,
+            0.34335482,
+            0.34335482,
+            0.34335482
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.12468188
+        },
+        {
+          "tick_index": 99,
+          "progress_fraction": 0.04921613,
+          "progress_s": 370.92035,
+          "speed": 293.2617,
+          "heading_error": 0.39370164,
+          "steering": 0.75520295,
+          "throttle": 0.84169424,
+          "reward": 0.0848521,
+          "progress_reward": 0.0906688,
+          "time_penalty": -0.0058166953,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.39370164,
+            0.39370164,
+            0.39370164,
+            0.39370164
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.08916959
+        },
+        {
+          "tick_index": 100,
+          "progress_fraction": 0.049871605,
+          "progress_s": 375.86038,
+          "speed": 296.97018,
+          "heading_error": 0.37759995,
+          "steering": -0.24152471,
+          "throttle": 0.6937537,
+          "reward": 0.08597344,
+          "progress_reward": 0.09176664,
+          "time_penalty": -0.0057931994,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 0,
+          "lookahead_heading_deltas": [
+            0.37759995,
+            0.37759995,
+            0.37759995,
+            0.37759995
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.13868837
+        },
+        {
+          "tick_index": 101,
+          "progress_fraction": 0.050540194,
+          "progress_s": 380.89926,
+          "speed": 303.15915,
+          "heading_error": 0.39128494,
+          "steering": 0.20527497,
+          "throttle": 0.911705,
+          "reward": 0.087763384,
+          "progress_reward": 0.09360246,
+          "time_penalty": -0.005839076,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.39128494,
+            0.39128494,
+            0.39128494,
+            0.39128494
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.10066313
+        },
+        {
+          "tick_index": 102,
+          "progress_fraction": 0.051200055,
+          "progress_s": 385.87234,
+          "speed": 299.21793,
+          "heading_error": 0.45164627,
+          "steering": 0.9054195,
+          "throttle": 0.05295512,
+          "reward": 0.08642457,
+          "progress_reward": 0.092380494,
+          "time_penalty": -0.0059559243,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.45164627,
+            0.45164627,
+            0.45164627,
+            0.45164627
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.11202535
+        },
+        {
+          "tick_index": 103,
+          "progress_fraction": 0.051871642,
+          "progress_s": 390.9338,
+          "speed": 304.8711,
+          "heading_error": 0.46130314,
+          "steering": 0.14485334,
+          "throttle": 0.8868849,
+          "reward": 0.08802749,
+          "progress_reward": 0.094022304,
+          "time_penalty": -0.0059948103,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.46130314,
+            0.46130314,
+            0.46130314,
+            0.46130314
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.15154131
+        },
+        {
+          "tick_index": 104,
+          "progress_fraction": 0.052541066,
+          "progress_s": 395.97894,
+          "speed": 304.01306,
+          "heading_error": 0.4409042,
+          "steering": -0.3059852,
+          "throttle": 0.32126004,
+          "reward": 0.08777115,
+          "progress_reward": 0.09371929,
+          "time_penalty": -0.005948143,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.4409042,
+            0.4409042,
+            0.4409042,
+            0.4409042
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.119775
+        },
+        {
+          "tick_index": 105,
+          "progress_fraction": 0.05322245,
+          "progress_s": 401.11426,
+          "speed": 309.8433,
+          "heading_error": 0.46090627,
+          "steering": 0.300031,
+          "throttle": 0.90229225,
+          "reward": 0.08938379,
+          "progress_reward": 0.095393956,
+          "time_penalty": -0.006010165,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.46090627,
+            0.46090627,
+            0.46090627,
+            0.46090627
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.10282955
+        },
+        {
+          "tick_index": 106,
+          "progress_fraction": 0.05390363,
+          "progress_s": 406.248,
+          "speed": 309.91806,
+          "heading_error": 0.42875573,
+          "steering": -0.4822574,
+          "throttle": 0.40414372,
+          "reward": 0.08942482,
+          "progress_reward": 0.09536475,
+          "time_penalty": -0.0059399274,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.42875573,
+            0.42875573,
+            0.42875573,
+            0.42875573
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.12658691
+        },
+        {
+          "tick_index": 107,
+          "progress_fraction": 0.05459594,
+          "progress_s": 411.46564,
+          "speed": 315.29318,
+          "heading_error": 0.3717002,
+          "steering": -0.85583305,
+          "throttle": 0.8417189,
+          "reward": 0.09109465,
+          "progress_reward": 0.096923634,
+          "time_penalty": -0.0058289818,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.3717002,
+            0.3717002,
+            0.3717002,
+            0.3717002
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.09722101
+        },
+        {
+          "tick_index": 108,
+          "progress_fraction": 0.05528856,
+          "progress_s": 416.6856,
+          "speed": 315.6381,
+          "heading_error": 0.43422922,
+          "steering": 0.9379353,
+          "throttle": 0.4330954,
+          "reward": 0.09099743,
+          "progress_reward": 0.09696692,
+          "time_penalty": -0.005969496,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.43422922,
+            0.43422922,
+            0.43422922,
+            0.43422922
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.07589562
+        },
+        {
+          "tick_index": 109,
+          "progress_fraction": 0.05597124,
+          "progress_s": 421.83066,
+          "speed": 311.11307,
+          "heading_error": 0.40035135,
+          "steering": -0.508168,
+          "throttle": 0.0176875,
+          "reward": 0.08969389,
+          "progress_reward": 0.09557493,
+          "time_penalty": -0.005881043,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.40035135,
+            0.40035135,
+            0.40035135,
+            0.40035135
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.15164292
+        },
+        {
+          "tick_index": 110,
+          "progress_fraction": 0.056648843,
+          "progress_s": 426.93747,
+          "speed": 308.8726,
+          "heading_error": 0.35672417,
+          "steering": -0.65440744,
+          "throttle": 0.202443,
+          "reward": 0.089085214,
+          "progress_reward": 0.09486459,
+          "time_penalty": -0.0057793804,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.35672417,
+            0.35672417,
+            0.35672417,
+            0.35672417
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.092841774
+        },
+        {
+          "tick_index": 111,
+          "progress_fraction": 0.057332173,
+          "progress_s": 432.08743,
+          "speed": 311.76083,
+          "heading_error": 0.4017734,
+          "steering": 0.6757383,
+          "throttle": 0.6341678,
+          "reward": 0.08978019,
+          "progress_reward": 0.0956662,
+          "time_penalty": -0.005886013,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.4017734,
+            0.4017734,
+            0.4017734,
+            0.4017734
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.08192712
+        },
+        {
+          "tick_index": 112,
+          "progress_fraction": 0.058028918,
+          "progress_s": 437.33847,
+          "speed": 318.4236,
+          "heading_error": 0.4639852,
+          "steering": 0.9331771,
+          "throttle": 0.9716921,
+          "reward": 0.091499195,
+          "progress_reward": 0.09754427,
+          "time_penalty": -0.0060450737,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.4639852,
+            0.4639852,
+            0.4639852,
+            0.4639852
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.13590842
+        },
+        {
+          "tick_index": 113,
+          "progress_fraction": 0.058719248,
+          "progress_s": 442.5412,
+          "speed": 315.5866,
+          "heading_error": 0.4544054,
+          "steering": -0.1436975,
+          "throttle": 0.16528773,
+          "reward": 0.0906318,
+          "progress_reward": 0.096646175,
+          "time_penalty": -0.0060143773,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.4544054,
+            0.4544054,
+            0.4544054,
+            0.4544054
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.1595996
+        },
+        {
+          "tick_index": 114,
+          "progress_fraction": 0.05940085,
+          "progress_s": 447.67813,
+          "speed": 311.62515,
+          "heading_error": 0.4182528,
+          "steering": -0.5422888,
+          "throttle": 0.06509504,
+          "reward": 0.08950225,
+          "progress_reward": 0.095424205,
+          "time_penalty": -0.0059219534,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.4182528,
+            0.4182528,
+            0.4182528,
+            0.4182528
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.10971011
+        },
+        {
+          "tick_index": 115,
+          "progress_fraction": 0.06009558,
+          "progress_s": 452.914,
+          "speed": 318.15997,
+          "heading_error": 0.4457191,
+          "steering": 0.4119946,
+          "throttle": 0.9506886,
+          "reward": 0.09125902,
+          "progress_reward": 0.097262114,
+          "time_penalty": -0.0060031004,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.4457191,
+            0.4457191,
+            0.4457191,
+            0.4457191
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.09461765
+        },
+        {
+          "tick_index": 116,
+          "progress_fraction": 0.06080058,
+          "progress_s": 458.22726,
+          "speed": 323.3167,
+          "heading_error": 0.43134692,
+          "steering": -0.2155829,
+          "throttle": 0.8363149,
+          "reward": 0.09271351,
+          "progress_reward": 0.0987,
+          "time_penalty": -0.0059864894,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.43134692,
+            0.43134692,
+            0.43134692,
+            0.43134692
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.13324967
+        },
+        {
+          "tick_index": 117,
+          "progress_fraction": 0.06149759,
+          "progress_s": 463.48035,
+          "speed": 319.7229,
+          "heading_error": 0.47707078,
+          "steering": 0.68585783,
+          "throttle": 0.10707429,
+          "reward": 0.09150289,
+          "progress_reward": 0.09758182,
+          "time_penalty": -0.0060789324,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.47707078,
+            0.47707078,
+            0.47707078,
+            0.47707078
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.10191252
+        },
+        {
+          "tick_index": 118,
+          "progress_fraction": 0.062200483,
+          "progress_s": 468.77774,
+          "speed": 322.79965,
+          "heading_error": 0.4389759,
+          "steering": -0.57142377,
+          "throttle": 0.66286707,
+          "reward": 0.09240248,
+          "progress_reward": 0.09840481,
+          "time_penalty": -0.006002331,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.4389759,
+            0.4389759,
+            0.4389759,
+            0.4389759
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.1532068
+        },
+        {
+          "tick_index": 119,
+          "progress_fraction": 0.06291331,
+          "progress_s": 474.15002,
+          "speed": 327.95886,
+          "heading_error": 0.49153262,
+          "steering": 0.78835124,
+          "throttle": 0.8532276,
+          "reward": 0.093656,
+          "progress_reward": 0.09979628,
+          "time_penalty": -0.006140274,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.49153262,
+            0.49153262,
+            0.49153262,
+            0.49153262
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.10027276
+        },
+        {
+          "tick_index": 120,
+          "progress_fraction": 0.06363274,
+          "progress_s": 479.57202,
+          "speed": 331.60104,
+          "heading_error": 0.540571,
+          "steering": 0.7355751,
+          "throttle": 0.7403276,
+          "reward": 0.094451964,
+          "progress_reward": 0.10071993,
+          "time_penalty": -0.006267962,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.540571,
+            0.540571,
+            0.540571,
+            0.540571
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.16755559
+        },
+        {
+          "tick_index": 121,
+          "progress_fraction": 0.06436283,
+          "progress_s": 485.0744,
+          "speed": 337.48184,
+          "heading_error": 0.6058121,
+          "steering": 0.9786164,
+          "throttle": 0.95871603,
+          "reward": 0.09576639,
+          "progress_reward": 0.10221258,
+          "time_penalty": -0.006446192,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.6058121,
+            0.6058121,
+            0.6058121,
+            0.6058121
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.16144438
+        },
+        {
+          "tick_index": 122,
+          "progress_fraction": 0.0650974,
+          "progress_s": 490.61053,
+          "speed": 340.3452,
+          "heading_error": 0.6412854,
+          "steering": 0.5321005,
+          "throttle": 0.7071897,
+          "reward": 0.09629561,
+          "progress_reward": 0.10283947,
+          "time_penalty": -0.0065438626,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.6412854,
+            0.6412854,
+            0.6412854,
+            0.6412854
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.16670667
+        },
+        {
+          "tick_index": 123,
+          "progress_fraction": 0.06582728,
+          "progress_s": 496.11133,
+          "speed": 338.56284,
+          "heading_error": 0.6986975,
+          "steering": 0.86118215,
+          "throttle": 0.3036988,
+          "reward": 0.0955101,
+          "progress_reward": 0.10218337,
+          "time_penalty": -0.00667327,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.6986975,
+            0.6986975,
+            0.6986975,
+            0.6986975
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.16447076
+        },
+        {
+          "tick_index": 124,
+          "progress_fraction": 0.06655073,
+          "progress_s": 501.56363,
+          "speed": 335.88348,
+          "heading_error": 0.7314749,
+          "steering": 0.4916599,
+          "throttle": 0.22260877,
+          "reward": 0.09454529,
+          "progress_reward": 0.10128319,
+          "time_penalty": -0.006737903,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.7314749,
+            0.7314749,
+            0.7314749,
+            0.7314749
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.14329566
+        },
+        {
+          "tick_index": 125,
+          "progress_fraction": 0.06727124,
+          "progress_s": 506.9938,
+          "speed": 335.14816,
+          "heading_error": 0.7813554,
+          "steering": 0.7482083,
+          "throttle": 0.4096012,
+          "reward": 0.094018824,
+          "progress_reward": 0.100871176,
+          "time_penalty": -0.0068523497,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.7813554,
+            0.7813554,
+            0.7813554,
+            0.7813554
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.14123687
+        },
+        {
+          "tick_index": 126,
+          "progress_fraction": 0.06798515,
+          "progress_s": 512.3742,
+          "speed": 332.4386,
+          "heading_error": 0.8077135,
+          "steering": 0.39537087,
+          "throttle": 0.22342098,
+          "reward": 0.09304765,
+          "progress_reward": 0.099947006,
+          "time_penalty": -0.006899356,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.8077135,
+            0.8077135,
+            0.8077135,
+            0.8077135
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.14077312
+        },
+        {
+          "tick_index": 127,
+          "progress_fraction": 0.06870636,
+          "progress_s": 517.8097,
+          "speed": 337.40103,
+          "heading_error": 0.7954691,
+          "steering": -0.1836673,
+          "throttle": 0.94507647,
+          "reward": 0.09407178,
+          "progress_reward": 0.10097027,
+          "time_penalty": -0.0068984856,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.7954691,
+            0.7954691,
+            0.7954691,
+            0.7954691
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.14186372
+        },
+        {
+          "tick_index": 128,
+          "progress_fraction": 0.069426745,
+          "progress_s": 523.2389,
+          "speed": 337.8504,
+          "heading_error": 0.772419,
+          "steering": -0.34575227,
+          "throttle": 0.5123934,
+          "reward": 0.094007514,
+          "progress_reward": 0.10085344,
+          "time_penalty": -0.0068459287,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.772419,
+            0.772419,
+            0.772419,
+            0.772419
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.10359442
+        },
+        {
+          "tick_index": 129,
+          "progress_fraction": 0.07015403,
+          "progress_s": 528.72015,
+          "speed": 342.6248,
+          "heading_error": 0.774937,
+          "steering": 0.03777122,
+          "throttle": 0.91014254,
+          "reward": 0.094942264,
+          "progress_reward": 0.10182038,
+          "time_penalty": -0.0068781176,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.774937,
+            0.774937,
+            0.774937,
+            0.774937
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.0996141
+        },
+        {
+          "tick_index": 130,
+          "progress_fraction": 0.07087249,
+          "progress_s": 534.1349,
+          "speed": 338.68112,
+          "heading_error": 0.83242893,
+          "steering": 0.86237836,
+          "throttle": 0.11370841,
+          "reward": 0.093590096,
+          "progress_reward": 0.10058433,
+          "time_penalty": -0.0069942325,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.83242893,
+            0.83242893,
+            0.83242893,
+            0.83242893
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.13041852
+        },
+        {
+          "tick_index": 131,
+          "progress_fraction": 0.07159173,
+          "progress_s": 539.5554,
+          "speed": 340.31763,
+          "heading_error": 0.8497467,
+          "steering": 0.259767,
+          "throttle": 0.6426956,
+          "reward": 0.09364725,
+          "progress_reward": 0.10069281,
+          "time_penalty": -0.007045557,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.8497467,
+            0.8497467,
+            0.8497467,
+            0.8497467
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "value_prediction": 0.19893031
+        },
+        {
+          "tick_index": 132,
+          "progress_fraction": 0.07231865,
+          "progress_s": 545.03394,
+          "speed": 345.72928,
+          "heading_error": 0.79112405,
+          "steering": -0.8793394,
+          "throttle": 0.9650084,
+          "reward": 0.09483455,
+          "progress_reward": 0.10176927,
+          "time_penalty": -0.006934721,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.79112405,
+            0.79112405,
+            0.79112405,
+            0.6929505
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            -0.00037759054
+          ],
+          "value_prediction": 0.16739994
+        },
+        {
+          "tick_index": 133,
+          "progress_fraction": 0.07304591,
+          "progress_s": 550.51495,
+          "speed": 347.02948,
+          "heading_error": 0.80338603,
+          "steering": 0.18392995,
+          "throttle": 0.5949413,
+          "reward": 0.09484411,
+          "progress_reward": 0.10181621,
+          "time_penalty": -0.006972097,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.80338603,
+            0.80338603,
+            0.80338603,
+            0.5088594
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            -0.0011327949
+          ],
+          "value_prediction": 0.08903067
+        },
+        {
+          "tick_index": 134,
+          "progress_fraction": 0.07376335,
+          "progress_s": 555.922,
+          "speed": 342.45706,
+          "heading_error": 0.828487,
+          "steering": 0.37651354,
+          "throttle": 0.058680147,
+          "reward": 0.09343451,
+          "progress_reward": 0.100441426,
+          "time_penalty": -0.007006917,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.828487,
+            0.828487,
+            0.828487,
+            0.53396034
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            -0.0011327949
+          ],
+          "value_prediction": 0.15929201
+        },
+        {
+          "tick_index": 135,
+          "progress_fraction": 0.0744865,
+          "progress_s": 561.3721,
+          "speed": 347.40976,
+          "heading_error": 0.8943205,
+          "steering": 0.9875034,
+          "throttle": 0.96659875,
+          "reward": 0.09404375,
+          "progress_reward": 0.10124147,
+          "time_penalty": -0.007197722,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.8943205,
+            0.8943205,
+            0.8943205,
+            0.40344816
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            -0.0018879705
+          ],
+          "value_prediction": 0.18219836
+        },
+        {
+          "tick_index": 136,
+          "progress_fraction": 0.0752108,
+          "progress_s": 566.8308,
+          "speed": 349.60123,
+          "heading_error": 0.8912268,
+          "steering": -0.046406202,
+          "throttle": 0.70110476,
+          "reward": 0.09419817,
+          "progress_reward": 0.101402104,
+          "time_penalty": -0.0072039347,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.8912268,
+            0.8912268,
+            0.8912268,
+            0.4003545
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            -0.0018879705
+          ],
+          "value_prediction": 0.2131935
+        },
+        {
+          "tick_index": 137,
+          "progress_fraction": 0.07593258,
+          "progress_s": 572.2705,
+          "speed": 349.74304,
+          "heading_error": 0.94735426,
+          "steering": 0.8419119,
+          "throttle": 0.524644,
+          "reward": 0.09370481,
+          "progress_reward": 0.1010485,
+          "time_penalty": -0.007343684,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.94735426,
+            0.94735426,
+            0.94735426,
+            0.260132
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            -0.0026431624
+          ],
+          "value_prediction": 0.17225213
+        },
+        {
+          "tick_index": 138,
+          "progress_fraction": 0.07664439,
+          "progress_s": 577.63513,
+          "speed": 345.0735,
+          "heading_error": 0.98451936,
+          "steering": 0.55747545,
+          "throttle": 0.05738637,
+          "reward": 0.092250794,
+          "progress_reward": 0.0996539,
+          "time_penalty": -0.0074031088,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.98451936,
+            0.98451936,
+            0.98451936,
+            0.29729712
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            -0.0026431624
+          ],
+          "value_prediction": 0.21336827
+        },
+        {
+          "tick_index": 139,
+          "progress_fraction": 0.07735347,
+          "progress_s": 582.9791,
+          "speed": 345.19144,
+          "heading_error": 0.9787459,
+          "steering": -0.08660266,
+          "throttle": 0.5226325,
+          "reward": 0.09188125,
+          "progress_reward": 0.09927109,
+          "time_penalty": -0.007389833,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.9787459,
+            0.9787459,
+            0.9787459,
+            0.09517175
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            -0.003398362
+          ],
+          "value_prediction": 0.21151955
+        },
+        {
+          "tick_index": 140,
+          "progress_fraction": 0.078056276,
+          "progress_s": 588.2759,
+          "speed": 342.99847,
+          "heading_error": 1.0010502,
+          "steering": 0.3345646,
+          "throttle": 0.29755485,
+          "reward": 0.09096405,
+          "progress_reward": 0.098392814,
+          "time_penalty": -0.0074287653,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            1.0010502,
+            1.0010502,
+            1.0010502,
+            0.117476106
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            -0.003398362
+          ],
+          "value_prediction": 0.17104517
+        },
+        {
+          "tick_index": 141,
+          "progress_fraction": 0.0787624,
+          "progress_s": 593.5976,
+          "speed": 347.1801,
+          "heading_error": 0.97434556,
+          "steering": -0.40057003,
+          "throttle": 0.90542316,
+          "reward": 0.09146419,
+          "progress_reward": 0.098856986,
+          "time_penalty": -0.007392795,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.97434556,
+            0.97434556,
+            0.97434556,
+            -0.10557699
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            -0.0041535483
+          ],
+          "value_prediction": 0.20369427
+        },
+        {
+          "tick_index": 142,
+          "progress_fraction": 0.07946983,
+          "progress_s": 598.9292,
+          "speed": 350.49106,
+          "heading_error": 1.0289468,
+          "steering": 0.81901836,
+          "throttle": 0.8480928,
+          "reward": 0.09148958,
+          "progress_reward": 0.09904057,
+          "time_penalty": -0.0075509823,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            1.0289468,
+            1.0289468,
+            1.0289468,
+            -0.24732685
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            -0.0049087447
+          ],
+          "value_prediction": 0.14913866
+        },
+        {
+          "tick_index": 143,
+          "progress_fraction": 0.080179535,
+          "progress_s": 604.27795,
+          "speed": 354.263,
+          "heading_error": 0.9952077,
+          "steering": -0.50608575,
+          "throttle": 0.868854,
+          "reward": 0.09186482,
+          "progress_reward": 0.09935871,
+          "time_penalty": -0.007493889,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            0.9952077,
+            0.9952077,
+            0.9952077,
+            -0.28106588
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            -0.0049087447
+          ],
+          "value_prediction": 0.22436021
+        },
+        {
+          "tick_index": 144,
+          "progress_fraction": 0.08088861,
+          "progress_s": 609.62195,
+          "speed": 356.4346,
+          "heading_error": 1.0490035,
+          "steering": 0.8069368,
+          "throttle": 0.73881054,
+          "reward": 0.091625236,
+          "progress_reward": 0.099270046,
+          "time_penalty": -0.007644809,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            1.0490035,
+            1.0490035,
+            1.0490035,
+            -0.42361617
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            -0.0056639216
+          ],
+          "value_prediction": 0.1387553
+        },
+        {
+          "tick_index": 145,
+          "progress_fraction": 0.08159605,
+          "progress_s": 614.9536,
+          "speed": 357.53387,
+          "heading_error": 1.0005865,
+          "steering": -0.7262538,
+          "throttle": 0.61149836,
+          "reward": 0.09151109,
+          "progress_reward": 0.09904161,
+          "time_penalty": -0.007530518,
+          "terminal_reward": 0.0,
+          "done": false,
+          "done_reason": null,
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            1.0005865,
+            1.0005865,
+            1.0005865,
+            -0.47203314
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            -0.0056639216
+          ],
+          "value_prediction": 0.23516448
+        },
+        {
+          "tick_index": 146,
+          "progress_fraction": 0.0823039,
+          "progress_s": 620.2883,
+          "speed": 360.4354,
+          "heading_error": 1.0370346,
+          "steering": 0.546722,
+          "throttle": 0.7955729,
+          "reward": -4.908545,
+          "progress_reward": 0.09909898,
+          "time_penalty": -0.0076439804,
+          "terminal_reward": -5.0,
+          "done": true,
+          "done_reason": "Crash",
+          "sector_index": 1,
+          "lookahead_heading_deltas": [
+            1.0370346,
+            1.0370346,
+            1.0370346,
+            -0.63193834
+          ],
+          "lookahead_curvatures": [
+            0.0,
+            0.0,
+            0.0,
+            -0.006419127
+          ],
+          "value_prediction": 0.11777441
+        }
+      ],
+      "metrics": {
+        "turn_in_latency_fraction": null,
+        "throttle_release_latency_fraction": null,
+        "steering_adequacy": 0.0,
+        "high_curvature_throttle_mean": 0.0
+      }
+    }
+  ]
+}

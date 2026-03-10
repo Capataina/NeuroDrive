@@ -14,7 +14,8 @@ pub const NUM_LOOKAHEAD_SAMPLES: usize = 4;
 /// Number of scalar lookahead features per sample.
 pub const LOOKAHEAD_FEATURES_PER_SAMPLE: usize = 2;
 /// Total observation dimension consumed by controllers.
-pub const OBSERVATION_DIM: usize = NUM_RAYS + 3 + NUM_LOOKAHEAD_SAMPLES * LOOKAHEAD_FEATURES_PER_SAMPLE;
+pub const OBSERVATION_DIM: usize =
+    NUM_RAYS + 4 + NUM_LOOKAHEAD_SAMPLES * LOOKAHEAD_FEATURES_PER_SAMPLE;
 
 /// Raycast sensor readings and derived kinematics for one car.
 #[derive(Component, Clone, Debug)]
@@ -27,6 +28,11 @@ pub struct SensorReadings {
     pub ray_directions: [Vec2; NUM_RAYS],
     /// Current scalar speed in world units / second.
     pub speed: f32,
+    /// Signed lateral offset from the centreline in world units.
+    ///
+    /// Positive means the car is left of the centreline relative to the
+    /// centreline tangent direction. Negative means right of the centreline.
+    pub signed_lateral_offset: f32,
     /// Signed heading error to centerline tangent in radians.
     pub heading_error: f32,
     /// Estimated yaw rate in radians / second.
@@ -46,6 +52,7 @@ impl Default for SensorReadings {
             ray_hits: [Vec2::ZERO; NUM_RAYS],
             ray_directions: [Vec2::X; NUM_RAYS],
             speed: 0.0,
+            signed_lateral_offset: 0.0,
             heading_error: 0.0,
             angular_velocity: 0.0,
             previous_heading: 0.0,
@@ -59,7 +66,8 @@ impl Default for SensorReadings {
 #[derive(Component, Clone, Debug)]
 pub struct ObservationVector {
     /// Feature vector in stable order:
-    /// [ray distances..., speed, heading_error, angular_velocity,
+    /// [ray distances..., speed, signed_lateral_offset, heading_error,
+    ///  angular_velocity,
     ///  lookahead_heading_delta_i, lookahead_curvature_i...]
     pub values: [f32; OBSERVATION_DIM],
 }
@@ -81,6 +89,8 @@ pub struct ObservationConfig {
     pub ray_step: f32,
     /// Speed normalisation scale in world units / second.
     pub speed_norm_max: f32,
+    /// Lateral-offset normalisation scale in world units.
+    pub lateral_offset_norm_max: f32,
     /// Angular-velocity normalisation scale in radians / second.
     pub angular_velocity_norm_max: f32,
     /// Relative ray angles around the car forward vector, in radians.
@@ -97,6 +107,7 @@ impl Default for ObservationConfig {
             ray_max_range: 375.0,
             ray_step: 3.0,
             speed_norm_max: 900.0,
+            lateral_offset_norm_max: 75.0,
             angular_velocity_norm_max: 8.0,
             ray_angles: [
                 -150f32.to_radians(),
@@ -131,10 +142,14 @@ pub fn update_sensor_readings_system(
 
     for (transform, car, progress, mut sensors) in &mut car_query {
         let position = transform.translation.truncate();
-        let forward = (transform.rotation * Vec3::X).truncate().normalize_or_zero();
+        let forward = (transform.rotation * Vec3::X)
+            .truncate()
+            .normalize_or_zero();
         let heading = forward.y.atan2(forward.x);
 
         sensors.speed = car.velocity.length();
+        sensors.signed_lateral_offset =
+            signed_lateral_offset(position, progress.closest_point, progress.tangent);
         sensors.heading_error = signed_angle_between(forward, progress.tangent);
         sensors.angular_velocity = wrap_angle(heading - sensors.previous_heading) / dt;
         sensors.previous_heading = heading;
@@ -180,11 +195,13 @@ pub fn build_observation_vector_system(
         }
 
         values[NUM_RAYS] = (sensors.speed / config.speed_norm_max).clamp(0.0, 1.0);
-        values[NUM_RAYS + 1] = (sensors.heading_error / PI).clamp(-1.0, 1.0);
-        values[NUM_RAYS + 2] =
+        values[NUM_RAYS + 1] =
+            (sensors.signed_lateral_offset / config.lateral_offset_norm_max).clamp(-1.0, 1.0);
+        values[NUM_RAYS + 2] = (sensors.heading_error / PI).clamp(-1.0, 1.0);
+        values[NUM_RAYS + 3] =
             (sensors.angular_velocity / config.angular_velocity_norm_max).clamp(-1.0, 1.0);
 
-        let mut cursor = NUM_RAYS + 3;
+        let mut cursor = NUM_RAYS + 4;
         for i in 0..NUM_LOOKAHEAD_SAMPLES {
             values[cursor] = (sensors.lookahead_heading_deltas[i] / PI).clamp(-1.0, 1.0);
             cursor += 1;
@@ -255,6 +272,16 @@ fn wrap_angle(mut angle: f32) -> f32 {
     angle
 }
 
+fn signed_lateral_offset(position: Vec2, closest_point: Vec2, tangent: Vec2) -> f32 {
+    let tangent_n = tangent.normalize_or_zero();
+    if tangent_n == Vec2::ZERO {
+        return 0.0;
+    }
+
+    let left_normal = Vec2::new(-tangent_n.y, tangent_n.x);
+    (position - closest_point).dot(left_normal)
+}
+
 fn signed_angle_between(from: Vec2, to: Vec2) -> f32 {
     let from_n = from.normalize_or_zero();
     let to_n = to.normalize_or_zero();
@@ -262,4 +289,22 @@ fn signed_angle_between(from: Vec2, to: Vec2) -> f32 {
         return 0.0;
     }
     wrap_angle(to_n.to_angle() - from_n.to_angle())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::signed_lateral_offset;
+    use bevy::prelude::Vec2;
+
+    #[test]
+    fn signed_lateral_offset_is_positive_to_the_left_of_the_tangent() {
+        let tangent = Vec2::X;
+        let closest_point = Vec2::ZERO;
+
+        let left = signed_lateral_offset(Vec2::new(0.0, 10.0), closest_point, tangent);
+        let right = signed_lateral_offset(Vec2::new(0.0, -10.0), closest_point, tangent);
+
+        assert!(left > 0.0);
+        assert!(right < 0.0);
+    }
 }

@@ -18,6 +18,7 @@ NeuroDrive/
 |   |   `-- plugin.rs
 |   |-- analytics/
 |   |   |-- mod.rs
+|   |   |-- models.rs
 |   |   |-- plugin.rs
 |   |   |-- exporters/
 |   |   |   |-- mod.rs
@@ -25,10 +26,19 @@ NeuroDrive/
 |   |   |   `-- markdown.rs
 |   |   |-- metrics/
 |   |   |   |-- mod.rs
-|   |   |   `-- chunking.rs
+|   |   |   |-- chunking.rs
+|   |   |   |-- critic.rs
+|   |   |   |-- inputs.rs
+|   |   |   |-- insights.rs
+|   |   |   |-- sectors.rs
+|   |   |   |-- stats.rs
+|   |   |   |-- trajectory.rs
+|   |   |   `-- turns.rs
 |   |   `-- trackers/
+|   |       |-- action.rs
+|   |       |-- episode.rs
 |   |       |-- mod.rs
-|   |       `-- episode.rs
+|   |       `-- trace.rs
 |   |-- brain/
 |   |   |-- mod.rs
 |   |   |-- plugin.rs
@@ -98,7 +108,7 @@ NeuroDrive/
 ### Newly Added but Still Partial
 
 - A `brain/` subsystem now exists with an `AgentMode` switch, an A2C plugin, a handwritten actor-critic model, a rollout buffer, and an update path.
-- An `analytics/` subsystem now exists with an episode tracker, chunked metrics, and JSON/Markdown exporters intended to write run reports under `reports/`.
+- An `analytics/` subsystem now exists with modular raw schemas, trackers, derived metrics, and JSON/Markdown exporters intended to write run reports under `reports/`.
 - The A2C code is integrated into the fixed-tick schedule and is no longer just a roadmap item; it is partial runtime code.
 
 ### Current Repository Reality
@@ -148,11 +158,12 @@ NeuroDrive/
 
 ### `src/analytics/`
 
-- Owns run-level aggregation and export of episode results.
-- `trackers/episode.rs` stores one record per completed episode.
-- `metrics/chunking.rs` aggregates episode records into chunked summary metrics.
-- `exporters/` serialises the tracked data to JSON and Markdown on app exit.
-- `plugin.rs` initialises the tracker and attempts to trigger export when the app exits.
+- Owns run-level aggregation, derived diagnostics, and export of episode results.
+- `models.rs` defines the stable analytics schemas shared by trackers, metrics, and exporters.
+- `trackers/` owns fixed-tick action accumulation, trace capture, and episode/update record finalisation.
+- `metrics/` owns chunking, input-learning trends, turn-execution diagnostics, critic diagnostics, sector summaries, trajectory snapshots, and narrative insights.
+- `exporters/` serialises either raw tracker data (JSON) or a curated report assembled from the metric modules (Markdown).
+- `plugin.rs` initialises tracker resources, schedules capture/finalisation systems, and triggers export on app exit.
 
 ### `src/debug/`
 

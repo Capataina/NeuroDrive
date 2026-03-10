@@ -97,19 +97,19 @@ impl TilePart {
     pub fn open_edges(self) -> (bool, bool, bool, bool) {
         // (north, south, east, west)
         match self {
-            TilePart::Empty       => (false, false, false, false),
-            TilePart::StraightH   => (false, false, true,  true ),
-            TilePart::SpawnPoint  => (false, false, true,  true ),
-            TilePart::StraightV   => (true,  true,  false, false),
-            TilePart::CornerNW    => (false, true,  true,  false),
-            TilePart::CornerNE    => (false, true,  false, true ),
-            TilePart::CornerSW    => (true,  false, true,  false),
-            TilePart::CornerSE    => (true,  false, false, true ),
-            TilePart::TJunctionN  => (false, true,  true,  true ),
-            TilePart::TJunctionS  => (true,  false, true,  true ),
-            TilePart::TJunctionE  => (true,  true,  false, true ),
-            TilePart::TJunctionW  => (true,  true,  true,  false),
-            TilePart::Crossroads  => (true,  true,  true,  true ),
+            TilePart::Empty => (false, false, false, false),
+            TilePart::StraightH => (false, false, true, true),
+            TilePart::SpawnPoint => (false, false, true, true),
+            TilePart::StraightV => (true, true, false, false),
+            TilePart::CornerNW => (false, true, true, false),
+            TilePart::CornerNE => (false, true, false, true),
+            TilePart::CornerSW => (true, false, true, false),
+            TilePart::CornerSE => (true, false, false, true),
+            TilePart::TJunctionN => (false, true, true, true),
+            TilePart::TJunctionS => (true, false, true, true),
+            TilePart::TJunctionE => (true, true, false, true),
+            TilePart::TJunctionW => (true, true, true, false),
+            TilePart::Crossroads => (true, true, true, true),
         }
     }
 
@@ -120,10 +120,7 @@ impl TilePart {
     pub fn is_corner(self) -> bool {
         matches!(
             self,
-            TilePart::CornerNW
-                | TilePart::CornerNE
-                | TilePart::CornerSW
-                | TilePart::CornerSE
+            TilePart::CornerNW | TilePart::CornerNE | TilePart::CornerSW | TilePart::CornerSE
         )
     }
 }

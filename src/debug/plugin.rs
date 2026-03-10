@@ -1,16 +1,13 @@
 use bevy::prelude::*;
 
 use crate::debug::hud::{
-    DrivingHudStats,
-    spawn_driving_hud_system,
-    update_driving_hud_stats_system,
-    update_driving_hud_text_system,
+    DrivingHudEpisodeAccumulator, DrivingHudHistory, DrivingHudStats,
+    capture_driving_hud_episode_metrics_system, spawn_driving_hud_system,
+    update_driving_hud_stats_system, update_driving_hud_text_system,
     update_driving_hud_visibility_system,
 };
 use crate::debug::overlays::{
-    DebugOverlayState,
-    debug_overlay_toggle_system,
-    draw_geometry_overlay_system,
+    DebugOverlayState, debug_overlay_toggle_system, draw_geometry_overlay_system,
     draw_sensor_overlay_system,
 };
 use crate::sim::sets::SimSet;
@@ -22,8 +19,19 @@ impl Plugin for DebugPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DebugOverlayState>()
             .init_resource::<DrivingHudStats>()
+            .init_resource::<DrivingHudHistory>()
+            .init_resource::<DrivingHudEpisodeAccumulator>()
             .add_systems(Startup, spawn_driving_hud_system)
-            .add_systems(FixedUpdate, update_driving_hud_stats_system.in_set(SimSet::Measurement))
+            .add_systems(
+                FixedUpdate,
+                update_driving_hud_stats_system.in_set(SimSet::Measurement),
+            )
+            .add_systems(
+                FixedUpdate,
+                capture_driving_hud_episode_metrics_system
+                    .after(crate::game::episode::episode_loop_system)
+                    .in_set(SimSet::Measurement),
+            )
             .add_systems(
                 Update,
                 (

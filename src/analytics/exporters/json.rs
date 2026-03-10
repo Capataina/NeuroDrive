@@ -1,6 +1,6 @@
+use crate::analytics::models::EpisodeTracker;
 use std::fs;
 use std::path::Path;
-use crate::analytics::trackers::episode::EpisodeTracker;
 
 pub fn export_to_json(tracker: &EpisodeTracker, filepath: &str) {
     let path = Path::new(filepath);

@@ -54,4 +54,3 @@ pub fn update_track_progress_system(
         progress.distance = projection.distance;
     }
 }
-

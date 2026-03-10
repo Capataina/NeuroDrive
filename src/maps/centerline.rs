@@ -49,7 +49,11 @@ pub enum CenterlineBuildError {
     /// A road tile did not provide a valid next step.
     DeadEnd { row: usize, col: usize },
     /// A road tile provided multiple next-step options (branching track).
-    AmbiguousBranch { row: usize, col: usize, options: Vec<GridDir> },
+    AmbiguousBranch {
+        row: usize,
+        col: usize,
+        options: Vec<GridDir>,
+    },
     /// The traversal failed to close back to the start.
     NotClosedLoop,
     /// The computed loop was too short to be meaningful.
@@ -126,12 +130,20 @@ impl TrackCenterline {
                 let a = self.points[i];
                 let b = self.points[(i + 1) % n];
                 let tangent = (b - a).normalize_or_zero();
-                return if tangent == Vec2::ZERO { Vec2::X } else { tangent };
+                return if tangent == Vec2::ZERO {
+                    Vec2::X
+                } else {
+                    tangent
+                };
             }
         }
 
         let fallback = (self.points[1] - self.points[0]).normalize_or_zero();
-        if fallback == Vec2::ZERO { Vec2::X } else { fallback }
+        if fallback == Vec2::ZERO {
+            Vec2::X
+        } else {
+            fallback
+        }
     }
 
     /// Builds a closed centreline by traversing grid connectivity.
@@ -282,7 +294,11 @@ fn traverse_cells(
     Ok((cells, dirs))
 }
 
-fn build_polyline_points(grid: &TrackGrid, cells: &[(usize, usize)], dirs: &[GridDir]) -> Vec<Vec2> {
+fn build_polyline_points(
+    grid: &TrackGrid,
+    cells: &[(usize, usize)],
+    dirs: &[GridDir],
+) -> Vec<Vec2> {
     let half = grid.tile_size * 0.5;
     let mut points: Vec<Vec2> = Vec::new();
 
@@ -341,7 +357,13 @@ fn dir_unit(dir: GridDir) -> Vec2 {
     }
 }
 
-fn push_corner_arc_samples(points: &mut Vec<Vec2>, center: Vec2, radius: f32, entry: Vec2, exit: Vec2) {
+fn push_corner_arc_samples(
+    points: &mut Vec<Vec2>,
+    center: Vec2,
+    radius: f32,
+    entry: Vec2,
+    exit: Vec2,
+) {
     let a0 = (entry - center).y.atan2((entry - center).x);
     let a1 = (exit - center).y.atan2((exit - center).x);
     let delta = wrap_to_pi(a1 - a0);
@@ -388,17 +410,28 @@ fn choose_next_dir(
     let (open_n, open_s, open_e, open_w) = tile.open_edges();
 
     let mut options: Vec<GridDir> = Vec::new();
-    if open_n { options.push(GridDir::North); }
-    if open_s { options.push(GridDir::South); }
-    if open_e { options.push(GridDir::East); }
-    if open_w { options.push(GridDir::West); }
+    if open_n {
+        options.push(GridDir::North);
+    }
+    if open_s {
+        options.push(GridDir::South);
+    }
+    if open_e {
+        options.push(GridDir::East);
+    }
+    if open_w {
+        options.push(GridDir::West);
+    }
 
     // Avoid immediately returning to the cell we just came from.
     options.retain(|d| *d != incoming);
 
     match options.as_slice() {
         [only] => Ok(*only),
-        [] => Err(CenterlineBuildError::DeadEnd { row: cell.0, col: cell.1 }),
+        [] => Err(CenterlineBuildError::DeadEnd {
+            row: cell.0,
+            col: cell.1,
+        }),
         many => Err(CenterlineBuildError::AmbiguousBranch {
             row: cell.0,
             col: cell.1,

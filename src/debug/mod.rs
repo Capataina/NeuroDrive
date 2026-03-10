@@ -5,7 +5,7 @@
 //! of the environment or agent interfaces.
 
 pub mod hud;
-pub mod plugin;
 pub mod overlays;
+pub mod plugin;
 
 pub use plugin::DebugPlugin;

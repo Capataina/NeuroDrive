@@ -19,16 +19,21 @@
 - [x] Reset A2C rollout state on mode switches to prevent mixed keyboard/AI trajectories in one buffer.
 - [x] Stabilise critic updates with lower learning rate, Huber value loss, and gradient clipping.
 - [x] Rebalance reward defaults to reduce “sprint then crash” incentives.
+- [x] Add signed lateral offset as a controlled observation-only experiment while preserving the current ray bundle.
 
 ## Future Vision Roadmap (Ranked)
 
 - [x] 1. Add ego-relative centreline lookahead scalars (heading delta and curvature at multiple distances ahead).
-- [ ] 2. Add an ego-relative waypoint bundle (next K centreline points in car frame) to improve compound-turn anticipation.
-- [ ] 3. Add curvature-aware speed assist (target-speed governor) while keeping steering policy-driven.
-- [ ] 4. Extend forward sensor coverage (longer range + denser front rays) as a low-complexity anticipatory boost.
-- [ ] 5. Add a small egocentric occupancy patch around the car only if lookahead features saturate.
-- [ ] 6. Add recurrent memory (GRU/LSTM) only after geometric lookahead is validated and stable.
-- [ ] 7. Consider minimap/image-style encoders only as a late-stage option after lower-complexity options fail.
+- [x] 2. Add a signed lateral-offset feature so centreline alignment includes lane placement as well as heading alignment.
+- [ ] 3. Define an explicit observation hierarchy where centreline-relative features are primary and raycasts are secondary safety features.
+- [ ] 4. Trial a reduced five-ray bundle only after the signed-offset experiment is measured cleanly.
+- [ ] 5. Add a dedicated brake control channel as a separate action-space experiment after observation-only changes are isolated.
+- [ ] 6. Add an ego-relative waypoint bundle (next K centreline points in car frame) to improve compound-turn anticipation.
+- [ ] 7. Add curvature-aware speed assist (target-speed governor) while keeping steering policy-driven.
+- [ ] 8. Extend forward sensor coverage (longer range + denser front rays) as a low-complexity anticipatory boost.
+- [ ] 9. Add a small egocentric occupancy patch around the car only if lookahead features saturate.
+- [ ] 10. Add recurrent memory (GRU/LSTM) only after geometric lookahead is validated and stable.
+- [ ] 11. Consider minimap/image-style encoders only as a late-stage option after lower-complexity options fail.
 
 ## Implementation Structure
 
@@ -187,6 +192,7 @@ The recommended default is to add light verification around the current handwrit
 
 - [x] Reward-ordering bug is fixed: progress gain is now computed before best-progress state is advanced.
 - [x] Fresh reports now show non-zero progress reward variance; remaining bottleneck is first-turn anticipation and critic quality.
+- [x] Observation work is now explicitly centreline-centric: the current controlled variable is signed lateral offset, while ray reduction and brake experiments are intentionally deferred so results stay attributable.
 
 ## Debugging / Verification
 

@@ -1,4 +1,16 @@
-use crate::analytics::trackers::episode::EpisodeRecord;
+use crate::analytics::metrics::stats::{percentile, std_dev};
+use crate::analytics::models::EpisodeRecord;
+
+pub const DEFAULT_CHUNK_COUNT: usize = 10;
+
+#[derive(Clone, Copy, Debug)]
+pub struct ChunkWindow {
+    pub chunk_index: usize,
+    pub start_index: usize,
+    pub end_index: usize,
+    pub start_episode: u32,
+    pub end_episode: u32,
+}
 
 #[derive(Debug, Default)]
 pub struct ChunkMetrics {
@@ -27,86 +39,85 @@ pub struct ChunkMetrics {
     pub throttle_std: f32,
 }
 
-pub fn calculate_chunks(records: &[EpisodeRecord], chunk_size: usize) -> Vec<ChunkMetrics> {
+/// Splits the episode history into at most `chunk_count` non-empty windows.
+pub fn build_chunk_windows(records: &[EpisodeRecord], chunk_count: usize) -> Vec<ChunkWindow> {
     if records.is_empty() {
-        return vec![];
+        return Vec::new();
     }
 
-    let mut metrics = Vec::new();
-    for (i, chunk) in records.chunks(chunk_size).enumerate() {
-        let count = chunk.len() as f32;
-        let progress_values: Vec<f32> = chunk.iter().map(|r| r.progress).collect();
-        let reward_values: Vec<f32> = chunk.iter().map(|r| r.reward).collect();
-        let pre_terminal_values: Vec<f32> = chunk.iter().map(|r| r.pre_terminal_return).collect();
-        let progress_reward_values: Vec<f32> =
-            chunk.iter().map(|r| r.progress_reward_sum).collect();
-        let time_penalty_values: Vec<f32> =
-            chunk.iter().map(|r| r.time_penalty_sum).collect();
-        let terminal_reward_values: Vec<f32> =
-            chunk.iter().map(|r| r.terminal_reward_sum).collect();
-        let crash_penalty_values: Vec<f32> =
-            chunk.iter().map(|r| r.crash_penalty_sum).collect();
-        let lap_bonus_values: Vec<f32> = chunk.iter().map(|r| r.lap_bonus_sum).collect();
-        let steering_values: Vec<f32> = chunk.iter().map(|r| r.steering_mean).collect();
-        let throttle_values: Vec<f32> = chunk.iter().map(|r| r.throttle_mean).collect();
-        let avg_progress = progress_values.iter().sum::<f32>() / count;
-        let max_progress = chunk.iter().map(|r| r.progress).fold(0.0, f32::max);
-        let avg_reward = reward_values.iter().sum::<f32>() / count;
-        let avg_ticks = chunk.iter().map(|r| r.ticks as f32).sum::<f32>() / count;
-        let crashes = chunk.iter().filter(|r| r.end_reason.contains("Crash")).count() as f32;
-        let crash_rate = crashes / count;
-        let lap_completion_rate =
-            chunk.iter().filter(|r| r.lap_completed).count() as f32 / count;
+    let bucket_count = chunk_count.max(1).min(records.len());
+    let mut windows = Vec::with_capacity(bucket_count);
+    for chunk_index in 0..bucket_count {
+        let start_index = records.len() * chunk_index / bucket_count;
+        let end_index = records.len() * (chunk_index + 1) / bucket_count;
+        if start_index >= end_index {
+            continue;
+        }
 
-        metrics.push(ChunkMetrics {
-            chunk_index: i,
-            start_episode: chunk.first().unwrap().episode_id,
-            end_episode: chunk.last().unwrap().episode_id,
-            avg_progress,
-            progress_std: std_dev(&progress_values),
-            progress_median: percentile(progress_values.clone(), 0.50),
-            progress_p90: percentile(progress_values, 0.90),
-            max_progress,
-            avg_reward,
-            reward_std: std_dev(&reward_values),
-            avg_pre_terminal_return: pre_terminal_values.iter().sum::<f32>() / count,
-            avg_progress_reward: progress_reward_values.iter().sum::<f32>() / count,
-            avg_time_penalty: time_penalty_values.iter().sum::<f32>() / count,
-            avg_terminal_reward: terminal_reward_values.iter().sum::<f32>() / count,
-            avg_crash_penalty: crash_penalty_values.iter().sum::<f32>() / count,
-            avg_lap_bonus: lap_bonus_values.iter().sum::<f32>() / count,
-            avg_ticks,
-            crash_rate,
-            lap_completion_rate,
-            steering_mean: steering_values.iter().sum::<f32>() / count,
-            steering_std: std_dev(&steering_values),
-            throttle_mean: throttle_values.iter().sum::<f32>() / count,
-            throttle_std: std_dev(&throttle_values),
+        windows.push(ChunkWindow {
+            chunk_index,
+            start_index,
+            end_index,
+            start_episode: records[start_index].episode_id,
+            end_episode: records[end_index - 1].episode_id,
         });
     }
 
-    metrics
+    windows
 }
 
-fn std_dev(values: &[f32]) -> f32 {
-    if values.is_empty() {
-        return 0.0;
-    }
+pub fn calculate_chunks(records: &[EpisodeRecord], chunk_count: usize) -> Vec<ChunkMetrics> {
+    build_chunk_windows(records, chunk_count)
+        .into_iter()
+        .map(|window| {
+            let chunk = &records[window.start_index..window.end_index];
+            let count = chunk.len() as f32;
+            let progress_values: Vec<f32> = chunk.iter().map(|r| r.progress).collect();
+            let reward_values: Vec<f32> = chunk.iter().map(|r| r.reward).collect();
+            let pre_terminal_values: Vec<f32> =
+                chunk.iter().map(|r| r.pre_terminal_return).collect();
+            let progress_reward_values: Vec<f32> =
+                chunk.iter().map(|r| r.progress_reward_sum).collect();
+            let time_penalty_values: Vec<f32> = chunk.iter().map(|r| r.time_penalty_sum).collect();
+            let terminal_reward_values: Vec<f32> =
+                chunk.iter().map(|r| r.terminal_reward_sum).collect();
+            let crash_penalty_values: Vec<f32> =
+                chunk.iter().map(|r| r.crash_penalty_sum).collect();
+            let lap_bonus_values: Vec<f32> = chunk.iter().map(|r| r.lap_bonus_sum).collect();
+            let steering_values: Vec<f32> = chunk.iter().map(|r| r.steering_mean).collect();
+            let throttle_values: Vec<f32> = chunk.iter().map(|r| r.throttle_mean).collect();
+            let crashes = chunk
+                .iter()
+                .filter(|r| r.end_reason.contains("Crash"))
+                .count() as f32;
+            let lap_completion_rate =
+                chunk.iter().filter(|r| r.lap_completed).count() as f32 / count;
 
-    let mean = values.iter().sum::<f32>() / values.len() as f32;
-    let variance = values
-        .iter()
-        .map(|value| (value - mean).powi(2))
-        .sum::<f32>()
-        / values.len() as f32;
-    variance.sqrt()
-}
-
-fn percentile(mut values: Vec<f32>, q: f32) -> f32 {
-    if values.is_empty() {
-        return 0.0;
-    }
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let index = ((values.len() - 1) as f32 * q.clamp(0.0, 1.0)).round() as usize;
-    values[index]
+            ChunkMetrics {
+                chunk_index: window.chunk_index,
+                start_episode: window.start_episode,
+                end_episode: window.end_episode,
+                avg_progress: progress_values.iter().sum::<f32>() / count,
+                progress_std: std_dev(&progress_values),
+                progress_median: percentile(progress_values.clone(), 0.50),
+                progress_p90: percentile(progress_values.clone(), 0.90),
+                max_progress: progress_values.iter().copied().fold(0.0, f32::max),
+                avg_reward: reward_values.iter().sum::<f32>() / count,
+                reward_std: std_dev(&reward_values),
+                avg_pre_terminal_return: pre_terminal_values.iter().sum::<f32>() / count,
+                avg_progress_reward: progress_reward_values.iter().sum::<f32>() / count,
+                avg_time_penalty: time_penalty_values.iter().sum::<f32>() / count,
+                avg_terminal_reward: terminal_reward_values.iter().sum::<f32>() / count,
+                avg_crash_penalty: crash_penalty_values.iter().sum::<f32>() / count,
+                avg_lap_bonus: lap_bonus_values.iter().sum::<f32>() / count,
+                avg_ticks: chunk.iter().map(|r| r.ticks as f32).sum::<f32>() / count,
+                crash_rate: crashes / count,
+                lap_completion_rate,
+                steering_mean: steering_values.iter().sum::<f32>() / count,
+                steering_std: std_dev(&steering_values),
+                throttle_mean: throttle_values.iter().sum::<f32>() / count,
+                throttle_std: std_dev(&throttle_values),
+            }
+        })
+        .collect()
 }

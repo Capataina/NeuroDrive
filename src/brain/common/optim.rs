@@ -6,7 +6,7 @@ pub struct AdamOptimizer {
     beta2: f32,
     epsilon: f32,
     t: f32,
-    
+
     // State arrays mirroring weights and biases
     m_weights: Vec<Vec<Vec<f32>>>, // [layer][out][in]
     v_weights: Vec<Vec<Vec<f32>>>,
@@ -49,13 +49,19 @@ impl AdamOptimizer {
 
         for (l_idx, layer) in layers.iter_mut().enumerate() {
             let out_dim = layer.weights.len();
-            let in_dim = if out_dim > 0 { layer.weights[0].len() } else { 0 };
+            let in_dim = if out_dim > 0 {
+                layer.weights[0].len()
+            } else {
+                0
+            };
 
             for i in 0..out_dim {
                 // Bias update
                 let g_b = layer.grad_biases[i];
-                self.m_biases[l_idx][i] = self.beta1 * self.m_biases[l_idx][i] + (1.0 - self.beta1) * g_b;
-                self.v_biases[l_idx][i] = self.beta2 * self.v_biases[l_idx][i] + (1.0 - self.beta2) * g_b * g_b;
+                self.m_biases[l_idx][i] =
+                    self.beta1 * self.m_biases[l_idx][i] + (1.0 - self.beta1) * g_b;
+                self.v_biases[l_idx][i] =
+                    self.beta2 * self.v_biases[l_idx][i] + (1.0 - self.beta2) * g_b * g_b;
 
                 let m_hat_b = self.m_biases[l_idx][i] / (1.0 - self.beta1.powf(self.t));
                 let v_hat_b = self.v_biases[l_idx][i] / (1.0 - self.beta2.powf(self.t));
@@ -65,13 +71,16 @@ impl AdamOptimizer {
                 // Weights update
                 for j in 0..in_dim {
                     let g_w = layer.grad_weights[i][j];
-                    self.m_weights[l_idx][i][j] = self.beta1 * self.m_weights[l_idx][i][j] + (1.0 - self.beta1) * g_w;
-                    self.v_weights[l_idx][i][j] = self.beta2 * self.v_weights[l_idx][i][j] + (1.0 - self.beta2) * g_w * g_w;
+                    self.m_weights[l_idx][i][j] =
+                        self.beta1 * self.m_weights[l_idx][i][j] + (1.0 - self.beta1) * g_w;
+                    self.v_weights[l_idx][i][j] =
+                        self.beta2 * self.v_weights[l_idx][i][j] + (1.0 - self.beta2) * g_w * g_w;
 
                     let m_hat_w = self.m_weights[l_idx][i][j] / (1.0 - self.beta1.powf(self.t));
                     let v_hat_w = self.v_weights[l_idx][i][j] / (1.0 - self.beta2.powf(self.t));
 
-                    layer.weights[i][j] -= self.learning_rate * m_hat_w / (v_hat_w.sqrt() + self.epsilon);
+                    layer.weights[i][j] -=
+                        self.learning_rate * m_hat_w / (v_hat_w.sqrt() + self.epsilon);
                 }
             }
         }

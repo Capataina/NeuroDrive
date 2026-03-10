@@ -45,7 +45,9 @@ pub fn a2c_update(
             let (_, val) = brain.model.forward(bootstrap_state);
             next_value = val;
         } else {
-            bevy::log::warn!("Missing bootstrap observation for non-terminal A2C rollout; using zero bootstrap value.");
+            bevy::log::warn!(
+                "Missing bootstrap observation for non-terminal A2C rollout; using zero bootstrap value."
+            );
         }
     }
 
@@ -153,22 +155,32 @@ pub fn a2c_update(
     }
 
     clip_linear_gradients(
-        &mut [&mut brain.model.a_fc1, &mut brain.model.a_fc2, &mut brain.model.a_mean],
+        &mut [
+            &mut brain.model.a_fc1,
+            &mut brain.model.a_fc2,
+            &mut brain.model.a_mean,
+        ],
         ACTOR_GRAD_CLIP_NORM,
     );
     clip_linear_gradients(
-        &mut [&mut brain.model.c_fc1, &mut brain.model.c_fc2, &mut brain.model.c_value],
+        &mut [
+            &mut brain.model.c_fc1,
+            &mut brain.model.c_fc2,
+            &mut brain.model.c_value,
+        ],
         CRITIC_GRAD_CLIP_NORM,
     );
 
-    brain
-        .model
-        .a_opt
-        .step(&mut [&mut brain.model.a_fc1, &mut brain.model.a_fc2, &mut brain.model.a_mean]);
-    brain
-        .model
-        .c_opt
-        .step(&mut [&mut brain.model.c_fc1, &mut brain.model.c_fc2, &mut brain.model.c_value]);
+    brain.model.a_opt.step(&mut [
+        &mut brain.model.a_fc1,
+        &mut brain.model.a_fc2,
+        &mut brain.model.a_mean,
+    ]);
+    brain.model.c_opt.step(&mut [
+        &mut brain.model.c_fc1,
+        &mut brain.model.c_fc2,
+        &mut brain.model.c_value,
+    ]);
 
     brain.model.opt_t += 1.0;
     for j in 0..2 {
@@ -297,7 +309,11 @@ fn squashed_gaussian_log_prob(
 ) -> f32 {
     let gaussian_log_prob = normal_log_prob(latent, mean, std);
     let log_det_jacobian = (1.0 - squashed * squashed + 1e-6).ln();
-    let affine_log_det = if component_idx == 1 { (2.0f32).ln() } else { 0.0 };
+    let affine_log_det = if component_idx == 1 {
+        (2.0f32).ln()
+    } else {
+        0.0
+    };
     gaussian_log_prob - log_det_jacobian + affine_log_det
 }
 

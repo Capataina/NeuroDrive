@@ -8,10 +8,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::agent::action::{
-    ActionState,
-    CarAction,
-    action_smoothing_system,
-    keyboard_action_input_system,
+    ActionState, CarAction, action_smoothing_system, keyboard_action_input_system,
 };
 use crate::agent::observation::{OBSERVATION_DIM, ObservationVector};
 use crate::brain::types::{AgentMode, Brain};
@@ -179,7 +176,10 @@ pub fn a2c_collect_reward_system(
         debug_assert_eq!(brain.buffer.states.len(), brain.buffer.actions.len());
         debug_assert_eq!(brain.buffer.states.len(), brain.buffer.latent_actions.len());
         debug_assert_eq!(brain.buffer.states.len(), brain.buffer.values.len());
-        debug_assert_eq!(brain.buffer.states.len(), brain.buffer.safety_clamp_hits.len());
+        debug_assert_eq!(
+            brain.buffer.states.len(),
+            brain.buffer.safety_clamp_hits.len()
+        );
         debug_assert_eq!(brain.buffer.rewards.len(), brain.buffer.dones.len());
 
         let reached_horizon = brain.buffer.states.len() >= brain.max_steps;

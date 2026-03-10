@@ -13,16 +13,16 @@ pub struct DebugOverlayState {
     pub geometry: bool,
     /// Sensor overlays (raycasts and hit points).
     pub sensors: bool,
-    /// Telemetry overlay (minimal: window-title update for now).
+    /// Telemetry overlay for the runtime diagnostics HUD.
     pub telemetry: bool,
 }
 
 impl Default for DebugOverlayState {
     fn default() -> Self {
         Self {
-            geometry: false,
+            geometry: true,
             sensors: false,
-            telemetry: false,
+            telemetry: true,
         }
     }
 }
@@ -91,10 +91,20 @@ pub fn draw_geometry_overlay_system(
         );
 
         let tangent_end = progress.closest_point + progress.tangent * 40.0;
-        gizmos.arrow_2d(progress.closest_point, tangent_end, Color::srgb(0.2, 0.6, 1.0));
+        gizmos.arrow_2d(
+            progress.closest_point,
+            tangent_end,
+            Color::srgb(0.2, 0.6, 1.0),
+        );
 
-        let forward = (transform.rotation * Vec3::X).truncate().normalize_or_zero();
-        gizmos.arrow_2d(car_pos, car_pos + forward * 45.0, Color::srgb(0.2, 0.8, 1.0));
+        let forward = (transform.rotation * Vec3::X)
+            .truncate()
+            .normalize_or_zero();
+        gizmos.arrow_2d(
+            car_pos,
+            car_pos + forward * 45.0,
+            Color::srgb(0.2, 0.8, 1.0),
+        );
 
         let velocity = car.velocity;
         if velocity.length_squared() > 1e-3 {
@@ -118,11 +128,7 @@ pub fn draw_geometry_overlay_system(
             } else {
                 index as f32 / (lookahead_count as f32 - 1.0)
             };
-            let lookahead_color = Color::srgb(
-                1.0 - 0.75 * t,
-                0.45 + 0.45 * t,
-                0.15 + 0.75 * t,
-            );
+            let lookahead_color = Color::srgb(1.0 - 0.75 * t, 0.45 + 0.45 * t, 0.15 + 0.75 * t);
 
             gizmos.line_2d(previous_point, lookahead_point, lookahead_color);
             gizmos.circle_2d(

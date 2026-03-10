@@ -1,11 +1,13 @@
-use bevy::prelude::*;
 use crate::game::car::spawn_car;
 use crate::game::collision::{CollisionEvent, collision_detection_system};
-use crate::game::episode::{EpisodeConfig, EpisodeMovingAverages, EpisodeState, episode_loop_system};
+use crate::game::episode::{
+    EpisodeConfig, EpisodeMovingAverages, EpisodeState, episode_loop_system,
+};
 use crate::game::physics::car_physics_system;
 use crate::game::progress::update_track_progress_system;
 use crate::maps::track::Track;
 use crate::sim::sets::SimSet;
+use bevy::prelude::*;
 
 /// Main game plugin that bundles all game systems.
 pub struct GamePlugin;

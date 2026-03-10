@@ -1,19 +1,19 @@
+mod agent;
+mod analytics;
+mod brain;
+mod debug;
 mod game;
 mod maps;
-mod agent;
-mod brain;
-mod analytics;
-mod debug;
 mod sim;
 
+use agent::AgentPlugin;
+use analytics::plugin::AnalyticsPlugin;
 use bevy::prelude::*;
 use bevy::time::Fixed;
+use brain::plugin::BrainPlugin;
+use debug::DebugPlugin;
 use game::GamePlugin;
 use maps::MonacoPlugin;
-use agent::AgentPlugin;
-use brain::plugin::BrainPlugin;
-use analytics::plugin::AnalyticsPlugin;
-use debug::DebugPlugin;
 
 fn main() {
     App::new()

@@ -8,7 +8,7 @@ pub struct BrainPlugin;
 impl Plugin for BrainPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AgentMode>();
-        
+
         // Add specific brain plugins
         app.add_plugins(crate::brain::a2c::A2cPlugin);
 

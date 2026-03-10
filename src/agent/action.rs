@@ -85,7 +85,11 @@ pub fn keyboard_action_input_system(
         steering += 1.0;
     }
 
-    let throttle = if keyboard.pressed(KeyCode::KeyW) { 1.0 } else { 0.0 };
+    let throttle = if keyboard.pressed(KeyCode::KeyW) {
+        1.0
+    } else {
+        0.0
+    };
 
     action_state.desired = CarAction { steering, throttle }.clamped();
 }
@@ -116,4 +120,3 @@ pub fn action_smoothing_system(
     }
     .clamped();
 }
-
