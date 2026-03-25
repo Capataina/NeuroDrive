@@ -2,73 +2,101 @@
 
 ## Why This Matters Here
 
-The current autonomous learner in NeuroDrive is a handwritten A2C baseline. If you do not understand actor-critic and GAE, the live learning path looks like arbitrary maths instead of a coherent baseline-validation system.
+The current learner in NeuroDrive is not a generic "neural network that somehow improves". It is a specific actor-critic baseline with GAE, bounded continuous actions, and handwritten optimisation logic.
 
-## Core Idea
+If you want to reason about the repository’s live learning path, this concept file is mandatory.
 
-Actor-critic splits the learning problem into two jobs:
+## Actor-Critic At A Glance
 
-- the actor chooses actions,
-- the critic estimates how good the state is.
+The actor outputs an action distribution.
 
-The actor improves when it learns that certain actions were better than expected. The critic helps define “better than expected” so the actor does not learn from raw reward noise alone.
+The critic estimates how promising the current situation is.
 
-GAE, or Generalised Advantage Estimation, is a practical way to compute that “better than expected” signal with a controllable bias-variance trade-off.
+The policy update uses the critic’s estimate to reduce gradient variance. Instead of learning from raw returns alone, it learns from a better-shaped signal about whether the chosen action outperformed expectation.
 
-## Build-Up
+## Why Actor-Critic Fits NeuroDrive
 
-### Step 1: Raw reward is too noisy
+This task has:
 
-One crash or one good straight can swing reward sharply. If you update the actor from raw returns alone, learning becomes brittle.
+- continuous steering and throttle,
+- dense but still noisy reward,
+- sequential dynamics,
+- a compact engineered observation vector.
 
-### Step 2: Add a critic
+Those are friendly conditions for an actor-critic baseline.
 
-The critic estimates state value. That lets the learner compare what happened against what was expected.
+## Current Policy Shape
 
-### Step 3: Estimate advantage
+The live A2C path uses:
 
-Advantage asks: “Was this action better or worse than the critic predicted?”
+- a handwritten two-hidden-layer actor,
+- a handwritten two-hidden-layer critic,
+- separate stacks rather than a shared trunk,
+- Gaussian latent action sampling,
+- `tanh` squashing,
+- a transformed throttle output from `[-1, 1]` latent space into `[0, 1]`.
 
-### Step 4: Smooth the estimate with GAE
+That last point matters. The policy does not simply emit raw steering and throttle; it emits sampled latent values that are transformed into bounded control outputs.
 
-GAE mixes multi-step TD errors using `gamma` and `lambda` so the signal is less noisy than one-step TD and less blunt than full Monte Carlo returns.
+## GAE
 
-## Worked Examples
+Generalised Advantage Estimation smooths the advantage target by combining TD-style information across several steps.
 
-### Example 1: Straight-line progress
+A common recursive view is:
 
-If the car makes smooth forward progress and the critic expected less, the advantage is positive and the actor should move slightly towards similar actions.
+`delta_t = r_t + gamma V(s_(t+1)) - V(s_t)`
 
-### Example 2: Crash after risky steering
+`A_t = delta_t + gamma lambda A_(t+1)`
 
-If the car crashes and the critic expected a better outcome, the advantage is negative and the actor should move away from the action pattern that led there.
+Interpretation:
 
-### Example 3: Why GAE matters
+- `delta_t` says whether the step was better or worse than expected,
+- `lambda` decides how much longer-horizon smoothing to keep,
+- smaller `lambda` means lower variance but more bias,
+- larger `lambda` means more return-like behaviour.
 
-If a turn goes wrong over several ticks, one-step TD can be too local. GAE lets the training signal spread across the sequence more usefully.
+## Why GAE Matters In Practice
 
-## How This Appears In The Project
+Driving reward can be noisy because:
 
-- `src/brain/a2c/mod.rs` owns the runtime act path, reward collection, and update triggering.
-- `src/brain/a2c/buffer.rs` stores rollout data.
-- `src/brain/a2c/update.rs` computes returns, advantages, and optimisation steps.
+- progress arrives incrementally,
+- time penalty is always present,
+- crash penalty arrives only at failure,
+- turn quality may matter several ticks before a terminal event.
+
+GAE helps avoid treating each noisy tick as a standalone verdict.
+
+## Bootstrap Logic
+
+When the rollout ends because a horizon was reached rather than because the episode truly terminated, the critic can estimate the remaining future value of the last observation. That bootstrap value prevents the update from pretending the future suddenly became zero for no reason.
+
+This is one of the easy places to introduce subtle training bugs, which is why the repository documents it carefully.
+
+## Limits Of The Current Baseline
+
+The current A2C design is competent enough to be educational and useful, but several things still keep it from being a highly trustworthy experimental baseline:
+
+- ad hoc RNG ownership,
+- no save/load path,
+- no evaluation-only mode,
+- no vectorised synchronous collection,
+- limited behavioural testing,
+- weak run metadata.
+
+That matters because a baseline should fail only when the environment or representation is genuinely hard, not because experiment discipline is thin.
 
 ## Common Misunderstandings
 
-❌ “Actor-critic means backprop is gone.”
-✅ It still uses gradient-based optimisation. It is just a different RL structure from value-only learning.
+❌ "A2C is here because the project changed its mind and became a normal RL project."
 
-❌ “GAE is the algorithm.”
-✅ GAE is one part of the training target computation inside the wider actor-critic setup.
+No. A2C is here because the repository needs a learnability baseline now.
 
-❌ “If losses look better, driving must be better.”
-✅ Not in this project. Behavioural diagnostics still matter more than scalar optimisation health alone.
+❌ "Once A2C works, the README’s biological-learning direction stops mattering."
 
-## Terms Used Here
+No. The whole educational value of this repository depends on understanding why those are different layers of the project.
 
-- actor
-- critic
-- advantage
-- return
-- GAE
-- entropy regularisation
+## Related Files
+
+- `project/systems/a2c-baseline.md`
+- `project/decisions/why-a2c-exists-in-a-brain-inspired-project.md`
+- `concepts/advanced/a2c-vs-biological-learning.md`

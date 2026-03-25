@@ -2,20 +2,22 @@
 
 ## Who This Path Is For
 
-Choose this path if you already understand programming and simulation, but want a clear route into why A2C exists here, how GAE fits, and where the current baseline is strong or weak.
+Use this path if you want to understand the live A2C baseline as a serious system rather than as a vague "policy gradient" label.
 
 ## Recommended Sequence
 
-- [ ] `learning/concepts/core/actor-critic-and-gae.md`
-- [ ] `learning/concepts/core/observation-design.md`
-- [ ] `learning/project/systems/a2c-baseline.md`
-- [ ] `learning/project/systems/environment.md`
-- [ ] `learning/project/comparisons/a2c-baseline-vs-biological-target.md`
-- [ ] `learning/project/evolution/current-state-and-next-gaps.md`
-- [ ] `learning/exercises/project/debug-a2c-reproducibility.md`
-- [ ] `learning/materials/reinforcement-learning.md`
+- [ ] `concepts/foundations/continuous-control-and-mdps.md`
+- [ ] `concepts/foundations/probability-value-estimation-and-return.md`
+- [ ] `concepts/core/actor-critic-and-gae.md`
+- [ ] `concepts/domain-patterns/reward-shaping-and-credit-assignment.md`
+- [ ] `project/systems/agent-interface.md`
+- [ ] `project/systems/a2c-baseline.md`
+- [ ] `project/systems/analytics.md`
+- [ ] `project/comparisons/current-baseline-vs-target-biological-system.md`
+- [ ] `project/comparisons/singleton-runtime-vs-vectorised-trainer.md`
+- [ ] `exercises/project/debug-a2c-rollout-alignment.md`
+- [ ] `materials/reinforcement-learning.md`
 
-## Notes
+## What You Should Notice
 
-- This path explains the current learner without pretending it is the final architecture.
-- It is strongest when paired with the environment system file, because reward and observation semantics matter as much as the optimiser here.
+The current RL stack is good enough to be educational and useful, but still weak enough that reproducibility, evaluation discipline, and vectorised rollout collection remain major missing pieces.

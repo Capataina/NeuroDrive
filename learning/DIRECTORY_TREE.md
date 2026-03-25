@@ -2,59 +2,109 @@
 
 ```text
 learning/
-├── LEARNING_MAP.md                          # What this learning system is for and how to use it
-├── DIRECTORY_TREE.md                        # Structural index of the learning tree
-├── GLOSSARY.md                              # Shared terminology for the whole project
-├── STUDY_GUIDE.md                           # High-level route selector
+├── LEARNING_MAP.md
+├── DIRECTORY_TREE.md
+├── GLOSSARY.md
+├── STUDY_GUIDE.md
 ├── paths/
-│   ├── PATH_INDEX.md                        # Index of focused study paths
-│   ├── project-architecture-path.md         # Top-down route through the current runtime
-│   ├── reinforcement-learning-path.md       # RL-first route to the A2C baseline
-│   ├── systems-and-simulation-path.md       # Determinism, physics, scheduling, and environment route
-│   └── implementation-first-path.md         # Fast route for rebuilding key project systems
+│   ├── PATH_INDEX.md
+│   ├── foundations-path.md
+│   ├── project-architecture-path.md
+│   ├── implementation-first-path.md
+│   ├── reinforcement-learning-path.md
+│   ├── neuroscience-path.md
+│   └── debugging-and-observability-path.md
 ├── concepts/
 │   ├── foundations/
-│   │   └── fixed-timestep-simulation.md     # Why deterministic fixed-step simulation matters here
+│   │   ├── continuous-control-and-mdps.md
+│   │   └── probability-value-estimation-and-return.md
 │   ├── core/
-│   │   ├── actor-critic-and-gae.md          # A2C and GAE explained from first principles
-│   │   └── observation-design.md            # Observation vectors, scaling, and leakage risks
-│   └── domain-patterns/
-│       ├── ecs-plugin-scheduling.md         # Bevy plugin/set ordering as a design pattern
-│       └── deterministic-racing-environment.md
-│                                              # Dense-signal continuous-control environment design
+│   │   ├── observations-actions-and-representation.md
+│   │   ├── determinism-and-fixed-timestep-simulation.md
+│   │   └── actor-critic-and-gae.md
+│   ├── domain-patterns/
+│   │   ├── reward-shaping-and-credit-assignment.md
+│   │   └── brain-inspired-learning-principles.md
+│   └── advanced/
+│       └── a2c-vs-biological-learning.md
 ├── project/
 │   ├── architecture/
-│   │   └── runtime-architecture.md          # NeuroDrive runtime map in learner-friendly form
+│   │   ├── runtime-overview.md
+│   │   └── data-flow-and-schedule.md
 │   ├── systems/
-│   │   ├── environment.md                   # Track, physics, reward, reset, and episode lifecycle
-│   │   ├── agent-interface.md               # Actions, sensors, observations, and controller boundary
-│   │   ├── a2c-baseline.md                  # Current baseline learner and its limitations
-│   │   └── analytics-and-debugging.md       # Runtime and post-run observability surfaces
+│   │   ├── maps-and-centreline.md
+│   │   ├── environment.md
+│   │   ├── agent-interface.md
+│   │   ├── a2c-baseline.md
+│   │   ├── analytics.md
+│   │   └── debug-runtime.md
+│   ├── decisions/
+│   │   └── why-a2c-exists-in-a-brain-inspired-project.md
 │   ├── comparisons/
-│   │   └── a2c-baseline-vs-biological-target.md
-│   │                                          # Why the current learner exists and why it is temporary
+│   │   ├── current-baseline-vs-target-biological-system.md
+│   │   └── singleton-runtime-vs-vectorised-trainer.md
 │   └── evolution/
-│       └── current-state-and-next-gaps.md   # What is implemented now and what is still missing
+│       └── project-state-and-next-pressure-points.md
 ├── exercises/
-│   ├── EXERCISE_GUIDE.md                    # How to use the exercise layer
-│   ├── EXERCISE_ORDER.md                    # Recommended practice sequence with checkboxes
+│   ├── EXERCISE_GUIDE.md
+│   ├── EXERCISE_ORDER.md
+│   ├── foundations/
+│   │   ├── derive-a-reward-signal.md
+│   │   └── reason-about-returns-and-advantages.md
 │   └── project/
-│       ├── reason-about-schedule-order.md   # Reconstruct the fixed-tick ordering contract
-│       ├── extend-observation-vector.md     # Think through a safe observation change
-│       └── debug-a2c-reproducibility.md     # Analyse current determinism gaps in the learner
+│       ├── inspect-the-observation-pipeline.md
+│       ├── debug-a2c-rollout-alignment.md
+│       ├── extend-the-analytics-schema.md
+│       └── design-the-vectorised-trainer-boundaries.md
 ├── materials/
-│   ├── rust-and-bevy.md                     # Suggested background study for the implementation stack
-│   ├── reinforcement-learning.md            # Suggested background study for the baseline learner
-│   └── neuroscience-and-local-learning.md   # Suggested background study for the long-term target
+│   ├── reinforcement-learning.md
+│   ├── computational-neuroscience.md
+│   └── rust-bevy-and-game-loop-engineering.md
 └── references/
-    └── status-conventions.md                # Short guide to current vs superseded wording
+    ├── notation-guide.md
+    ├── status-conventions.md
+    └── system-cheat-sheet.md
 ```
 
 ## Key Locations
 
-- `paths/` — checklist-driven study routes for different goals
-- `concepts/` — first-principles explanations that the project relies on
-- `project/` — NeuroDrive-specific architecture, systems, evolution, and comparisons
-- `exercises/` — practice tasks that make you reason about the actual repository
-- `materials/` — topic-grouped external study suggestions
-- `references/` — small support files that help the learner interpret the rest
+- `paths/`
+  Route files for different learner goals. Use this when you want progression rather than a raw file list.
+- `concepts/`
+  Theory and reusable ideas. Read these when you need the domain scaffolding behind the project systems.
+- `project/`
+  Project-grounded explanations of the actual NeuroDrive runtime, architecture, decisions, and evolution.
+- `exercises/`
+  Practice tasks. These are intentionally project-specific where that teaches more than generic toy tasks would.
+- `materials/`
+  Curated external-study guidance by topic rather than by medium.
+- `references/`
+  Quick lookup files that support the rest of the archive.
+
+## File Highlights
+
+- `LEARNING_MAP.md`
+  Explains what this archive is for and how to use it.
+- `STUDY_GUIDE.md`
+  The best high-level route selector if you do not yet know where to begin.
+- `GLOSSARY.md`
+  Shared vocabulary across RL, simulation, architecture, and brain-inspired learning.
+- `project/architecture/runtime-overview.md`
+  The best first project-specific file for most readers.
+- `project/comparisons/current-baseline-vs-target-biological-system.md`
+  The file that makes the repository’s transitional state easiest to understand.
+- `project/evolution/project-state-and-next-pressure-points.md`
+  A compact explanation of what is missing next and why it matters.
+
+## How The Tree Is Intended To Feel
+
+This is not a small archive with a decorative structure. The tree exists so that a large amount of educational material stays navigable.
+
+The guiding split is:
+
+- `concepts/` explains the ideas,
+- `project/` explains this repository,
+- `paths/` tells you how to move through both,
+- `exercises/` forces you to prove understanding,
+- `materials/` sends you outward when the archive should not try to become a full textbook,
+- `references/` reduces lookup friction while reading.

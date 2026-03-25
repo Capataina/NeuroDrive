@@ -1,47 +1,80 @@
 # Agent Interface
 
+## Status
+
+Current in the project runtime.
+
 ## What This System Does
 
-The agent interface is the stable boundary between the environment and any controller. It defines what the controller can observe and how it can act.
+The agent interface is the stable boundary between:
 
-## Where It Fits
+- what the environment exposes to controllers,
+- and what controllers are allowed to send back.
 
-This system sits between `game` truth and `brain` logic. It is the most important contract to preserve if the repo later replaces A2C with a biological learner.
+It provides:
 
-## Key Mechanics
+- the `CarAction` contract,
+- desired versus applied action state,
+- optional smoothing,
+- sensor readings,
+- observation vector construction.
 
-- `src/agent/action.rs` defines `CarAction` and the `ActionState` resource.
-- `desired` action is controller output.
-- `applied` action is what physics actually consumes after optional smoothing.
+## Why This Boundary Is Important
 
-On the observation side:
+It decouples several concerns:
 
-- `SensorReadings` stores world-derived measurements,
-- `ObservationVector` stores the normalised fixed-size controller input,
-- `ObservationConfig` centralises sensor and scaling parameters.
+- the environment can stay the source of truth,
+- controllers can vary,
+- analytics can record a stable action surface,
+- debug views can inspect both raw sensor readings and controller-facing vectors.
 
-The live observation vector currently has 23 dimensions:
+This is one of the cleanest subsystem boundaries in the current repository.
 
-- 11 rays,
+## Current Observation Design
+
+The observation vector dimension is `23`.
+
+The current schema is geometry-rich rather than minimalist:
+
+- ray distances,
 - speed,
 - signed lateral offset,
 - heading error,
 - angular velocity,
-- 4 lookahead heading-delta features,
-- 4 lookahead curvature features.
+- lookahead heading deltas,
+- lookahead curvatures.
 
-## Important Trade-Offs
+This is a deliberate design choice. The project is not trying to prove that a learner can infer everything from sparse raw inputs.
 
-- The interface is richer than the original Milestone 1 sketch because lookahead geometry has already been added.
-- `TrackProgress` is intentionally excluded from the observation vector to avoid direct progress leakage.
-- The interface is stable across keyboard and AI modes, which is good for analytics and future brain replacements.
+## Action Design
 
-## Learning Links
+The action surface stays intentionally small:
 
-- Related concepts: `learning/concepts/core/observation-design.md`
-- Related systems: `learning/project/systems/environment.md`
-- Related exercises: `learning/exercises/project/extend-observation-vector.md`
+- steering,
+- throttle.
 
-## Status
+There is no separate brake channel yet.
 
-Current for this project.
+That keeps the control problem manageable, but it also means future changes to action space would have a wide blast radius across:
+
+- the policy output layer,
+- analytics schemas,
+- debug displays,
+- exercise expectations.
+
+## Important Design Lesson
+
+`TrackProgress` is not part of the observation vector. This is a strong boundary choice and should not be broken casually. It preserves the difference between environment truth and controller-accessible representation.
+
+## Current Risks
+
+- no observation schema versioning,
+- no stronger compatibility guard for snapshots or offline comparison,
+- no brake channel,
+- no broader input-health instrumentation yet.
+
+## Related Files
+
+- `concepts/core/observations-actions-and-representation.md`
+- `project/systems/a2c-baseline.md`
+- `project/systems/debug-runtime.md`

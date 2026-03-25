@@ -1,42 +1,100 @@
 # A2C Baseline
 
-## What This System Does
-
-This is the current autonomous learner. Its job is not to become the final project architecture. Its job is to answer a narrower question: can the current environment and observation contract support autonomous driving improvement at all?
-
-## Where It Fits
-
-The A2C baseline sits behind the stable agent boundary. It consumes `ObservationVector`, writes `ActionState.desired`, reads episode reward and terminal truth, and emits training-health snapshots for analytics and debug.
-
-## Key Mechanics
-
-- `src/brain/plugin.rs` owns mode switching between keyboard and AI.
-- `src/brain/a2c/mod.rs` owns the live act path, reward collection, and flush-on-exit behaviour.
-- `src/brain/a2c/model.rs` contains the handwritten actor-critic model.
-- `src/brain/a2c/buffer.rs` stores rollouts.
-- `src/brain/a2c/update.rs` performs optimisation and updates `A2cTrainingStats`.
-
-Current implemented behaviour:
-
-- actor and critic are separate stacks,
-- actions are sampled as Gaussians, squashed with `tanh`, and mapped into steering/throttle bounds,
-- rollouts update on horizon or eligible terminal conditions,
-- GAE is used,
-- learning-health stats flow into the HUD and analytics.
-
-## Important Trade-Offs
-
-- This is a strong baseline for learnability validation, but not yet a disciplined experiment harness.
-- Controlled RNG ownership is still missing, which weakens reproducibility.
-- There is no headless mode, no save/load path, and no evaluation-only mode.
-- The repo already contains a concrete plan for vectorised A2C, but the current runtime remains singleton-car.
-
-## Learning Links
-
-- Related concepts: `learning/concepts/core/actor-critic-and-gae.md`
-- Related comparison: `learning/project/comparisons/a2c-baseline-vs-biological-target.md`
-- Related exercise: `learning/exercises/project/debug-a2c-reproducibility.md`
-
 ## Status
 
-Current for this project, but intentionally temporary in long-term architecture terms.
+Current in the maintained implementation. Transitional rather than final.
+
+## What This System Does
+
+The A2C baseline provides the current autonomous controller used to test whether NeuroDrive’s environment and representation are learnable.
+
+It owns:
+
+- action selection from observations,
+- rollout buffering,
+- reward/done collection,
+- GAE-based advantage computation,
+- actor and critic updates,
+- training-health snapshots for downstream observability.
+
+## Current Runtime Shape
+
+The current brain resource contains:
+
+- a handwritten actor-critic model,
+- a rollout buffer,
+- `gamma`,
+- `gae_lambda`,
+- rollout/update thresholds,
+- a simple step counter.
+
+The actor and critic are separate MLP stacks with two hidden layers each. The action path samples Gaussian latent values, squashes them with `tanh`, and maps throttle into `[0, 1]`.
+
+## Schedule Placement
+
+This subsystem only makes sense because of its placement in the simulation schedule.
+
+- `a2c_act_system` runs in `SimSet::Input`,
+- `a2c_collect_reward_system` runs in `SimSet::Measurement`,
+- `a2c_flush_on_exit_system` runs in `Last`.
+
+That means the policy acts before physics, then later receives reward after episode truth has been finalised.
+
+## What The Baseline Already Gets Right
+
+- continuous bounded actions,
+- separate actor and critic,
+- GAE,
+- rollout bootstrap for non-terminal truncation,
+- gradient clipping,
+- training-health export,
+- mode switching with rollout reset,
+- flush-on-exit update for residual buffer data.
+
+This is well beyond a toy placeholder.
+
+## Why It Is Still Not A Trustworthy Final Baseline
+
+Several major gaps remain:
+
+- RNG ownership is still ad hoc,
+- there is no checkpointing,
+- there is no evaluation-only mode,
+- there is no vectorised synchronous rollout collection,
+- there is limited behavioural regression testing,
+- there is limited run metadata.
+
+These are not cosmetic omissions. They determine whether experiment results are easy or hard to misread.
+
+## What The Training Stats Are For
+
+`A2cTrainingStats` captures:
+
+- policy loss,
+- value loss,
+- entropy,
+- explained variance,
+- action spread,
+- clamp fraction,
+- layer weight and gradient norms,
+- dead-ReLU fractions.
+
+These stats are valuable because they give the project a live training-health surface without pretending that scalar reward alone tells the whole story.
+
+## Why This Baseline Should Stay Modular
+
+The README’s target system is not A2C. Therefore the A2C implementation should remain a replaceable learning module, not the permanent organising principle for the whole codebase.
+
+That means future infrastructure work should prefer abstractions that are useful beyond this specific baseline:
+
+- experiment discipline,
+- reproducibility,
+- observability,
+- environment scaling,
+- evaluation workflows.
+
+## Related Files
+
+- `concepts/core/actor-critic-and-gae.md`
+- `project/decisions/why-a2c-exists-in-a-brain-inspired-project.md`
+- `project/comparisons/singleton-runtime-vs-vectorised-trainer.md`

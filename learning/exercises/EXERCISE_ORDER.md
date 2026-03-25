@@ -1,13 +1,16 @@
 # Exercise Order
 
-## Project Systems
+## Recommended Sequence
 
-- [ ] `learning/exercises/project/reason-about-schedule-order.md`
-- [ ] `learning/exercises/project/extend-observation-vector.md`
-- [ ] `learning/exercises/project/debug-a2c-reproducibility.md`
+- [ ] `foundations/derive-a-reward-signal.md`
+- [ ] `foundations/reason-about-returns-and-advantages.md`
+- [ ] `project/inspect-the-observation-pipeline.md`
+- [ ] `project/debug-a2c-rollout-alignment.md`
+- [ ] `project/extend-the-analytics-schema.md`
+- [ ] `project/design-the-vectorised-trainer-boundaries.md`
 
-## Suggested Jumps
+## Suggested Checkpoints
 
-- Before `reason-about-schedule-order.md`, read `learning/project/architecture/runtime-architecture.md`.
-- Before `extend-observation-vector.md`, read `learning/project/systems/agent-interface.md`.
-- Before `debug-a2c-reproducibility.md`, read `learning/project/systems/a2c-baseline.md` and `learning/project/evolution/current-state-and-next-gaps.md`.
+- [ ] I can explain why each current reward term exists.
+- [ ] I can explain how one observation tick becomes one A2C transition.
+- [ ] I can identify at least three files that would need coordinated change for vectorised training.

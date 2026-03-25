@@ -1,14 +1,14 @@
 # Status Conventions
 
-Use short status language only where current versus superseded material might confuse the learner.
+Use these interpretations when a file includes a status section.
 
-## Preferred Labels
-
-- `Current for this project.` — use when the file describes live implementation reality.
-- `Current for the baseline, but temporary in long-term architecture terms.` — use when the system is live but not meant to define the repo forever.
-- `Superseded in the current implementation, but still educationally useful.` — use when older material is kept to teach a transition.
-- `Historical background only.` — use when a file is intentionally not about current code reality.
-
-## Rule Of Thumb
-
-If there is no ambiguity, do not add a status section just for symmetry.
+- **Current in the project runtime**
+  Implemented and active in code now.
+- **Current in the maintained implementation**
+  Reflected in the codebase and `context/`, though it may still be immature.
+- **Foundational domain knowledge**
+  Theory the learner needs regardless of direct implementation status.
+- **Planned project direction**
+  Central to the README mission but not yet implemented.
+- **Historical or transitional**
+  Not the end goal, but educationally important for understanding the current state.

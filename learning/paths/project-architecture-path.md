@@ -2,21 +2,21 @@
 
 ## Who This Path Is For
 
-Choose this path if you want to understand NeuroDrive as a whole before diving into one subsystem. It is the best starting point for repository orientation and for reasoning about downstream blast radius.
+Use this path if you want the quickest strong mental model of the current repository.
 
 ## Recommended Sequence
 
-- [ ] `learning/LEARNING_MAP.md`
-- [ ] `learning/project/architecture/runtime-architecture.md`
-- [ ] `learning/project/systems/environment.md`
-- [ ] `learning/project/systems/agent-interface.md`
-- [ ] `learning/project/systems/a2c-baseline.md`
-- [ ] `learning/project/systems/analytics-and-debugging.md`
-- [ ] `learning/project/evolution/current-state-and-next-gaps.md`
-- [ ] `learning/exercises/project/reason-about-schedule-order.md`
+- [ ] `project/architecture/runtime-overview.md`
+- [ ] `project/architecture/data-flow-and-schedule.md`
+- [ ] `project/systems/maps-and-centreline.md`
+- [ ] `project/systems/environment.md`
+- [ ] `project/systems/agent-interface.md`
+- [ ] `project/systems/a2c-baseline.md`
+- [ ] `project/systems/analytics.md`
+- [ ] `project/systems/debug-runtime.md`
+- [ ] `project/comparisons/current-baseline-vs-target-biological-system.md`
+- [ ] `project/evolution/project-state-and-next-pressure-points.md`
 
-## Notes
+## What To Do Next
 
-- This path is top-down and repo-specific.
-- If the A2C file feels too abrupt, detour into `concepts/core/actor-critic-and-gae.md`.
-- After this path, the implementation-first path becomes much more efficient.
+If you want to contribute code after this, switch to `implementation-first-path.md`. If you want to understand why the current learner exists but is not the end goal, follow with `neuroscience-path.md`.

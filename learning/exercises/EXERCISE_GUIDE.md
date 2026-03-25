@@ -1,22 +1,34 @@
 # Exercise Guide
 
-The exercise layer is for reconstruction, debugging, and design reasoning against the actual NeuroDrive repository.
+The exercise layer exists to turn passive understanding into working judgement.
 
-## How To Use These Exercises
+## Exercise Types
 
-- Read the linked learning files first.
-- Work from repository reality, not from memory.
-- Prefer writing down your reasoning before touching code.
-- Use the hints in the exercise itself to stage your approach.
+- **Reconstruction**
+  Rebuild a mechanism from first principles.
+- **Debugging**
+  Find a likely failure mode or alignment bug.
+- **Extension**
+  Propose and scope a safe change.
+- **Design reasoning**
+  Compare alternatives and defend a choice.
 
-## Exercise Types In This Folder
+## How To Use Hints
 
-- reasoning about execution order,
-- safe interface extension,
-- debugging and design analysis.
+Prefer this escalation order:
 
-## Difficulty Guidance
+1. attempt the task from the archive material only,
+2. re-read the linked concept and project files,
+3. inspect the relevant source files,
+4. only then write down your solution.
 
-- Start with `reason-about-schedule-order.md` if you want the clearest systems exercise.
-- Move to `extend-observation-vector.md` if you want to reason about blast radius.
-- Finish with `debug-a2c-reproducibility.md` if you want a more architectural exercise.
+## Good Starting Order By Confidence
+
+- Low confidence: `foundations/derive-a-reward-signal.md`
+- Medium confidence: `project/inspect-the-observation-pipeline.md`
+- High confidence: `project/debug-a2c-rollout-alignment.md`
+- Architecture-focused: `project/design-the-vectorised-trainer-boundaries.md`
+
+## Important Rule
+
+The exercises intentionally avoid full worked solutions. Their value comes from forcing you to connect the archive back to the actual repository.
