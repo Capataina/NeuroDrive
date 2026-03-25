@@ -248,6 +248,7 @@ Main risks:
 Why now:
 
 - it is the most algorithm-faithful improvement and the biggest likely sample-efficiency gain within A2C itself
+- NeuroDrive already has a concrete implementation plan for this path in `context/plans/vectorised-a2c-visual-trainer.md`, so this is now an execution-ready direction rather than a purely abstract recommendation
 
 What it unlocks:
 
@@ -304,6 +305,10 @@ Primary sources used:
   - normalisation,
   - evaluation discipline,
   - stronger analytics metadata.
+- The current repo now has both:
+  - a concrete plan for vectorised A2C execution,
+  - and clear evidence that experiment-discipline gaps still matter.
+  Treat those as parallel pressures, not as mutually exclusive truths.
 - If the current A2C remains weak after those upgrades, the project should be willing to conclude that the limitation is in the environment/task formulation or that A2C has served its purpose and should stop absorbing engineering effort.
 
 ## Open Constraints / Follow-Up Questions

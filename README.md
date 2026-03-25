@@ -239,7 +239,7 @@ Topology evolves gradually during experience.
 
 ## Training Loop (Watchable, Continual Learning)
 
-Learning is online and episodic:
+The intended long-term biological-learning loop is online and episodic:
 
 1. Reset car position.
 2. Run simulation until crash, timeout, or lap completion.
@@ -252,6 +252,11 @@ The same brain learns across episodes.
 No population.
 No generational replacement.
 
+Current implemented baseline note:
+
+- The live A2C baseline already trains online across episodes.
+- It currently updates through rollout collection plus periodic actor/critic updates rather than continuous synaptic plasticity.
+
 ---
 
 ## Reward Structure
@@ -261,6 +266,8 @@ Reward is treated as a **neuromodulatory teaching signal**, not a fitness score.
 Primary reward:
 
 - Positive reward for **forward progress** along track centerline
+- Small per-tick **time penalty**
+- Extra penalty for **high-speed heading misalignment**
 - Penalty for **crashing / leaving track**
 - Bonus for **lap completion**
 
@@ -289,16 +296,21 @@ The project is designed to make learning _visible and measurable_, not just plau
 
 NeuroDrive includes real-time observability because “looks like learning” is not evidence.
 
-Planned telemetry:
+Live telemetry already includes:
 
 - Real-time episode counter
 - Progress metrics (max progress, lap %, best-ever)
 - Moving averages (e.g. last 20 episodes)
 - Reward decomposition (progress vs crash penalties)
+- A2C update-health summaries in the runtime HUD
+- Post-run analytics export to JSON and Markdown reports
+- Sensor overlays (raycasts + hit points)
+
+Planned or later-stage telemetry still includes:
+
 - Dopamine δ visualisation (raw + smoothed)
 - Weight statistics (mean |w|, histogram bins, clamp hits)
 - Graph statistics (synapse count, sparsity, churn rate)
-- Sensor overlays (raycasts + hit points)
 - Optional live graph view (nodes/edges)
 - Optional live weight view (matrix/synapse list)
 
@@ -344,7 +356,7 @@ This milestone establishes a fully deterministic, instrumented control environme
   - [x] F1, F2 and F3 keys to toggle the debug overlays
     - F1: Geometry overlays
     - F2: Sensor overlays
-    - F3: Learning telemetry (after the ais are implemented)
+    - F3: Runtime diagnostics and learning telemetry
 
 **Success criteria:**
 The environment is stable, deterministic, observable, and debuggable.  
@@ -366,13 +378,13 @@ It is a diagnostic layer that answers:
 
 ### Implementation Scope
 
-- [ ] Small MLP policy network (e.g. 2×64 hidden layers)
-- [ ] Value function (shared trunk or separate head)
-- [ ] On-policy rollout buffer
-- [ ] Advantage estimation (TD or GAE-lite)
-- [ ] Policy loss + value loss + entropy regularization
-- [ ] Online updates at fixed rollout intervals
-- [ ] Real-time learning visualisation (watchable behaviour)
+- [x] Small MLP policy network (2×64 hidden layers)
+- [x] Value function (implemented as a separate critic stack)
+- [x] On-policy rollout buffer
+- [x] Advantage estimation (GAE)
+- [x] Policy loss + value loss + entropy regularization
+- [x] Online updates at fixed rollout intervals
+- [x] Real-time learning visualisation (watchable behaviour)
 - [ ] Headless fast-training mode (optional)
 - [ ] Policy snapshot + evaluation mode
 
@@ -388,10 +400,12 @@ It is a diagnostic layer that answers:
 
 - Raycast distances (normalized)
 - Speed
+- Signed lateral offset from the centreline
 - Heading error relative to track tangent
-- Optional angular velocity
+- Angular velocity
+- Centreline lookahead samples with heading-delta and curvature features
 
-No privileged geometric information (no arc-length progress, no curvature lookahead).
+The baseline still avoids direct arc-length progress as input, but it now uses centreline-relative geometry and lookahead features to improve turn anticipation.
 
 ### Success criteria
 
@@ -410,6 +424,15 @@ If A2C fails:
 
 > Milestone 1 proves that the task is learnable.  
 > It isolates environment design from biological learning mechanics.
+
+Current status:
+
+- The A2C baseline is implemented and live in the runtime.
+- Remaining milestone gaps are mainly experiment discipline and usability:
+  - headless training,
+  - save/load checkpoints,
+  - evaluation-only mode,
+  - stronger reproducibility and run metadata.
 
 ---
 

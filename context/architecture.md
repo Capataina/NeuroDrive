@@ -136,10 +136,15 @@ Last:
 ## Structural Notes / Current Reality
 
 - The codebase is no longer environment-only. Any documentation that still treats A2C or analytics as roadmap-only is stale.
+- The repository now also contains a substantial `learning/` tree. It is useful teaching material, but it should stay distinct from `context/`, which remains the implementation-facing memory layer.
 - `src/analytics/sessions/` and `src/brain/biological/` currently exist as empty placeholders. They should not be treated as implemented subsystems until files land there.
 - The project is still in a transitional architecture state:
   - the repository intent targets brain-inspired local plasticity,
   - the implemented learning path is currently a handwritten A2C baseline used to validate the environment and observation contract.
+- `README.md` is directionally accurate about project intent and milestone ordering, but its Milestone 1 checklist now understates implementation reality:
+  - the A2C baseline is live,
+  - the debug learning HUD exists,
+  - analytics export is implemented.
 - The highest current documentation pressure is around validation and interface truth:
   - A2C is live but still lacks persistence, evaluation mode, headless training, and controlled RNG ownership.
   - Analytics reports are useful but still miss run metadata such as config snapshots and seeds.

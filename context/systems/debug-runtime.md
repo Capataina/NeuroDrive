@@ -37,6 +37,11 @@
   - a live A2C learning line when update stats exist,
   - recent-history quarter summaries with an “Improving/Mixed/Regressing/Warm-up” assessment.
 - The HUD keeps its own recent episode history split into four real-time quarters for quick run judgement without waiting for exported reports.
+- HUD history is intentionally bounded by `EpisodeConfig.moving_average_window`, so the quarter grid is “recent run health” rather than an unbounded full-run summary.
+- The runtime HUD is a Bevy UI panel, not a debug-print overlay:
+  - fixed-position root node,
+  - fixed-width quarter grid,
+  - text sections for assessment, current state, run state, learning, and legend.
 
 ## Key Interfaces / Data Flow
 
@@ -63,10 +68,13 @@
   - `DrivingHudRoot`
   - fixed-column quarter summary grid
 - Runtime world-space overlays via Bevy gizmos.
+- Test coverage:
+  - a HUD assessment unit test covers the “recent quarter is cleaner” improvement heuristic.
 
 ## Known Issues / Active Risks
 
 - The HUD is informative but still summary-oriented; it does not expose full rollout-buffer internals or detailed per-layer update history.
+- The debug runtime still assumes a single active car in several `single()` queries, so it will need structural work before the vectorised trainer plan can land cleanly.
 - Overlay performance under very long AI runs has not been explicitly evaluated.
 - The current assessment heuristic is intentionally lightweight and should not be treated as a substitute for offline analytics.
 

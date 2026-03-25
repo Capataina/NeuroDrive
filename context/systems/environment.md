@@ -18,6 +18,10 @@
 - `TrackGrid` is the authoritative driveable-area query used by both collisions and raycasts.
 - A closed `TrackCenterline` is derived from tile connectivity and stored on the `Track` component together with spawn pose.
 - `GamePlugin` configures a fixed `SimSet` chain: `Input -> Physics -> Collision -> Measurement`.
+- The environment path is still explicitly singleton-car:
+  - startup spawns one `Car`,
+  - collision uses `single()` car queries,
+  - episode truth lives in singleton resources rather than per-car components.
 - A single car entity is spawned with:
   - sprite and transform,
   - kinematic parameters,
@@ -25,6 +29,7 @@
   - sensor and observation components.
 - Physics is deterministic and centralised in `car_physics_system`, backed by the pure helper `step_car_dynamics()`.
 - Collision detection checks rotated car-rectangle corners against road occupancy and emits `CollisionEvent` when any corner leaves the road.
+- `CollisionEvent` is a zero-payload message. That is sufficient for the current one-car runtime, but it does not yet carry per-instance identity that a multi-car trainer would need.
 - `episode_loop_system` owns:
   - per-tick reward accumulation,
   - crash/timeout/lap-complete termination,
@@ -74,6 +79,7 @@
 
 - Environment-level regression coverage is still thin; there are no ECS-level tests for collision timing, lap wrapping, reset correctness, or episode-summary edge cases.
 - The track layer currently assumes a single closed loop with no branching.
+- Singleton-car assumptions are still spread across collision and episode logic, which is the main structural blocker for the proposed vectorised trainer.
 - Finish-line rendering is cosmetic only; lap completion still relies on progress thresholds rather than explicit crossing logic.
 - The environment currently runs in a normal Bevy windowed loop only; there is no headless or accelerated training mode.
 
