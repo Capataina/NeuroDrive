@@ -1,110 +1,138 @@
 # Directory Tree
 
+This file shows the full structure of the `learning/` archive with a short description of each folder and key file.
+
 ```text
 learning/
-├── LEARNING_MAP.md
-├── DIRECTORY_TREE.md
-├── GLOSSARY.md
-├── STUDY_GUIDE.md
+├── LEARNING_MAP.md              — what this archive is for and how to use it
+├── DIRECTORY_TREE.md            — this file; full structural index
+├── GLOSSARY.md                  — comprehensive alphabetical glossary of all major terms
+├── STUDY_GUIDE.md               — high-level route selector; start here to pick a path
+│
 ├── paths/
-│   ├── PATH_INDEX.md
-│   ├── foundations-path.md
-│   ├── project-architecture-path.md
-│   ├── implementation-first-path.md
-│   ├── reinforcement-learning-path.md
-│   ├── neuroscience-path.md
-│   └── debugging-and-observability-path.md
+│   ├── PATH_INDEX.md            — overview of all paths and how to choose one
+│   ├── foundations-path.md      — bottom-up study for learners who want maths and mechanics first
+│   ├── reinforcement-learning-path.md — focused RL theory through to the A2C implementation
+│   ├── neuroscience-path.md     — biological learning from Hebbian rules to structural plasticity
+│   ├── project-architecture-path.md — top-down study of the runtime architecture and systems
+│   ├── implementation-first-path.md — fast route through the live code for experienced engineers
+│   └── research-directions-path.md — roadmap-facing study of Milestones 2–9 and the science behind them
+│
 ├── concepts/
 │   ├── foundations/
-│   │   ├── continuous-control-and-mdps.md
-│   │   └── probability-value-estimation-and-return.md
+│   │   ├── neural-networks.md           — feedforward networks, linear layers, ReLU, backpropagation
+│   │   ├── optimization-and-gradients.md — SGD, Adam, gradient clipping, learning-rate intuition
+│   │   ├── probability-and-distributions.md — Gaussian distributions, sampling, log-prob, entropy
+│   │   └── bevy-ecs-primer.md           — Entity Component System model used throughout NeuroDrive
+│   │
 │   ├── core/
-│   │   ├── observations-actions-and-representation.md
-│   │   ├── determinism-and-fixed-timestep-simulation.md
-│   │   └── actor-critic-and-gae.md
+│   │   ├── reinforcement-learning.md    — Markov decision processes, value functions, Bellman equations
+│   │   ├── policy-gradient-methods.md   — REINFORCE, policy gradient theorem, variance reduction
+│   │   ├── advantage-estimation.md      — GAE, lambda returns, bias-variance trade-off
+│   │   ├── actor-critic-architecture.md — combining policy and value networks; A2C and variants
+│   │   └── continuous-control.md        — action spaces, Gaussian policies, tanh squashing
+│   │
 │   ├── domain-patterns/
-│   │   ├── reward-shaping-and-credit-assignment.md
-│   │   └── brain-inspired-learning-principles.md
+│   │   ├── reward-shaping.md            — potential-based shaping, dense vs sparse, pitfalls
+│   │   ├── observation-design.md        — feature engineering, raycasts, centreline geometry
+│   │   └── determinism-and-reproducibility.md — why determinism matters; seeds, fixed timesteps
+│   │
 │   └── advanced/
-│       └── a2c-vs-biological-learning.md
+│       ├── hebbian-plasticity.md        — Hebb's rule, co-activation, local learning
+│       ├── spike-timing-dependent-plasticity.md — STDP mechanism, timing windows, biological basis
+│       ├── eligibility-traces.md        — synapse-local credit assignment, λ-returns vs traces
+│       ├── neuromodulation.md           — dopamine-like reward gating, RPE, three-factor rules
+│       ├── structural-plasticity.md     — synapse growth and pruning, topology adaptation
+│       └── continual-learning.md        — catastrophic forgetting, lifelong learning, memory consolidation
+│
 ├── project/
 │   ├── architecture/
-│   │   ├── runtime-overview.md
-│   │   └── data-flow-and-schedule.md
+│   │   ├── runtime-overview.md          — high-level map of all subsystems and their relationships
+│   │   ├── fixed-tick-pipeline.md       — the SimSet execution chain and why order matters
+│   │   └── module-boundaries.md         — ownership, data flow, and dependency direction
+│   │
 │   ├── systems/
-│   │   ├── maps-and-centreline.md
-│   │   ├── environment.md
-│   │   ├── agent-interface.md
-│   │   ├── a2c-baseline.md
-│   │   ├── analytics.md
-│   │   └── debug-runtime.md
+│   │   ├── environment-system.md        — track, physics, collision, progress, reward, episodes
+│   │   ├── agent-interface.md           — observation vector, action contract, sensor pipeline
+│   │   ├── a2c-brain.md                 — model, rollout buffer, GAE, update path, training stats
+│   │   ├── analytics-system.md          — trackers, derived metrics, JSON/Markdown export
+│   │   └── debug-runtime.md             — F1/F2/F3 overlays, HUD, live learning display
+│   │
 │   ├── decisions/
-│   │   └── why-a2c-exists-in-a-brain-inspired-project.md
+│   │   ├── a2c-as-baseline.md           — why A2C was chosen, what it validates, when to retire it
+│   │   └── tanh-squashed-actions.md     — why tanh is used for continuous actions; log-prob correction
+│   │
 │   ├── comparisons/
-│   │   ├── current-baseline-vs-target-biological-system.md
-│   │   └── singleton-runtime-vs-vectorised-trainer.md
+│   │   ├── a2c-vs-ppo.md                — A2C versus PPO for this project; what PPO adds
+│   │   └── rate-based-vs-spiking.md     — rate-coding neurons versus spiking neurons; transition plan
+│   │
 │   └── evolution/
-│       └── project-state-and-next-pressure-points.md
+│       ├── milestone-roadmap.md         — Milestones 0–9 explained with learning context
+│       └── from-baseline-to-brain.md    — the planned transition from A2C to local plasticity
+│
 ├── exercises/
-│   ├── EXERCISE_GUIDE.md
-│   ├── EXERCISE_ORDER.md
+│   ├── EXERCISE_GUIDE.md                — exercise types, how to use hints, where to start
+│   ├── EXERCISE_ORDER.md                — recommended practice sequence with checkboxes
+│   │
 │   ├── foundations/
-│   │   ├── derive-a-reward-signal.md
-│   │   └── reason-about-returns-and-advantages.md
+│   │   ├── implement-linear-layer.md    — build a forward+backward linear layer from scratch
+│   │   ├── implement-relu-backprop.md   — implement ReLU and verify its gradient
+│   │   └── implement-adam-optimizer.md  — implement Adam update rule step by step
+│   │
+│   ├── core/
+│   │   ├── implement-gae.md             — implement GAE from the recurrence definition
+│   │   ├── trace-the-policy-gradient.md — manually trace through one A2C policy update
+│   │   └── trace-observation-vector.md  — trace a single tick's observation construction
+│   │
 │   └── project/
-│       ├── inspect-the-observation-pipeline.md
-│       ├── debug-a2c-rollout-alignment.md
-│       ├── extend-the-analytics-schema.md
-│       └── design-the-vectorised-trainer-boundaries.md
+│       ├── debug-reward-shaping.md      — diagnose a reward-shaping scenario and fix it
+│       ├── extend-observation-vector.md — design and add a new observation feature
+│       └── sketch-eligibility-traces.md — design the eligibility trace system for Milestone 2
+│
 ├── materials/
-│   ├── reinforcement-learning.md
-│   ├── computational-neuroscience.md
-│   └── rust-bevy-and-game-loop-engineering.md
+│   ├── reinforcement-learning-resources.md — papers, books, and references for RL study
+│   ├── neuroscience-resources.md           — neuroscience resources for biological learning
+│   └── rust-and-systems-resources.md       — Rust, Bevy, and game-engine systems resources
+│
 └── references/
-    ├── notation-guide.md
-    ├── status-conventions.md
-    └── system-cheat-sheet.md
+    ├── notation-guide.md                   — symbols and conventions used across the archive
+    ├── status-conventions.md               — meanings of Current / Planned / Foundational labels
+    └── observation-vector-reference.md     — the 23-dim observation vector, feature by feature
 ```
 
-## Key Locations
+## Key Locations by Purpose
 
-- `paths/`
-  Route files for different learner goals. Use this when you want progression rather than a raw file list.
-- `concepts/`
-  Theory and reusable ideas. Read these when you need the domain scaffolding behind the project systems.
-- `project/`
-  Project-grounded explanations of the actual NeuroDrive runtime, architecture, decisions, and evolution.
-- `exercises/`
-  Practice tasks. These are intentionally project-specific where that teaches more than generic toy tasks would.
-- `materials/`
-  Curated external-study guidance by topic rather than by medium.
-- `references/`
-  Quick lookup files that support the rest of the archive.
+### If you want to understand the current implementation
 
-## File Highlights
-
-- `LEARNING_MAP.md`
-  Explains what this archive is for and how to use it.
-- `STUDY_GUIDE.md`
-  The best high-level route selector if you do not yet know where to begin.
-- `GLOSSARY.md`
-  Shared vocabulary across RL, simulation, architecture, and brain-inspired learning.
 - `project/architecture/runtime-overview.md`
-  The best first project-specific file for most readers.
-- `project/comparisons/current-baseline-vs-target-biological-system.md`
-  The file that makes the repository’s transitional state easiest to understand.
-- `project/evolution/project-state-and-next-pressure-points.md`
-  A compact explanation of what is missing next and why it matters.
+- `project/systems/environment-system.md`
+- `project/systems/a2c-brain.md`
+- `project/systems/agent-interface.md`
+- `references/observation-vector-reference.md`
 
-## How The Tree Is Intended To Feel
+### If you want to understand the RL theory behind A2C
 
-This is not a small archive with a decorative structure. The tree exists so that a large amount of educational material stays navigable.
+- `concepts/core/reinforcement-learning.md`
+- `concepts/core/policy-gradient-methods.md`
+- `concepts/core/advantage-estimation.md`
+- `concepts/core/actor-critic-architecture.md`
+- `project/decisions/a2c-as-baseline.md`
 
-The guiding split is:
+### If you want to understand where the project is heading
 
-- `concepts/` explains the ideas,
-- `project/` explains this repository,
-- `paths/` tells you how to move through both,
-- `exercises/` forces you to prove understanding,
-- `materials/` sends you outward when the archive should not try to become a full textbook,
-- `references/` reduces lookup friction while reading.
+- `project/evolution/from-baseline-to-brain.md`
+- `project/evolution/milestone-roadmap.md`
+- `concepts/advanced/hebbian-plasticity.md`
+- `concepts/advanced/eligibility-traces.md`
+- `concepts/advanced/neuromodulation.md`
+
+### If you want to practise
+
+- `exercises/EXERCISE_GUIDE.md`
+- `exercises/EXERCISE_ORDER.md`
+
+### If you want a quick reference
+
+- `GLOSSARY.md`
+- `references/notation-guide.md`
+- `references/observation-vector-reference.md`

@@ -1,127 +1,192 @@
 # Runtime Overview
 
-## Status
-
-Current in the project runtime.
-
 ## Why This Architecture Matters
 
-NeuroDrive is already large enough that you should not think of it as "a car and a learner". It is a structured runtime with clear subsystem roles:
+Understanding NeuroDrive's architecture is not just about navigating the codebase — it is about understanding the design decisions that make the project coherent. The subsystem split is deliberate. The ownership boundaries are enforced. The dependency direction is unidirectional. These are all choices with reasons.
 
-- maps,
-- game/environment,
-- agent interface,
-- brain,
-- analytics,
-- debug,
-- shared simulation ordering.
+**Status:** Current implementation (Bevy 0.18, Rust).
 
-Understanding that split is the fastest way to avoid confused edits.
+## Prerequisites
 
-## High-Level Shape
+- `concepts/foundations/bevy-ecs-primer.md` — ECS, systems, resources, components, plugins
+
+---
+
+## The Six Subsystems
 
 ```text
-Track + centreline
-    -> car physics and episode truth
-    -> observation/action interface
-    -> brain acts through stable control boundary
-    -> analytics records behaviour and updates
-    -> debug renders live interpretation
+NeuroDrive/src/
+│
+├── maps/          ← Track topology (foundational, no runtime deps)
+├── game/          ← Car physics, collision, progress, rewards, episodes
+├── agent/         ← Observation/action contract (stable interface)
+├── brain/         ← Controller implementation (A2C baseline)
+├── analytics/     ← Post-run data capture and export
+├── debug/         ← Live overlays and HUD
+└── sim/           ← Shared schedule ordering contract
 ```
 
-## Subsystem Boundaries
+### Subsystem Responsibilities
 
-### `maps`
+| Subsystem | Owns | Does NOT own |
+|---|---|---|
+| `maps` | Track geometry, centreline, tile semantics, spawn pose | Runtime car state, physics, learning |
+| `game` | Car entity, physics, collision, progress, reward, episode lifecycle | Observations, policy logic, analytics export |
+| `agent` | Action and observation contract | Physics, reward definition, policy decisions |
+| `brain` | Controller mode and the A2C baseline | Reward truth, raw environment state, analytics capture |
+| `analytics` | Episode/update capture, derived metrics, export | Simulation truth, training state, reward definitions |
+| `debug` | Live overlays, HUD, runtime diagnostics | Simulation truth, training decisions |
+| `sim` | Named system set ordering shared across plugins | Any runtime state |
 
-Owns:
+---
 
-- track construction,
-- grid occupancy,
-- centreline derivation,
-- spawn pose,
-- some visual geometry.
+## Dependency Direction
 
-Why foundational:
-Every later subsystem depends on spatial truth from here.
+The dependency graph is deliberately acyclic:
 
-### `game`
+```
+sim        (shared ordering — no deps)
+maps       (no runtime deps)
+game       (depends on maps, sim)
+agent      (depends on game, maps, brain::types for mode)
+brain      (depends on agent, game)
+analytics  (depends on game, agent, brain — read-only)
+debug      (depends on maps, game, agent, brain — read-only)
+main       (wires plugin order, owns global config)
+```
 
-Owns:
+**Key rule:** lower layers do not import from higher layers. `game` does not depend on `brain`. `agent` only references `brain::types` for the mode enum, not any brain implementation. This keeps the environment independent of whatever controller is plugged in.
 
-- the car entity,
-- deterministic dynamics,
-- collision truth,
-- progress measurement,
-- reward shaping,
-- episode reset logic.
+---
 
-This subsystem is where environment truth is created.
+## The Stable Controller Boundary
 
-### `agent`
+The most important design principle in the architecture:
 
-Owns:
+```
+                    ┌────────────────┐
+                    │   Environment  │
+                    │  (maps, game)  │
+                    └───────┬────────┘
+                            │ EpisodeState (reward, done)
+                            │ TrackProgress
+                            │ CollisionEvent
+                            ▼
+                    ┌────────────────┐
+                    │     agent/     │
+                    │ ObservationVector │
+                    │ ActionState    │
+                    └───────┬────────┘
+                            │ obs → brain
+                            │ action ← brain
+                            ▼
+                    ┌────────────────┐
+                    │    brain/      │
+                    │ (A2C baseline) │
+                    └────────────────┘
+```
 
-- stable action semantics,
-- optional action smoothing,
-- sensor derivation,
-- observation vector construction.
+The `agent/` layer is the stable boundary. It exposes exactly:
+- `ObservationVector` — the normalised policy input (23-dim)
+- `ActionState` — the desired and applied car control (`CarAction`)
 
-This is the contract layer between environment and controller.
+**Why this matters:** Any controller — keyboard, A2C, or the future biological brain — uses the same interface. The environment never needs to know what kind of brain is in control.
 
-### `brain`
+---
 
-Owns:
+## The Plugin System
 
-- controller mode selection,
-- current A2C baseline,
-- rollout and update logic.
+Each subsystem registers as a Bevy plugin:
 
-It consumes observation and reward truth but does not define them.
+```rust
+app.add_plugins((
+    MonacoPlugin,       // maps: builds track, spawns track entity
+    GamePlugin,         // game: spawns car, registers physics/episode systems
+    AgentPlugin,        // agent: registers observation/action systems
+    A2cPlugin,          // brain: registers A2C systems, initialises A2cBrain
+    AnalyticsPlugin,    // analytics: registers capture and export systems
+    DebugPlugin,        // debug: registers overlays and HUD
+));
+```
 
-### `analytics`
+Plugin order matters for resource initialisation but system ordering within `FixedUpdate` is controlled by the `SimSet` contract.
 
-Owns:
+---
 
-- run tracking,
-- tick and episode record building,
-- derived metrics,
-- export to JSON and Markdown.
+## The Single Car Model
 
-It observes runtime truth; it should not mutate it.
+The current runtime assumes exactly one car:
 
-### `debug`
+- Many queries use `single()` / `single_mut()` which panic if more or fewer than one entity matches
+- `EpisodeState` and `ActionState` are global resources (not per-car components)
+- Analytics captures per-episode data from the single car
 
-Owns:
+This is a known architectural constraint. The planned vectorised trainer (`context/plans/vectorised-a2c-visual-trainer.md`) will break these singleton assumptions to support 25 concurrent cars.
 
-- live world overlays,
-- HUD summaries,
-- quick run-health interpretation.
+---
 
-Again, it is an observer, not a truth source.
+## Subsystem Interaction Summary
 
-## Repository-Wide Architectural Story
+```text
+Startup:
+  MonacoPlugin → spawns Track entity
+  GamePlugin   → spawns Camera + Car entity
+  All plugins  → initialise resources
 
-The current implementation stage can be summarised like this:
+FixedUpdate (every 60Hz tick):
+  SimSet::Input:
+    keyboard_action_input_system (if keyboard mode)
+    a2c_act_system               (if AI mode)
+    action_smoothing_system
 
-- the environment is already substantial,
-- the controller interface is now stable enough to matter,
-- the A2C baseline is real,
-- analytics and debug infrastructure are not roadmap-only extras,
-- the biological-learning path is still ahead of the runtime rather than inside it.
+  SimSet::Physics:
+    car_physics_system
+    capture_episode_action_stats_system
 
-That is why the project feels transitional rather than unfinished.
+  SimSet::Collision:
+    collision_detection_system
 
-## Pressure Points
+  SimSet::Measurement:
+    update_track_progress_system
+    episode_loop_system          ← reward, terminal, reset
+    update_sensor_readings_system
+    build_observation_vector_system
+    capture_episode_tick_trace_system
+    snapshot_completed_episode_*_systems
+    a2c_collect_reward_system    ← append reward, maybe update
+    update_driving_hud_stats_system
+    capture_driving_hud_episode_metrics_system
 
-The current architecture is coherent, but several tensions remain:
+Update (every frame):
+  toggle_agent_mode_system
+  episode_tracker_system       (analytics fold)
+  debug overlay rendering
+  HUD text update
 
-- singleton-car assumptions limit vectorised training,
-- A2C reproducibility is weaker than environment determinism,
-- run metadata is thinner than a serious experiment workflow needs,
-- the biological `src/brain/biological/` direction is still not implemented.
+Last (end of frame):
+  a2c_flush_on_exit_system
+  analytics on-exit export
+```
+
+---
+
+## Pressure Points and Future Tension
+
+The current architecture handles the single-car case cleanly. Several pressure points exist for future development:
+
+1. **Singleton assumptions** are the main blocker for vectorised training. Every `single()` query and global resource that stores per-car state needs to be per-entity.
+
+2. **Brain is modular but minimal.** The `Brain` trait in `brain/types.rs` is minimal — it just maps `ObservationVector → CarAction`. A richer pluggable-brain interface will be needed when the biological brain architecture is introduced.
+
+3. **Analytics is exit-triggered.** All data is exported when the app exits. Crash-safe checkpointing is a known gap.
+
+4. **No headless mode.** The runtime requires a window. A headless accelerated training mode would allow much faster experiments.
+
+---
 
 ## Related Files
 
-- `project/architecture/data-flow-and-schedule.md`
-- `project/systems/environment.md`
-- `project/comparisons/current-baseline-vs-target-biological-system.md`
+- `project/architecture/fixed-tick-pipeline.md` — the SimSet ordering in detail
+- `project/architecture/module-boundaries.md` — ownership and dependency rules
+- `project/systems/environment-system.md` — the game/maps layer in depth
+- `project/systems/agent-interface.md` — the stable controller boundary
