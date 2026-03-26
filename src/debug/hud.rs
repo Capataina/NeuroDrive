@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 
-use bevy::ecs::hierarchy::ChildSpawnerCommands;
 use bevy::prelude::*;
 use bevy::ui::widget::{Text, TextUiWriter};
 use bevy::ui::{
@@ -10,8 +9,9 @@ use bevy::ui::{
 
 use crate::agent::observation::SensorReadings;
 use crate::brain::a2c::A2cTrainingStats;
+use crate::brain::ranking::TrainerLiveRanking;
 use crate::debug::overlays::DebugOverlayState;
-use crate::game::car::Car;
+use crate::game::car::{Car, EnvInstanceId};
 use crate::game::collision::Collided;
 use crate::game::episode::{EpisodeConfig, EpisodeEndReason, EpisodeMovingAverages, EpisodeState};
 use crate::game::progress::TrackProgress;
@@ -37,41 +37,11 @@ impl Default for DrivingHudStats {
     }
 }
 
-/// Accumulates one episode's centreline-following metrics before snapshotting them into history.
-#[derive(Resource, Debug)]
-pub struct DrivingHudEpisodeAccumulator {
-    episode_id: u32,
-    tick_count: u32,
-    centreline_distance_sum: f32,
-    abs_heading_error_sum_deg: f32,
-}
-
-impl Default for DrivingHudEpisodeAccumulator {
-    fn default() -> Self {
-        Self {
-            episode_id: 1,
-            tick_count: 0,
-            centreline_distance_sum: 0.0,
-            abs_heading_error_sum_deg: 0.0,
-        }
-    }
-}
-
-impl DrivingHudEpisodeAccumulator {
-    fn reset_for_episode(&mut self, episode_id: u32) {
-        self.episode_id = episode_id;
-        self.tick_count = 0;
-        self.centreline_distance_sum = 0.0;
-        self.abs_heading_error_sum_deg = 0.0;
-    }
-
-    fn record_tick(&mut self, episode_state: &EpisodeState) {
-        self.tick_count = self.tick_count.saturating_add(1);
-        self.centreline_distance_sum += episode_state.current_tick_centerline_distance;
-        self.abs_heading_error_sum_deg +=
-            episode_state.current_tick_heading_error.abs().to_degrees();
-    }
-}
+/// Placeholder resource retained for compatibility with DebugPlugin resource init.
+/// Episode-level accumulation is no longer needed since we fold completions directly
+/// from EpisodeState per car.
+#[derive(Resource, Debug, Default)]
+pub struct DrivingHudEpisodeAccumulator;
 
 /// Rolling debug-only history used to split recent episodes into four real-time quarters.
 #[derive(Resource, Debug, Default)]
@@ -110,8 +80,8 @@ pub(crate) enum HudTextRole {
     Assessment,
     Current,
     Run,
+    RunDetail,
     Learning,
-    Legend,
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,233 +94,228 @@ pub(crate) struct QuarterCell {
 enum QuarterColumn {
     Quarter,
     Count,
-    Gap,
-    Heading,
     Progress,
     Life,
     Return,
     Ends,
 }
 
+const QUARTER_COLUMNS: [QuarterColumn; 6] = [
+    QuarterColumn::Quarter,
+    QuarterColumn::Count,
+    QuarterColumn::Progress,
+    QuarterColumn::Life,
+    QuarterColumn::Return,
+    QuarterColumn::Ends,
+];
+
 fn quarter_column_width(column: QuarterColumn) -> f32 {
     match column {
-        QuarterColumn::Quarter => 30.0,
+        QuarterColumn::Quarter => 24.0,
         QuarterColumn::Count => 28.0,
-        QuarterColumn::Gap => 52.0,
-        QuarterColumn::Heading => 58.0,
-        QuarterColumn::Progress => 54.0,
-        QuarterColumn::Life => 48.0,
+        QuarterColumn::Progress => 56.0,
+        QuarterColumn::Life => 50.0,
         QuarterColumn::Return => 58.0,
-        QuarterColumn::Ends => 88.0,
+        QuarterColumn::Ends => 72.0,
     }
 }
 
 /// Spawns the runtime diagnostics HUD used by `F3`.
 pub(crate) fn spawn_driving_hud_system(mut commands: Commands) {
+    let bg = Color::srgba(0.04, 0.06, 0.09, 0.72);
+    let accent = Color::srgb(0.35, 0.58, 0.93);
+    let text_bright = Color::srgb(0.90, 0.93, 0.96);
+    let text_primary = Color::srgb(0.78, 0.82, 0.86);
+    let text_dim = Color::srgb(0.55, 0.62, 0.70);
+    let divider = Color::srgba(0.40, 0.50, 0.60, 0.18);
+    let header_bg = Color::srgba(0.08, 0.12, 0.18, 0.80);
+    let cell_bg = Color::srgba(0.06, 0.09, 0.14, 0.70);
+    let table_bg = Color::srgba(0.03, 0.05, 0.08, 0.30);
+
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(12.0),
-                left: Val::Px(12.0),
-                width: Val::Px(620.0),
-                padding: UiRect::axes(Val::Px(14.0), Val::Px(12.0)),
+                top: Val::Px(10.0),
+                left: Val::Px(10.0),
+                width: Val::Px(440.0),
+                padding: UiRect::axes(Val::Px(10.0), Val::Px(8.0)),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(6.0),
+                row_gap: Val::Px(3.0),
                 display: Display::None,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.05, 0.09, 0.11, 0.91)),
+            BackgroundColor(bg),
             DrivingHudRoot,
         ))
         .with_children(|parent| {
+            // Accent bar
             parent.spawn((
                 Node {
                     width: Val::Percent(100.0),
-                    height: Val::Px(4.0),
+                    height: Val::Px(2.0),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.19, 0.69, 0.61)),
+                BackgroundColor(accent),
             ));
 
+            // Title
             parent.spawn((
-                Text::new("Run Diagnostics  |  F1 geometry  |  F2 sensors  |  F3 panel"),
-                TextFont::from_font_size(16.0),
-                TextColor(Color::srgb(0.95, 0.98, 0.97)),
+                Text::new("NeuroDrive"),
+                TextFont::from_font_size(13.0),
+                TextColor(text_bright),
             ));
 
+            // Assessment
             parent.spawn((
                 Text::new(""),
-                TextFont::from_font_size(13.0),
-                TextColor(Color::srgb(0.61, 0.87, 0.80)),
+                TextFont::from_font_size(10.0),
+                TextColor(accent),
                 HudTextRole::Assessment,
             ));
-            parent.spawn((
-                Text::new(""),
-                TextFont::from_font_size(12.0),
-                TextColor(Color::srgb(0.90, 0.94, 0.93)),
-                HudTextRole::Current,
-            ));
-            parent.spawn((
-                Text::new(""),
-                TextFont::from_font_size(12.0),
-                TextColor(Color::srgb(0.90, 0.94, 0.93)),
-                HudTextRole::Run,
-            ));
-            parent.spawn((
-                Text::new(""),
-                TextFont::from_font_size(12.0),
-                TextColor(Color::srgb(0.80, 0.88, 0.87)),
-                HudTextRole::Learning,
-            ));
 
+            // Divider
             parent.spawn((
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(1.0),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.72, 0.83, 0.82, 0.16)),
+                BackgroundColor(divider),
             ));
 
+            // Current (live metrics)
             parent.spawn((
-                Text::new("Recent quarters (oldest -> newest)"),
-                TextFont::from_font_size(12.0),
-                TextColor(Color::srgb(0.93, 0.96, 0.95)),
+                Text::new(""),
+                TextFont::from_font_size(11.0),
+                TextColor(text_primary),
+                HudTextRole::Current,
             ));
 
+            // Run (episode stats)
+            parent.spawn((
+                Text::new(""),
+                TextFont::from_font_size(11.0),
+                TextColor(text_primary),
+                HudTextRole::Run,
+            ));
+
+            // Run detail (best/avg)
+            parent.spawn((
+                Text::new(""),
+                TextFont::from_font_size(11.0),
+                TextColor(text_dim),
+                HudTextRole::RunDetail,
+            ));
+
+            // Learning (PPO)
+            parent.spawn((
+                Text::new(""),
+                TextFont::from_font_size(11.0),
+                TextColor(text_dim),
+                HudTextRole::Learning,
+            ));
+
+            // Divider
+            parent.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(1.0),
+                    ..default()
+                },
+                BackgroundColor(divider),
+            ));
+
+            // Quarters subtitle
+            parent.spawn((
+                Text::new("Quarters"),
+                TextFont::from_font_size(10.0),
+                TextColor(text_dim),
+            ));
+
+            // Quarter table
             parent
                 .spawn((
                     Node {
                         width: Val::Percent(100.0),
                         flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(3.0),
+                        row_gap: Val::Px(1.0),
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(0.03, 0.05, 0.06, 0.34)),
+                    BackgroundColor(table_bg),
                 ))
                 .with_children(|table| {
-                    let spawn_cell =
-                        |row: &mut ChildSpawnerCommands<'_>, label: &str, width: f32, bg: Color| {
-                            row.spawn((
-                                Node {
-                                    width: Val::Px(width),
-                                    padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
-                                    justify_content: JustifyContent::FlexStart,
-                                    align_items: AlignItems::Center,
-                                    ..default()
-                                },
-                                BackgroundColor(bg),
-                            ))
-                            .with_children(
-                                |cell: &mut ChildSpawnerCommands<'_>| {
-                                    cell.spawn((
-                                        Text::new(label),
-                                        TextFont::from_font_size(10.5),
-                                        TextColor(Color::srgb(0.95, 0.98, 0.97)),
-                                    ));
-                                },
-                            );
-                        };
+                    // Header row
+                    let headers: [(&str, QuarterColumn); 6] = [
+                        ("Q", QuarterColumn::Quarter),
+                        ("N", QuarterColumn::Count),
+                        ("Prog", QuarterColumn::Progress),
+                        ("Life", QuarterColumn::Life),
+                        ("Rwd", QuarterColumn::Return),
+                        ("C/L/T", QuarterColumn::Ends),
+                    ];
 
                     table
                         .spawn((
                             Node {
                                 width: Val::Percent(100.0),
                                 flex_direction: FlexDirection::Row,
-                                column_gap: Val::Px(4.0),
+                                column_gap: Val::Px(2.0),
                                 ..default()
                             },
-                            BackgroundColor(Color::srgba(0.08, 0.13, 0.15, 0.82)),
+                            BackgroundColor(header_bg),
                         ))
                         .with_children(|row| {
-                            spawn_cell(
-                                row,
-                                "Q",
-                                quarter_column_width(QuarterColumn::Quarter),
-                                Color::srgba(0.10, 0.18, 0.20, 0.92),
-                            );
-                            spawn_cell(
-                                row,
-                                "N",
-                                quarter_column_width(QuarterColumn::Count),
-                                Color::srgba(0.10, 0.18, 0.20, 0.92),
-                            );
-                            spawn_cell(
-                                row,
-                                "Gap",
-                                quarter_column_width(QuarterColumn::Gap),
-                                Color::srgba(0.10, 0.18, 0.20, 0.92),
-                            );
-                            spawn_cell(
-                                row,
-                                "Head",
-                                quarter_column_width(QuarterColumn::Heading),
-                                Color::srgba(0.10, 0.18, 0.20, 0.92),
-                            );
-                            spawn_cell(
-                                row,
-                                "Prog",
-                                quarter_column_width(QuarterColumn::Progress),
-                                Color::srgba(0.10, 0.18, 0.20, 0.92),
-                            );
-                            spawn_cell(
-                                row,
-                                "Life",
-                                quarter_column_width(QuarterColumn::Life),
-                                Color::srgba(0.10, 0.18, 0.20, 0.92),
-                            );
-                            spawn_cell(
-                                row,
-                                "Return",
-                                quarter_column_width(QuarterColumn::Return),
-                                Color::srgba(0.10, 0.18, 0.20, 0.92),
-                            );
-                            spawn_cell(
-                                row,
-                                "C/L/T",
-                                quarter_column_width(QuarterColumn::Ends),
-                                Color::srgba(0.10, 0.18, 0.20, 0.92),
-                            );
+                            for (label, col) in &headers {
+                                row.spawn((
+                                    Node {
+                                        width: Val::Px(quarter_column_width(*col)),
+                                        padding: UiRect::axes(Val::Px(3.0), Val::Px(2.0)),
+                                        justify_content: JustifyContent::FlexStart,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(header_bg),
+                                ))
+                                .with_children(|cell| {
+                                    cell.spawn((
+                                        Text::new(*label),
+                                        TextFont::from_font_size(9.5),
+                                        TextColor(text_dim),
+                                    ));
+                                });
+                            }
                         });
 
+                    // Data rows
                     for row_index in 0..HUD_QUARTER_COUNT {
                         table
                             .spawn((
                                 Node {
                                     width: Val::Percent(100.0),
                                     flex_direction: FlexDirection::Row,
-                                    column_gap: Val::Px(4.0),
+                                    column_gap: Val::Px(2.0),
                                     ..default()
                                 },
-                                BackgroundColor(Color::srgba(0.03, 0.08, 0.10, 0.55)),
+                                BackgroundColor(cell_bg),
                             ))
                             .with_children(|row| {
-                                for column in [
-                                    QuarterColumn::Quarter,
-                                    QuarterColumn::Count,
-                                    QuarterColumn::Gap,
-                                    QuarterColumn::Heading,
-                                    QuarterColumn::Progress,
-                                    QuarterColumn::Life,
-                                    QuarterColumn::Return,
-                                    QuarterColumn::Ends,
-                                ] {
+                                for column in QUARTER_COLUMNS {
                                     row.spawn((
                                         Node {
                                             width: Val::Px(quarter_column_width(column)),
-                                            padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
+                                            padding: UiRect::axes(Val::Px(3.0), Val::Px(2.0)),
                                             justify_content: JustifyContent::FlexStart,
                                             align_items: AlignItems::Center,
                                             ..default()
                                         },
-                                        BackgroundColor(Color::srgba(0.05, 0.11, 0.13, 0.82)),
+                                        BackgroundColor(cell_bg),
                                     ))
                                     .with_children(|cell| {
                                         cell.spawn((
                                             Text::new(""),
-                                            TextFont::from_font_size(10.5),
-                                            TextColor(Color::srgb(0.90, 0.94, 0.93)),
+                                            TextFont::from_font_size(9.5),
+                                            TextColor(text_primary),
                                             QuarterCell {
                                                 row: row_index,
                                                 column,
@@ -361,79 +326,53 @@ pub(crate) fn spawn_driving_hud_system(mut commands: Commands) {
                             });
                     }
                 });
-
-            parent.spawn((
-                Text::new(""),
-                TextFont::from_font_size(10.5),
-                TextColor(Color::srgb(0.61, 0.78, 0.76)),
-                HudTextRole::Legend,
-            ));
         });
 }
 
-/// SHIM: tracks stats from first car only until HUD overhaul.
+/// Tracks best progress and death count across ALL cars.
 pub(crate) fn update_driving_hud_stats_system(
     mut hud_stats: ResMut<DrivingHudStats>,
-    car_query: Query<(&TrackProgress, &EpisodeState, Has<Collided>), With<Car>>,
+    car_query: Query<(&EnvInstanceId, &TrackProgress, &EpisodeState, Has<Collided>), With<Car>>,
 ) {
-    // SHIM: first car only until HUD overhaul
-    let Some((progress, episode_state, collided)) = car_query.iter().next() else {
-        return;
-    };
+    for (_env_id, progress, episode_state, collided) in car_query.iter() {
+        if collided {
+            hud_stats.deaths = hud_stats.deaths.saturating_add(1);
+        }
 
-    if collided {
-        hud_stats.deaths = hud_stats.deaths.saturating_add(1);
-    }
-
-    if progress.fraction > hud_stats.best_progress_fraction {
-        hud_stats.best_progress_fraction = progress.fraction;
-        hud_stats.best_progress_episode = episode_state.current_episode;
+        if progress.fraction > hud_stats.best_progress_fraction {
+            hud_stats.best_progress_fraction = progress.fraction;
+            hud_stats.best_progress_episode = episode_state.current_episode;
+        }
     }
 }
 
-/// SHIM: captures HUD metrics from first car only until HUD overhaul.
+/// Folds ALL cars' completed episodes into HUD history.
 pub(crate) fn capture_driving_hud_episode_metrics_system(
     config: Res<EpisodeConfig>,
-    car_query: Query<&EpisodeState, With<Car>>,
-    mut accumulator: ResMut<DrivingHudEpisodeAccumulator>,
+    car_query: Query<(&EnvInstanceId, &EpisodeState), With<Car>>,
     mut history: ResMut<DrivingHudHistory>,
 ) {
-    // SHIM: first car only until HUD overhaul
-    let Some(episode_state) = car_query.iter().next() else {
-        return;
-    };
+    for (_env_id, episode_state) in car_query.iter() {
+        let Some(end_reason) = episode_state.current_tick_end_reason else {
+            continue;
+        };
 
-    let finished_episode_id = episode_state.current_episode.saturating_sub(1);
-    let target_episode_id = if episode_state.current_tick_end_reason.is_some() {
-        finished_episode_id
-    } else {
-        episode_state.current_episode
-    };
-
-    if accumulator.episode_id != target_episode_id {
-        accumulator.reset_for_episode(target_episode_id);
+        // This car finished an episode this tick.
+        history.episodes.push_back(CompletedHudEpisode {
+            end_reason,
+            best_progress_fraction: episode_state.last_episode_best_progress_fraction,
+            total_return: episode_state.last_episode_return,
+            life_seconds: episode_state.last_episode_ticks as f32 * FIXED_TICK_SECONDS,
+            mean_centreline_distance: episode_state.current_tick_centerline_distance,
+            mean_abs_heading_error_deg: episode_state
+                .current_tick_heading_error
+                .abs()
+                .to_degrees(),
+        });
+        while history.episodes.len() > config.moving_average_window.max(1) {
+            let _ = history.episodes.pop_front();
+        }
     }
-
-    accumulator.record_tick(episode_state);
-
-    let Some(end_reason) = episode_state.current_tick_end_reason else {
-        return;
-    };
-
-    let tick_count = accumulator.tick_count.max(1) as f32;
-    history.episodes.push_back(CompletedHudEpisode {
-        end_reason,
-        best_progress_fraction: episode_state.last_episode_best_progress_fraction,
-        total_return: episode_state.last_episode_return,
-        life_seconds: episode_state.last_episode_ticks as f32 * FIXED_TICK_SECONDS,
-        mean_centreline_distance: accumulator.centreline_distance_sum / tick_count,
-        mean_abs_heading_error_deg: accumulator.abs_heading_error_sum_deg / tick_count,
-    });
-    while history.episodes.len() > config.moving_average_window.max(1) {
-        let _ = history.episodes.pop_front();
-    }
-
-    accumulator.reset_for_episode(episode_state.current_episode);
 }
 
 /// Shows or hides the diagnostics panel according to the `F3` toggle.
@@ -452,14 +391,22 @@ pub(crate) fn update_driving_hud_visibility_system(
     };
 }
 
-/// SHIM: reads from first car only until HUD overhaul.
+/// Displays the best car's live stats. Uses TrainerLiveRanking to select
+/// which car to show; falls back to the first car if no ranking exists yet.
 pub(crate) fn update_driving_hud_text_system(
     overlay: Res<DebugOverlayState>,
     hud_stats: Res<DrivingHudStats>,
     history: Res<DrivingHudHistory>,
     a2c_stats: Option<Res<A2cTrainingStats>>,
+    ranking: Option<Res<TrainerLiveRanking>>,
     car_query: Query<
-        (&TrackProgress, &SensorReadings, &EpisodeState, &EpisodeMovingAverages),
+        (
+            &EnvInstanceId,
+            &TrackProgress,
+            &SensorReadings,
+            &EpisodeState,
+            &EpisodeMovingAverages,
+        ),
         With<Car>,
     >,
     summary_query: Query<(Entity, &HudTextRole)>,
@@ -470,8 +417,15 @@ pub(crate) fn update_driving_hud_text_system(
         return;
     }
 
-    // SHIM: first car only until HUD overhaul
-    let Some((progress, sensors, episode_state, moving_avg)) = car_query.iter().next() else {
+    // Select the best car from the ranking, falling back to any car.
+    let best_env_id = ranking.as_ref().and_then(|r| r.best_env_id);
+    let Some((_, progress, sensors, episode_state, moving_avg)) = (match best_env_id {
+        Some(target_id) => car_query
+            .iter()
+            .find(|(env_id, _, _, _, _)| env_id.0 == target_id)
+            .or_else(|| car_query.iter().next()),
+        None => car_query.iter().next(),
+    }) else {
         return;
     };
 
@@ -492,17 +446,20 @@ pub(crate) fn update_driving_hud_text_system(
     let (assessment, guidance) = assess_recent_run(&recent_quarters);
 
     let current_line = format!(
-        "Now  progress {progress_pct:5.2}%  life-best {life_best_progress_pct:5.2}%  offset {offset:+6.2}  line-gap {line_gap:5.2}  heading {heading_error_deg:5.2} deg",
+        "Prog {progress_pct:.1}%  Best {life_best_progress_pct:.1}%  Gap {gap:.1}  Head {heading_error_deg:.1}\u{00b0}  Off {offset:+.1}",
+        gap = progress.distance,
         offset = sensors.signed_lateral_offset,
-        line_gap = progress.distance,
     );
     let run_line = format!(
-        "Run  ep {}  deaths {}  life {:5.2}s  reward {:+7.2}  last {}  best {:5.2}% @ ep {}  recent avg {:5.2}% / {:+6.2}",
+        "Ep {}  Life {:.1}s  Rwd {:+.1}  Deaths {}  Last {}",
         episode_state.current_episode,
-        hud_stats.deaths,
         current_life_seconds,
         episode_state.current_return,
+        hud_stats.deaths,
         last_reason,
+    );
+    let run_detail_line = format!(
+        "Best {:.1}% (ep{})  Avg {:.1}% / {:+.1}",
         best_progress_pct,
         hud_stats.best_progress_episode,
         avg_progress_pct,
@@ -510,27 +467,24 @@ pub(crate) fn update_driving_hud_text_system(
     );
     let learning_line = match a2c_stats {
         Some(stats) if stats.last_completed_update > 0 => format!(
-            "A2C  upd {}  EV {:5.3}  Vloss {:5.3}  Ent {:5.3}  steer std {:5.3}  throttle std {:5.3}",
+            "PPO #{}  EV {:.3}  VL {:.3}  Ent {:.3}  Clip {:.0}%  KL {:.4}",
             stats.last_completed_update,
             stats.explained_variance,
             stats.value_loss,
             stats.policy_entropy,
-            stats.steering_std,
-            stats.throttle_std,
+            stats.clip_fraction * 100.0,
+            stats.approx_kl,
         ),
-        _ => "A2C  no completed updates yet".to_string(),
+        _ => "PPO  waiting for first update".to_string(),
     };
-    let legend_line =
-        "Lower Gap/Head is better. Higher Prog/Life/Return is better. C/L/T = crashes/laps/timeouts."
-            .to_string();
 
     for (entity, role) in &summary_query {
         let text = match role {
-            HudTextRole::Assessment => format!("Status  {assessment}  |  {guidance}"),
+            HudTextRole::Assessment => format!("{assessment}  \u{2014}  {guidance}"),
             HudTextRole::Current => current_line.clone(),
             HudTextRole::Run => run_line.clone(),
+            HudTextRole::RunDetail => run_detail_line.clone(),
             HudTextRole::Learning => learning_line.clone(),
-            HudTextRole::Legend => legend_line.clone(),
         };
         *text_writer.text(entity, 0) = text;
     }
@@ -588,23 +542,19 @@ fn render_quarter_cell(
         return match column {
             QuarterColumn::Quarter => format!("Q{}", quarter_index + 1),
             QuarterColumn::Count => "-".to_string(),
-            QuarterColumn::Gap => "-".to_string(),
-            QuarterColumn::Heading => "-".to_string(),
             QuarterColumn::Progress => "-".to_string(),
             QuarterColumn::Life => "-".to_string(),
             QuarterColumn::Return => "-".to_string(),
-            QuarterColumn::Ends => "collect".to_string(),
+            QuarterColumn::Ends => "--".to_string(),
         };
     }
 
     match column {
         QuarterColumn::Quarter => format!("Q{}", quarter_index + 1),
         QuarterColumn::Count => format!("{}", quarter.count),
-        QuarterColumn::Gap => format!("{:.2}", quarter.mean_centreline_distance),
-        QuarterColumn::Heading => format!("{:.1}", quarter.mean_abs_heading_error_deg),
         QuarterColumn::Progress => format!("{:.1}%", quarter.mean_progress_pct),
-        QuarterColumn::Life => format!("{:.2}s", quarter.mean_life_seconds),
-        QuarterColumn::Return => format!("{:+.2}", quarter.mean_return),
+        QuarterColumn::Life => format!("{:.1}s", quarter.mean_life_seconds),
+        QuarterColumn::Return => format!("{:+.1}", quarter.mean_return),
         QuarterColumn::Ends => format!(
             "{}/{}/{}",
             quarter.crash_count, quarter.lap_count, quarter.timeout_count

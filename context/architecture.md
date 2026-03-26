@@ -13,7 +13,7 @@
   - a fixed 60 Hz simulation timestep,
   - a single hard-coded track,
   - a **multi-car vectorised trainer** (configurable car count via `TrainerConfig`, default 3) with per-car components and one shared rollout buffer,
-  - a live handwritten A2C baseline brain,
+  - a live handwritten **PPO** brain (upgraded from A2C — clipped surrogate objective, multi-epoch updates amortised across ticks),
   - a per-tick analytics capture pipeline with JSON and Markdown export,
   - a debug HUD, world-space overlay layer, and live leaderboard panel.
 - The project intent in `README.md` is biologically inspired local plasticity. The current implementation reality is still at **baseline validation** — proving the environment and observation contract are learnable before transitioning to biological learning rules.
@@ -54,10 +54,10 @@ NeuroDrive/
 │   │   ├── plugin.rs                    # BrainPlugin: AgentMode toggle (F4), A2C buffer reset on switch
 │   │   ├── types.rs                     # AgentMode enum, Brain trait
 │   │   ├── a2c/
-│   │   │   ├── mod.rs                   # A2cBrain, A2cPlugin, act/reward-collect/flush systems
+│   │   │   ├── mod.rs                   # A2cBrain, A2cPlugin, PpoUpdateState, act/collect/epoch/flush systems
 │   │   │   ├── model.rs                 # ActorCritic: 2×64 MLP with separate actor + critic stacks
-│   │   │   ├── buffer.rs               # TrainerRolloutBuffer: env_id-tagged transitions from all cars, per-env GAE computation
-│   │   │   └── update.rs               # a2c_update(): GAE, policy/value losses, gradient clipping, health stats
+│   │   │   ├── buffer.rs               # TrainerRolloutBuffer: env_id-tagged transitions + old_log_probs, per-env GAE
+│   │   │   └── update.rs               # PreparedUpdate, ppo_process_chunk/ppo_finish_epoch, PPO clipped surrogate
 │   │   ├── common/
 │   │   │   ├── mod.rs
 │   │   │   ├── mlp.rs                   # Handwritten Linear layer, ReLU, Glorot init, forward/backward
@@ -67,17 +67,22 @@ NeuroDrive/
 │   │   └── biological/                  # Empty placeholder for future local-plasticity brain
 │   ├── analytics/
 │   │   ├── mod.rs
-│   │   ├── plugin.rs                    # AnalyticsPlugin: tracker init, capture scheduling, on-exit export
-│   │   ├── models.rs                    # EpisodeTracker, EpisodeRecord, TickTraceRecord, A2cUpdateRecord
+│   │   ├── plugin.rs                    # AnalyticsPlugin: tracker + config init, capture scheduling, two-tier on-exit export
+│   │   ├── models.rs                    # EpisodeTracker, EpisodeRecord (env_id-tagged), TickTraceRecord, A2cUpdateRecord, AnalyticsConfig, RunMetadata, CompactRunExport
 │   │   ├── trackers/
 │   │   │   ├── mod.rs
-│   │   │   ├── action.rs               # Per-episode steering/throttle accumulation and snapshot
-│   │   │   ├── trace.rs                # Per-tick trajectory capture and episode snapshot
-│   │   │   └── episode.rs              # Folds completed episode + trace + A2C snapshots into EpisodeTracker
+│   │   │   ├── action.rs               # PerCarActionAccumulators: per-car steering/throttle accumulation and snapshot (all cars)
+│   │   │   ├── trace.rs                # PerCarTraceAccumulators: per-car per-tick trajectory capture and episode snapshot (all cars)
+│   │   │   └── episode.rs              # Folds all cars' completed episodes + traces + PPO snapshots into EpisodeTracker
 │   │   ├── metrics/
 │   │   │   ├── mod.rs
 │   │   │   ├── stats.rs                # Basic episode statistics computation
 │   │   │   ├── chunking.rs             # Temporal chunked trend analysis
+│   │   │   ├── timeseries.rs           # Episode/update time-series extraction, rolling mean, plateau detection
+│   │   │   ├── diagnostics.rs          # Automated diagnostic flags (entropy collapse, clip spikes, plateaus, etc.)
+│   │   │   ├── consistency.rs          # Per-sector behavioural consistency (speed/steering/throttle variance)
+│   │   │   ├── phases.rs               # Learning phase detection (Exploration → Discovery → Refinement → Plateau → Regression)
+│   │   │   ├── sparkline.rs            # ASCII visual helpers (sparklines, bar charts, heatmap rows)
 │   │   │   ├── inputs.rs               # Input-learning summaries (ray, offset, heading distributions)
 │   │   │   ├── turns.rs                # Turn-execution diagnostics (latency, adequacy, understeer)
 │   │   │   ├── critic.rs               # Critic health diagnostics (value drift, explained variance)
@@ -86,8 +91,8 @@ NeuroDrive/
 │   │   │   └── insights.rs             # Narrative insight bullet generation
 │   │   ├── exporters/
 │   │   │   ├── mod.rs
-│   │   │   ├── json.rs                 # Timestamped JSON run export
-│   │   │   └── markdown.rs             # Timestamped Markdown report with tables and narrative
+│   │   │   ├── json.rs                 # Two-tier JSON export: compact (always) + full trace (opt-in)
+│   │   │   └── markdown.rs             # Diagnostic-oriented Markdown report with 7 sections, sparklines, heatmaps
 │   │   └── sessions/                    # Empty placeholder for future session management
 │   └── debug/
 │       ├── mod.rs
@@ -110,8 +115,8 @@ NeuroDrive/
 | **maps** | Track topology, tile semantics, centreline derivation, spawn pose, visual track geometry | game, agent, debug | `src/maps/` |
 | **game** | Car entity lifecycle, physics, collision truth, progress measurement, reward shaping, episode boundaries | maps, agent, analytics, debug, brain | `src/game/` |
 | **agent** | Stable action boundary (CarAction ↔ ActionState) and policy observation contract (ObservationVector) | game, maps, brain, debug | `src/agent/` |
-| **brain** | Controller mode switching (F4), the current A2C baseline implementation, trainer live ranking, and car visual roles | agent, game, analytics | `src/brain/` |
-| **analytics** | Episode/update capture, derived diagnostics, JSON + Markdown report export | game, agent, brain | `src/analytics/` |
+| **brain** | Controller mode switching (F4), the PPO baseline implementation (clipped surrogate, amortised epochs), trainer live ranking, and car visual roles | agent, game, analytics | `src/brain/` |
+| **analytics** | Multi-car episode/update capture (env_id-tagged), 13 derived metric modules, two-tier JSON export (compact + opt-in full trace), diagnostic Markdown report with ASCII visuals | game, agent, brain | `src/analytics/` |
 | **debug** | Live world-space overlays, runtime HUD panel, live leaderboard panel, and recent-run assessment | game, agent, brain, maps | `src/debug/` |
 
 ## Dependency Direction
@@ -175,7 +180,7 @@ DefaultPlugins → MonacoPlugin → AgentPlugin → BrainPlugin → AnalyticsPlu
 ```text
 SimSet::Input
 ├── keyboard_action_input_system          (agent — mode-gated, writes ActionState.desired)
-├── a2c_act_all_cars_system               (brain — mode-gated, writes ActionState.desired for all cars, appends to rollout buffer with env_id)
+├── a2c_act_all_cars_system               (brain — mode-gated, writes ActionState.desired for all cars, appends to rollout buffer with env_id + old log-prob)
 └── action_smoothing_system               (agent — copies or smooths desired → applied)
 
 SimSet::Physics
@@ -193,7 +198,8 @@ SimSet::Measurement
 ├── capture_episode_tick_trace_system     (analytics — per-tick trace record)
 ├── snapshot_completed_episode_trace_system     (analytics)
 ├── snapshot_completed_episode_action_stats_system  (analytics)
-├── a2c_collect_rewards_all_cars_system   (brain — appends reward/done for all cars, triggers update at horizon with per-env GAE)
+├── a2c_collect_rewards_all_cars_system   (brain — appends reward/done for all cars, prepares PPO update at horizon)
+├── ppo_epoch_system                     (brain — processes 128-sample chunk from prepared update, advances epoch state)
 ├── update_driving_hud_stats_system       (debug — updates live HUD values)
 └── capture_driving_hud_episode_metrics_system  (debug — captures episode-end data for quarter summaries)
 ```
@@ -216,31 +222,34 @@ SimSet::Measurement
 ### Last Schedule (before exit)
 
 ```text
-├── a2c_flush_on_exit_system              (brain — updates from any residual rollout data)
+├── a2c_flush_on_exit_system              (brain — finishes in-progress PPO epochs + flushes residual rollout data)
 └── on_exit_system                        (analytics — exports JSON + Markdown to reports/)
 ```
 
 ### Key Data Flow Contracts
 
-- The environment contract is **fixed-tick and order-sensitive**. A2C action selection must happen before smoothing, reward collection must happen after episode truth is computed, and analytics trace capture sits between observation rebuild and A2C reward collection.
+- The environment contract is **fixed-tick and order-sensitive**. PPO action selection must happen before smoothing, reward collection must happen after episode truth is computed, and analytics trace capture sits between observation rebuild and PPO reward collection.
+- The PPO update is **amortised across ticks** via `PreparedUpdate` and `ppo_epoch_system`. GAE is computed once at prepare time; samples are processed in 128-sample chunks across subsequent ticks. New transitions collect into a fresh buffer during the update.
 - The `agent` boundary is stable: observations go from environment to controller, and actions go from controller to physics through `ActionState`.
 - The analytics path is **append-only** during runtime and flushes only on app exit.
 
 ## Structural Notes / Current Reality
 
-- The codebase is **not** environment-only. A2C, analytics, and the debug HUD are live and substantial subsystems. Documentation treating them as roadmap-only is obsolete.
+- The codebase is **not** environment-only. PPO, analytics, and the debug HUD are live and substantial subsystems. Documentation treating them as roadmap-only is obsolete.
 - **Singleton-car assumptions have been removed** from `game`, `agent`, and `brain`. `ActionState`, `EpisodeState`, and `EpisodeMovingAverages` are now per-car **Components** (not Resources). `CollisionEvent` has been replaced by a `Collided` marker component. All fixed-tick systems iterate over multiple cars.
 - The runtime is a **multi-car vectorised trainer**:
   - `TrainerConfig` controls car count (default 3). Cars are spawned with lateral offsets, each assigned a unique colour from a 25-colour palette.
   - Per-car components: `EnvInstanceId`, `SpawnConfig`, `CarColour`, `ActionState`, `EpisodeState`, `EpisodeMovingAverages`.
-  - One shared `TrainerRolloutBuffer` collects transitions from all cars with `env_id` tagging; GAE is computed per-env (no cross-env value leakage).
+  - One shared `TrainerRolloutBuffer` collects transitions from all cars with `env_id` tagging and old log-probs for PPO ratio computation; GAE is computed per-env (no cross-env value leakage).
   - A `TrainerLiveRanking` resource tracks best/worst car with hysteresis; `ranking.rs` assigns visual highlight roles.
   - A live leaderboard panel (top-right, F3-toggled) shows per-car performance with colour swatches.
+- The brain uses **PPO** (upgraded from A2C): clipped surrogate objective (ε=0.2), 4 epochs per update. Updates are **amortised across ticks** via `PreparedUpdate` and `ppo_epoch_system` — GAE is computed once, then 128 samples are processed per tick to avoid frame stutter. Blocking flush on exit handles residual data.
 - **Analytics and HUD systems use temporary shims** (target first car) pending a full analytics overhaul to support multi-car reporting.
-- The brain layer now owns **ranking logic** (`src/brain/ranking.rs`) in addition to A2C. A seeded `StdRng` lives in `A2cBrain` for deterministic policy sampling.
+- The brain layer now owns **ranking logic** (`src/brain/ranking.rs`) in addition to PPO. A seeded `StdRng` lives in `A2cBrain` for deterministic policy sampling.
+- The **debug HUD** has been redesigned: compact 440px panel with blue accent palette, 72% opacity, condensed text lines (no wrapping), PPO-specific metrics (clip %, KL divergence), six-column quarter table, no legend. Leaderboard panel matches the updated colour scheme.
 - The project is in a **transitional architecture state**:
   - The repository intent targets brain-inspired local plasticity (Milestones 2–9).
-  - The implemented learning path is a handwritten A2C baseline used to validate the environment and observation contract (Milestone 1).
+  - The implemented learning path is a handwritten PPO baseline used to validate the environment and observation contract (Milestone 1). Cars are confirmed to learn — drifting corners observed.
 - **`src/brain/biological/`** and **`src/analytics/sessions/`** are empty placeholder directories. They should not be treated as implemented subsystems.
-- `README.md` is directionally accurate but its Milestone 1 checklist understates implementation reality — A2C, debug HUD, and analytics export are all live.
-- The highest current documentation pressure is around **validation and experiment discipline**: A2C lacks persistence, evaluation mode, headless training, and multi-car analytics integration.
+- `README.md` is directionally accurate but its Milestone 1 checklist understates implementation reality — PPO, debug HUD, and analytics export are all live.
+- The highest current documentation pressure is around **validation and experiment discipline**: the brain lacks persistence, evaluation mode, headless training, and multi-car analytics integration.

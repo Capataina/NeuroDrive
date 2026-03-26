@@ -6,6 +6,7 @@ pub const NUM_PROGRESS_SECTORS: usize = 20;
 /// Exported analytics snapshot for a completed episode.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EpisodeRecord {
+    pub env_id: u32,
     pub episode_id: u32,
     pub progress: f32,
     pub reward: f32,
@@ -51,6 +52,7 @@ pub struct EpisodeRecord {
 /// Tick-level trajectory analytics record.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TickTraceRecord {
+    pub env_id: u32,
     pub tick_index: u32,
     pub progress_fraction: f32,
     pub progress_s: f32,
@@ -134,6 +136,8 @@ pub struct A2cUpdateRecord {
     pub throttle_mean: f32,
     pub throttle_std: f32,
     pub clamped_action_fraction: f32,
+    pub clip_fraction: f32,
+    pub approx_kl: f32,
     pub layer_health: Vec<A2cLayerRecord>,
 }
 
@@ -145,4 +149,44 @@ pub struct EpisodeTracker {
     pub episode_traces: Vec<EpisodeTrace>,
     #[serde(skip)]
     pub last_recorded_update: u64,
+}
+
+/// Controls which analytics artefacts are exported on exit.
+#[derive(Resource, Debug)]
+pub struct AnalyticsConfig {
+    /// When true, a full trace JSON (with per-tick data) is written alongside
+    /// the compact export. Default: false.
+    pub full_trace_export: bool,
+}
+
+impl Default for AnalyticsConfig {
+    fn default() -> Self {
+        Self {
+            full_trace_export: false,
+        }
+    }
+}
+
+/// Metadata describing the training run — hyperparameters, environment shape,
+/// and session identity. Serialised into the compact JSON export header.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RunMetadata {
+    pub car_count: usize,
+    pub track_name: String,
+    pub session_timestamp: u64,
+    pub ppo_epochs: usize,
+    pub clip_epsilon: f32,
+    pub gamma: f32,
+    pub gae_lambda: f32,
+    pub max_steps: usize,
+    pub samples_per_tick: usize,
+}
+
+/// Compact export schema — episodes and PPO updates with run metadata,
+/// but no per-tick trace data. This is the default export format.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CompactRunExport {
+    pub metadata: RunMetadata,
+    pub episodes: Vec<EpisodeRecord>,
+    pub ppo_updates: Vec<A2cUpdateRecord>,
 }

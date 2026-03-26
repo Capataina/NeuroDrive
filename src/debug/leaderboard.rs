@@ -31,33 +31,33 @@ pub fn spawn_leaderboard_system(mut commands: Commands, trainer_config: Res<Trai
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(12.0),
-                right: Val::Px(12.0),
-                width: Val::Px(220.0),
-                padding: UiRect::all(Val::Px(10.0)),
+                top: Val::Px(10.0),
+                right: Val::Px(10.0),
+                width: Val::Px(210.0),
+                padding: UiRect::axes(Val::Px(10.0), Val::Px(8.0)),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
+                row_gap: Val::Px(3.0),
                 display: Display::Flex,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.05, 0.07, 0.10, 0.88)),
+            BackgroundColor(Color::srgba(0.04, 0.06, 0.09, 0.72)),
             LeaderboardRoot,
         ))
         .with_children(|parent| {
-            // Title bar
+            // Accent bar
             parent.spawn((
                 Node {
                     width: Val::Percent(100.0),
-                    height: Val::Px(3.0),
+                    height: Val::Px(2.0),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.85, 0.65, 0.13)),
+                BackgroundColor(Color::srgb(0.35, 0.58, 0.93)),
             ));
 
             parent.spawn((
                 Text::new("Leaderboard"),
-                TextFont::from_font_size(14.0),
-                TextColor(Color::srgb(0.95, 0.93, 0.88)),
+                TextFont::from_font_size(12.0),
+                TextColor(Color::srgb(0.90, 0.93, 0.96)),
             ));
 
             // Pre-spawn rows for each env
@@ -69,26 +69,26 @@ pub fn spawn_leaderboard_system(mut commands: Commands, trainer_config: Res<Trai
                             width: Val::Percent(100.0),
                             flex_direction: FlexDirection::Row,
                             align_items: AlignItems::Center,
-                            column_gap: Val::Px(8.0),
-                            padding: UiRect::axes(Val::Px(4.0), Val::Px(3.0)),
+                            column_gap: Val::Px(6.0),
+                            padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
                             ..default()
                         },
-                        BackgroundColor(Color::srgba(0.08, 0.10, 0.14, 0.6)),
+                        BackgroundColor(Color::srgba(0.06, 0.09, 0.14, 0.50)),
                         LeaderboardRow(env_id),
                     ))
                     .with_children(|row| {
                         // Rank number
                         row.spawn((
                             Text::new(format!("{}.", i + 1)),
-                            TextFont::from_font_size(12.0),
-                            TextColor(Color::srgb(0.6, 0.6, 0.6)),
+                            TextFont::from_font_size(10.0),
+                            TextColor(Color::srgb(0.55, 0.62, 0.70)),
                         ));
 
                         // Colour swatch
                         row.spawn((
                             Node {
-                                width: Val::Px(12.0),
-                                height: Val::Px(12.0),
+                                width: Val::Px(10.0),
+                                height: Val::Px(10.0),
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.5, 0.5, 0.5)),
@@ -98,8 +98,8 @@ pub fn spawn_leaderboard_system(mut commands: Commands, trainer_config: Res<Trai
                         // Car info text
                         row.spawn((
                             Text::new("---"),
-                            TextFont::from_font_size(11.0),
-                            TextColor(Color::srgb(0.88, 0.88, 0.88)),
+                            TextFont::from_font_size(10.0),
+                            TextColor(Color::srgb(0.78, 0.82, 0.86)),
                             LeaderboardRowText(env_id),
                         ));
                     });

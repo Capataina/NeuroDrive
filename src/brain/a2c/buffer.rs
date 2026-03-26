@@ -12,6 +12,7 @@ pub struct TrainerRolloutBuffer {
     pub actions: Vec<Vec<f32>>,
     pub latent_actions: Vec<Vec<f32>>,
     pub safety_clamp_hits: Vec<[bool; 2]>,
+    pub old_log_probs: Vec<f32>,
     pub rewards: Vec<f32>,
     pub values: Vec<f32>,
     pub dones: Vec<bool>,
@@ -27,11 +28,13 @@ impl TrainerRolloutBuffer {
         latent_actions: Vec<f32>,
         safety_clamp_hits: [bool; 2],
         value: f32,
+        log_prob: f32,
     ) {
         self.states.push(state);
         self.actions.push(actions);
         self.latent_actions.push(latent_actions);
         self.safety_clamp_hits.push(safety_clamp_hits);
+        self.old_log_probs.push(log_prob);
         self.values.push(value);
         self.env_ids.push(env_id);
     }
@@ -58,6 +61,7 @@ impl TrainerRolloutBuffer {
         self.actions.clear();
         self.latent_actions.clear();
         self.safety_clamp_hits.clear();
+        self.old_log_probs.clear();
         self.rewards.clear();
         self.values.clear();
         self.dones.clear();
@@ -70,6 +74,7 @@ impl TrainerRolloutBuffer {
             && self.actions.len() == n
             && self.latent_actions.len() == n
             && self.safety_clamp_hits.len() == n
+            && self.old_log_probs.len() == n
             && self.values.len() == n
             && self.dones.len() == n
             && self.env_ids.len() == n
@@ -148,7 +153,7 @@ mod tests {
         let dones = vec![false, false, true, false];
 
         for i in 0..4 {
-            buf.push_pre_step(0, vec![0.0], vec![0.0], vec![0.0], [false, false], values[i]);
+            buf.push_pre_step(0, vec![0.0], vec![0.0], vec![0.0], [false, false], values[i], 0.0);
             buf.push_reward(rewards[i], dones[i]);
         }
 
@@ -202,7 +207,7 @@ mod tests {
         ];
 
         for &(eid, reward, value, done) in &entries {
-            buf.push_pre_step(eid, vec![0.0], vec![0.0], vec![0.0], [false, false], value);
+            buf.push_pre_step(eid, vec![0.0], vec![0.0], vec![0.0], [false, false], value, 0.0);
             buf.push_reward(reward, done);
         }
 

@@ -1,10 +1,10 @@
-# System — Brain A2C Baseline
+# System — Brain PPO Baseline
 
 ## Scope / Purpose
 
 - Provide the current autonomous-controller baseline used to validate that the environment and observation contract are learnable.
 - Keep the baseline self-contained in Rust without external ML frameworks.
-- A2C exists as a **diagnostic tool**, not the intended final learning architecture. The project's long-term direction is brain-inspired local plasticity.
+- PPO (upgraded from A2C) exists as a **diagnostic tool**, not the intended final learning architecture. The project's long-term direction is brain-inspired local plasticity.
 
 ## Boundaries / Ownership
 
@@ -12,7 +12,7 @@
 |-------|------|-------------|
 | `src/brain/plugin.rs` | `BrainPlugin`, `AgentMode` toggle (F4), registers `TrainerLiveRanking`, wires ranking and visual-role systems, rollout-buffer reset on mode switch | Policy implementation details |
 | `src/brain/types.rs` | `AgentMode` enum (`Keyboard` / `Ai`), `Brain` trait (**dead code** — unused, tagged for Stage 5 removal) | Observation or reward production |
-| `src/brain/a2c/` | `A2cBrain` (model + hyperparams + seeded RNG, **no buffer**), `TrainerRolloutBuffer` (separate resource with env_id tagging), `A2cPlugin`, vectorised act/collect/flush systems, per-env GAE, `ActorCritic` model, update logic, training stats | Environment truth, observation construction |
+| `src/brain/a2c/` | `A2cBrain` (model + hyperparams + seeded RNG, **no buffer**), `TrainerRolloutBuffer` (separate resource with env_id tagging + old log-probs), `PpoUpdateState` (staged update resource), `A2cPlugin`, vectorised act/collect/epoch/flush systems, per-env GAE, `ActorCritic` model, PPO clipped update logic, training stats | Environment truth, observation construction |
 | `src/brain/ranking.rs` | `TrainerLiveRanking` resource, ranking computation, `update_car_visual_roles_system` (best-car highlighting via alpha + z-order), `CarColour`-aware sprite updates | Policy, observation, reward |
 | `src/brain/common/` | Reusable handwritten ML primitives: `Linear`, `Relu`, `AdamOptimizer`, Gaussian math | Algorithm-specific logic |
 | `src/brain/biological/` | **Empty placeholder** for future local-plasticity brain | Nothing yet |
@@ -53,11 +53,12 @@ obs (23) → Linear(23,64) → ReLU    obs (23) → Linear(23,64) → ReLU
 
 ### Rollout Collection
 
-- `a2c_act_all_cars_system` (replaces old `a2c_act_system`) runs in `SimSet::Input` after keyboard input and before action smoothing. Iterates **all** cars, calls `model.forward()` for each, samples stochastic actions via the seeded RNG, writes per-car `ActionState`, and pushes transitions tagged with `env_id` to `TrainerRolloutBuffer`.
-- `a2c_collect_rewards_all_cars_system` (replaces old `a2c_collect_reward_system`) runs in `SimSet::Measurement` after episode truth and observation rebuild. Pushes per-car reward and done flag for all cars.
-- `TrainerRolloutBuffer` stores: `states`, `actions`, `latent_actions`, `safety_clamp_hits`, `rewards`, `values`, `dones`, `env_ids`.
+- `a2c_act_all_cars_system` runs in `SimSet::Input` after keyboard input and before action smoothing. Iterates **all** cars, calls `model.forward()` for each, samples stochastic actions via the seeded RNG, writes per-car `ActionState`, computes old log-prob (sum of squashed-Gaussian log-probs across action dimensions), and pushes transitions tagged with `env_id` and `old_log_prob` to `TrainerRolloutBuffer`.
+- `a2c_collect_rewards_all_cars_system` runs in `SimSet::Measurement` after episode truth and observation rebuild. Pushes per-car reward and done flag for all cars. When the buffer reaches the horizon and no update is in progress, calls `ppo_prepare_update` to compute per-env GAE, freeze the buffer into a `PreparedUpdate`, and clear the live buffer.
+- `ppo_epoch_system` runs in `SimSet::Measurement` after the collect system. Processes a chunk of `samples_per_tick` (default 128) samples from the `PreparedUpdate` per tick. When an epoch's samples are exhausted, calls `ppo_finish_epoch` (clip gradients, step optimiser). Advances to the next epoch or clears the update state when all epochs are done.
+- `TrainerRolloutBuffer` stores: `states`, `actions`, `latent_actions`, `safety_clamp_hits`, `old_log_probs`, `rewards`, `values`, `dones`, `env_ids`.
 - GAE is computed **per-env** to prevent cross-env value leakage. Transitions are grouped by `env_id`; GAE runs within each group independently. Advantages are normalised globally across all envs in the batch.
-- Bootstrap values are computed per-env at update time: non-terminal envs get a fresh `model.forward()` value; terminal envs get 0.
+- Bootstrap values are computed per-env at prepare time: non-terminal envs get a fresh `model.forward()` value; terminal envs get 0.
 
 ### Update Triggering
 
@@ -65,24 +66,32 @@ obs (23) → Linear(23,64) → ReLU    obs (23) → Linear(23,64) → ReLU
 |-----------|---------|
 | Rollout horizon | `buffer.len() >= max_steps` (512) — total transitions across **all** cars |
 | Terminal batch | **Any car** terminal AND `buffer.len() >= min_update_steps` (128) |
-| App exit | Residual rollout data exists |
+| App exit | Residual rollout data or in-progress update exists |
 
-- Per-env bootstrap values are computed at update time (non-terminal envs forward-pass, terminal envs 0).
-- Update calls `a2c_update(brain, buffer, stats, bootstrap_values: &HashMap<u32, f32>)`, which:
-  1. Computes GAE advantages and returns.
-  2. Standardises advantages (zero mean, unit variance).
-  3. Computes policy loss (negative log-prob × advantage + entropy bonus).
-  4. Computes value loss (Huber loss on returns vs values).
-  5. Backpropagates through actor and critic separately.
-  6. Clips gradients (actor: 0.5, critic: 0.5).
-  7. Steps Adam optimisers.
-  8. Snapshots `A2cTrainingStats` with losses, entropy, explained variance, action spread, clamp fraction, and per-layer health.
+Update is **amortised across ticks** to avoid frame stutter:
+
+1. `ppo_prepare_update` computes per-env GAE, freezes buffer into `PreparedUpdate`, clears live buffer.
+2. `ppo_epoch_system` processes `samples_per_tick` (128) samples per tick, accumulating gradients into the model.
+3. When all samples in an epoch are done, `ppo_finish_epoch` clips gradients and steps the optimiser.
+4. After all `ppo_epochs` (4) complete, the `PreparedUpdate` is dropped and the update state cleared.
+5. On app exit, `a2c_flush_on_exit_system` finishes any in-progress epochs synchronously, then processes any remaining buffer data via `ppo_update_blocking`.
+
+Each epoch:
+  1. Forwards each sample through the current policy to get new log-probs.
+  2. Computes ratio `π_new / π_old` from stored old log-probs.
+  3. Applies clipped surrogate objective: `min(ratio × A, clip(ratio, 1-ε, 1+ε) × A)`.
+  4. Gradient flows through ratio when unclipped; zero when clipped.
+  5. Value loss is Huber on returns vs values (unchanged from A2C).
+  6. Entropy bonus applied to log-std gradients regardless of clipping.
+  7. After all samples: clip gradients (actor: 0.5, critic: 0.5), step Adam, update log-std.
 
 ### Training Stats
 
-`A2cTrainingStats` records the most recent completed update:
+`A2cTrainingStats` records the most recent completed update (final epoch values):
 - `policy_loss`, `value_loss`, `policy_entropy`, `explained_variance`
 - `steering_mean/std`, `throttle_mean/std`, `clamped_action_fraction`
+- `clip_fraction` — fraction of samples where the PPO ratio was clipped (healthy: 10–30%)
+- `approx_kl` — approximate KL divergence between old and new policy (healthy: < 0.02)
 - Per-layer `A2cLayerHealth`: weight L2 norm, gradient L2 norm, dead-ReLU fraction
 
 ### Trainer Ranking
@@ -102,6 +111,9 @@ obs (23) → Linear(23,64) → ReLU    obs (23) → Linear(23,64) → ReLU
 | `gae_lambda` | 0.95 |
 | `max_steps` (rollout horizon) | 512 |
 | `min_update_steps` | 128 |
+| `ppo_epochs` | 4 |
+| `clip_epsilon` | 0.2 |
+| `samples_per_tick` | 128 |
 | Actor hidden dim | 64 |
 | Critic hidden dim | 64 |
 | Actor LR | 3e-4 |
@@ -109,7 +121,6 @@ obs (23) → Linear(23,64) → ReLU    obs (23) → Linear(23,64) → ReLU
 | Actor grad clip | 0.5 |
 | Critic grad clip | 0.5 |
 | Entropy coefficient | 0.01 |
-| Value loss coefficient | 0.5 |
 
 ## Key Interfaces / Data Flow
 
@@ -140,15 +151,15 @@ Tick lifecycle (vectorised):
 ## Known Issues / Active Risks
 
 - **No save/load path**, no evaluation mode, no headless training loop.
-- **No dedicated A2C integration tests**, no explicit behavioural success threshold, limited protection against silent training regressions beyond runtime stats (unit tests cover GAE only).
-- The `Brain` trait is **dead code** — unused by the vectorised path, tagged for Stage 5 removal.
+- **No dedicated PPO integration tests**, no explicit behavioural success threshold, limited protection against silent training regressions beyond runtime stats (unit tests cover GAE only).
+- The `Brain` trait is **dead code** — unused by the vectorised path.
 - **Analytics and HUD systems use temporary shims** (target first car only) pending a full overhaul.
-- **Observed policy oscillation** (learn-then-forget cycle) — PPO upgrade planned to address via clipped policy ratio.
 - All rollout buffer alignment is checked by `debug_assert!` only — not active in release builds.
+- The module is still named `a2c/` and structs still use `A2c` prefixes (e.g., `A2cBrain`, `A2cPlugin`) despite now implementing PPO. A rename would be cosmetic churn with no functional benefit at this stage.
 
 ## Partial / In Progress
 
-- The baseline is integrated and live, but better described as a **validation harness** than a trusted learning subsystem.
+- The baseline is integrated and live. Cars are confirmed to learn meaningful behaviour (drifting corners observed with PPO).
 - Several earlier timing and contract bugs have been corrected:
   - reward/order alignment,
   - terminal-step handling,
@@ -159,17 +170,17 @@ Tick lifecycle (vectorised):
 
 ## Planned / Missing / Likely Changes
 
-- **PPO upgrade** planned to clip the policy ratio and address observed oscillation — see `context/plans/ppo-upgrade-brief.md`.
-- **Full analytics overhaul** planned (visual outputs: heat maps, graphs, charts) — see `context/plans/analytics-overhaul-brief.md`.
+- **Full analytics overhaul** planned (multi-car capture, visual outputs, diagnostic automation) — see `context/plans/analytics-overhaul-brief.md`.
 - **Headless training, persistence, and evaluation mode** are likely to matter before longer experiments become credible.
-- The final project direction points toward biological/local-plasticity systems; A2C should stay modular enough to be **retired later** without distorting the rest of the runtime.
+- The final project direction points toward biological/local-plasticity systems; PPO should stay modular enough to be **retired later** without distorting the rest of the runtime.
 - Activation switch from ReLU to tanh is a credible upgrade candidate based on on-policy literature.
 
 ## Durable Notes / Discarded Approaches
 
 - The **bounded tanh-squashed action contract** is a deliberate improvement over sampling unconstrained values and relying on later clamping. It ensures actions are naturally within physical bounds.
-- A2C exists as a **baseline for learnability validation**, not the intended final learning architecture. Engineering investment should stay proportionate.
-- External A2C research and a NeuroDrive-specific implementation ladder live in `context/references/a2c-for-neurodrive.md` — deep algorithm research belongs there rather than in this system file.
+- PPO exists as a **baseline for learnability validation**, not the intended final learning architecture. Engineering investment should stay proportionate.
+- External A2C/PPO research and a NeuroDrive-specific implementation ladder live in `context/references/a2c-for-neurodrive.md` — deep algorithm research belongs there rather than in this system file.
+- **PPO upgrade resolved the A2C policy oscillation problem.** The clipped surrogate objective prevents any single update from destabilising the policy. The amortised epoch processing (128 samples/tick) resolved frame stutter that appeared when all 4 epochs ran in a single tick.
 
 ## Obsolete / No Longer Relevant
 

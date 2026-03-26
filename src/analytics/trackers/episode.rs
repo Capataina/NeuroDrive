@@ -1,96 +1,105 @@
 use bevy::prelude::*;
 
 use crate::analytics::models::{A2cLayerRecord, A2cUpdateRecord, EpisodeRecord, EpisodeTracker};
-use crate::analytics::trackers::action::EpisodeActionAccumulator;
-use crate::analytics::trackers::trace::EpisodeTraceAccumulator;
+use crate::analytics::trackers::action::PerCarActionAccumulators;
+use crate::analytics::trackers::trace::PerCarTraceAccumulators;
 use crate::brain::a2c::A2cTrainingStats;
-use crate::game::car::Car;
+use crate::game::car::{Car, EnvInstanceId};
 use crate::game::episode::{EpisodeEndReason, EpisodeState};
 
-/// SHIM: folds episodes from first car only until analytics overhaul.
+/// Folds completed episodes from all cars into EpisodeTracker, tagged with env_id.
+/// Also records A2C/PPO update snapshots from the shared training stats resource.
 pub fn episode_tracker_system(
-    car_query: Query<&EpisodeState, With<Car>>,
+    car_query: Query<(&EnvInstanceId, &EpisodeState), With<Car>>,
     a2c_stats: Option<Res<A2cTrainingStats>>,
-    mut action_accumulator: ResMut<EpisodeActionAccumulator>,
-    mut trace_accumulator: ResMut<EpisodeTraceAccumulator>,
+    mut action_accumulators: ResMut<PerCarActionAccumulators>,
+    mut trace_accumulators: ResMut<PerCarTraceAccumulators>,
     mut tracker: ResMut<EpisodeTracker>,
 ) {
-    // SHIM: first car only until analytics overhaul
-    let Some(episode_state) = car_query.iter().next() else {
-        return;
-    };
+    for (env_id, episode_state) in car_query.iter() {
+        let Some(reason) = episode_state.last_end_reason else {
+            continue;
+        };
 
-    if let Some(reason) = episode_state.last_end_reason {
         let finished_episode_id = episode_state.current_episode - 1;
 
-        if tracker.episodes.last().map(|r| r.episode_id) != Some(finished_episode_id) {
-            let action_summary = action_accumulator
-                .take_completed_summary(finished_episode_id)
-                .unwrap_or_default();
-            let trace = trace_accumulator.take_completed_trace(finished_episode_id);
-            let trace_metrics = trace
-                .as_ref()
-                .map(|episode_trace| episode_trace.metrics.clone())
-                .unwrap_or_default();
-
-            if let Some(trace) = trace {
-                if tracker
-                    .episode_traces
-                    .last()
-                    .map(|record| record.episode_id)
-                    != Some(trace.episode_id)
-                {
-                    tracker.episode_traces.push(trace);
-                }
-            }
-
-            tracker.episodes.push(EpisodeRecord {
-                episode_id: finished_episode_id,
-                progress: episode_state.last_episode_best_progress_fraction,
-                reward: episode_state.last_episode_return,
-                pre_terminal_return: episode_state.last_episode_pre_terminal_return,
-                progress_reward_sum: episode_state.last_episode_progress_reward_sum,
-                time_penalty_sum: episode_state.last_episode_time_penalty_sum,
-                terminal_reward_sum: episode_state.last_episode_terminal_reward_sum,
-                crash_penalty_sum: episode_state.last_episode_crash_penalty_sum,
-                lap_bonus_sum: episode_state.last_episode_lap_bonus_sum,
-                ticks: episode_state.last_episode_ticks,
-                crashes: episode_state.last_episode_crashes,
-                end_reason: format!("{:?}", reason),
-                lap_completed: reason == EpisodeEndReason::LapComplete,
-                crash_position: episode_state
-                    .last_episode_crash_position
-                    .map(|position| [position.x, position.y]),
-                steering_mean: action_summary.steering_mean,
-                steering_std: action_summary.steering_std,
-                throttle_mean: action_summary.throttle_mean,
-                throttle_std: action_summary.throttle_std,
-                turn_in_latency_fraction: trace_metrics.turn_in_latency_fraction,
-                turn_in_latency_ticks: trace_metrics.turn_in_latency_ticks,
-                throttle_release_latency_fraction: trace_metrics.throttle_release_latency_fraction,
-                throttle_release_latency_ticks: trace_metrics.throttle_release_latency_ticks,
-                steering_adequacy: trace_metrics.steering_adequacy,
-                high_curvature_throttle_mean: trace_metrics.high_curvature_throttle_mean,
-                curvature_steering_error_mean: trace_metrics.curvature_steering_error_mean,
-                curvature_steering_bias_mean: trace_metrics.curvature_steering_bias_mean,
-                understeer_rate: trace_metrics.understeer_rate,
-                turn_entry_speed: trace_metrics.turn_entry_speed,
-                peak_curvature_speed: trace_metrics.peak_curvature_speed,
-                crash_speed: trace_metrics.crash_speed,
-                entry_lateral_offset: trace_metrics.entry_lateral_offset,
-                peak_lateral_offset: trace_metrics.peak_lateral_offset,
-                peak_centerline_distance: trace_metrics.peak_centerline_distance,
-                mean_centerline_distance: trace_metrics.mean_centerline_distance,
-                mean_abs_lateral_offset: trace_metrics.mean_abs_lateral_offset,
-                mean_abs_heading_error_deg: trace_metrics.mean_abs_heading_error_deg,
-                mean_all_ray_distance: trace_metrics.mean_all_ray_distance,
-                mean_front_ray_distance: trace_metrics.mean_front_ray_distance,
-                mean_side_ray_distance: trace_metrics.mean_side_ray_distance,
-                failure_mode: trace_metrics.failure_mode,
-            });
+        // Avoid duplicate records for the same (env_id, episode_id) pair.
+        let already_recorded = tracker.episodes.iter().rev().take(32).any(|r| {
+            r.env_id == env_id.0 && r.episode_id == finished_episode_id
+        });
+        if already_recorded {
+            continue;
         }
+
+        let action_summary = action_accumulators
+            .take_completed_summary(env_id.0, finished_episode_id)
+            .unwrap_or_default();
+        let trace = trace_accumulators.take_completed_trace(env_id.0, finished_episode_id);
+        let trace_metrics = trace
+            .as_ref()
+            .map(|episode_trace| episode_trace.metrics.clone())
+            .unwrap_or_default();
+
+        if let Some(trace) = trace {
+            let already_traced = tracker
+                .episode_traces
+                .iter()
+                .rev()
+                .take(32)
+                .any(|t| t.episode_id == trace.episode_id);
+            if !already_traced {
+                tracker.episode_traces.push(trace);
+            }
+        }
+
+        tracker.episodes.push(EpisodeRecord {
+            env_id: env_id.0,
+            episode_id: finished_episode_id,
+            progress: episode_state.last_episode_best_progress_fraction,
+            reward: episode_state.last_episode_return,
+            pre_terminal_return: episode_state.last_episode_pre_terminal_return,
+            progress_reward_sum: episode_state.last_episode_progress_reward_sum,
+            time_penalty_sum: episode_state.last_episode_time_penalty_sum,
+            terminal_reward_sum: episode_state.last_episode_terminal_reward_sum,
+            crash_penalty_sum: episode_state.last_episode_crash_penalty_sum,
+            lap_bonus_sum: episode_state.last_episode_lap_bonus_sum,
+            ticks: episode_state.last_episode_ticks,
+            crashes: episode_state.last_episode_crashes,
+            end_reason: format!("{:?}", reason),
+            lap_completed: reason == EpisodeEndReason::LapComplete,
+            crash_position: episode_state
+                .last_episode_crash_position
+                .map(|position| [position.x, position.y]),
+            steering_mean: action_summary.steering_mean,
+            steering_std: action_summary.steering_std,
+            throttle_mean: action_summary.throttle_mean,
+            throttle_std: action_summary.throttle_std,
+            turn_in_latency_fraction: trace_metrics.turn_in_latency_fraction,
+            turn_in_latency_ticks: trace_metrics.turn_in_latency_ticks,
+            throttle_release_latency_fraction: trace_metrics.throttle_release_latency_fraction,
+            throttle_release_latency_ticks: trace_metrics.throttle_release_latency_ticks,
+            steering_adequacy: trace_metrics.steering_adequacy,
+            high_curvature_throttle_mean: trace_metrics.high_curvature_throttle_mean,
+            curvature_steering_error_mean: trace_metrics.curvature_steering_error_mean,
+            curvature_steering_bias_mean: trace_metrics.curvature_steering_bias_mean,
+            understeer_rate: trace_metrics.understeer_rate,
+            turn_entry_speed: trace_metrics.turn_entry_speed,
+            peak_curvature_speed: trace_metrics.peak_curvature_speed,
+            crash_speed: trace_metrics.crash_speed,
+            entry_lateral_offset: trace_metrics.entry_lateral_offset,
+            peak_lateral_offset: trace_metrics.peak_lateral_offset,
+            peak_centerline_distance: trace_metrics.peak_centerline_distance,
+            mean_centerline_distance: trace_metrics.mean_centerline_distance,
+            mean_abs_lateral_offset: trace_metrics.mean_abs_lateral_offset,
+            mean_abs_heading_error_deg: trace_metrics.mean_abs_heading_error_deg,
+            mean_all_ray_distance: trace_metrics.mean_all_ray_distance,
+            mean_front_ray_distance: trace_metrics.mean_front_ray_distance,
+            mean_side_ray_distance: trace_metrics.mean_side_ray_distance,
+            failure_mode: trace_metrics.failure_mode,
+        });
     }
 
+    // A2C/PPO update recording — reads from a global resource, not per-car.
     if let Some(a2c_stats) = a2c_stats {
         if a2c_stats.last_completed_update > tracker.last_recorded_update {
             tracker.last_recorded_update = a2c_stats.last_completed_update;
@@ -106,6 +115,8 @@ pub fn episode_tracker_system(
                 throttle_mean: a2c_stats.throttle_mean,
                 throttle_std: a2c_stats.throttle_std,
                 clamped_action_fraction: a2c_stats.clamped_action_fraction,
+                clip_fraction: a2c_stats.clip_fraction,
+                approx_kl: a2c_stats.approx_kl,
                 layer_health: a2c_stats
                     .layer_health
                     .iter()

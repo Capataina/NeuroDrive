@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use crate::agent::action::ActionState;
-use crate::game::car::Car;
+use crate::game::car::{Car, EnvInstanceId};
 use crate::game::episode::EpisodeState;
 use bevy::prelude::*;
 
@@ -14,7 +16,7 @@ pub struct EpisodeActionSummary {
 }
 
 /// Running action statistics for the currently active episode.
-#[derive(Resource, Debug)]
+#[derive(Debug)]
 pub struct EpisodeActionAccumulator {
     pub episode_id: u32,
     pub steps: u32,
@@ -87,56 +89,78 @@ impl EpisodeActionAccumulator {
             throttle_std: self.throttle_std(),
         });
     }
+}
 
-    pub fn take_completed_summary(&mut self, episode_id: u32) -> Option<EpisodeActionSummary> {
-        if self
+/// Per-car action accumulators keyed by env_id.
+#[derive(Resource, Debug, Default)]
+pub struct PerCarActionAccumulators {
+    pub accumulators: HashMap<u32, EpisodeActionAccumulator>,
+}
+
+impl PerCarActionAccumulators {
+    /// Takes the completed action summary for a specific car and episode,
+    /// returning it if one is ready.
+    pub fn take_completed_summary(
+        &mut self,
+        env_id: u32,
+        episode_id: u32,
+    ) -> Option<EpisodeActionSummary> {
+        let accumulator = self.accumulators.get_mut(&env_id)?;
+        if accumulator
             .last_completed_summary
             .as_ref()
-            .map(|summary| summary.episode_id)
+            .map(|s| s.episode_id)
             == Some(episode_id)
         {
-            self.last_completed_summary.take()
+            accumulator.last_completed_summary.take()
         } else {
             None
         }
     }
 }
 
-/// SHIM: captures action stats from first car only until analytics overhaul.
+/// Captures per-tick action statistics for every car's active episode.
 pub fn capture_episode_action_stats_system(
-    car_query: Query<(&EpisodeState, &ActionState), With<Car>>,
-    mut accumulator: ResMut<EpisodeActionAccumulator>,
+    car_query: Query<(&EnvInstanceId, &EpisodeState, &ActionState), With<Car>>,
+    mut accumulators: ResMut<PerCarActionAccumulators>,
 ) {
-    let Some((episode_state, action_state)) = car_query.iter().next() else {
-        return;
-    };
+    for (env_id, episode_state, action_state) in car_query.iter() {
+        let accumulator = accumulators
+            .accumulators
+            .entry(env_id.0)
+            .or_default();
 
-    if accumulator.episode_id != episode_state.current_episode {
-        accumulator.reset_for_episode(episode_state.current_episode);
+        if accumulator.episode_id != episode_state.current_episode {
+            accumulator.reset_for_episode(episode_state.current_episode);
+        }
+
+        accumulator.record_step(action_state);
     }
-
-    accumulator.record_step(action_state);
 }
 
-/// SHIM: snapshots from first car only until analytics overhaul.
+/// Snapshots completed episode action stats for every car that finished an episode this tick.
 pub fn snapshot_completed_episode_action_stats_system(
-    car_query: Query<&EpisodeState, With<Car>>,
-    mut accumulator: ResMut<EpisodeActionAccumulator>,
+    car_query: Query<(&EnvInstanceId, &EpisodeState), With<Car>>,
+    mut accumulators: ResMut<PerCarActionAccumulators>,
 ) {
-    let Some(episode_state) = car_query.iter().next() else {
-        return;
-    };
+    for (env_id, episode_state) in car_query.iter() {
+        let Some(_reason) = episode_state.current_tick_end_reason else {
+            continue;
+        };
 
-    let Some(_reason) = episode_state.current_tick_end_reason else {
-        return;
-    };
+        let finished_episode_id = episode_state.current_episode.saturating_sub(1);
 
-    let finished_episode_id = episode_state.current_episode.saturating_sub(1);
-    if accumulator.last_completed_episode_id == Some(finished_episode_id) {
-        return;
+        let accumulator = accumulators
+            .accumulators
+            .entry(env_id.0)
+            .or_default();
+
+        if accumulator.last_completed_episode_id == Some(finished_episode_id) {
+            continue;
+        }
+
+        accumulator.snapshot_completed_episode(finished_episode_id);
     }
-
-    accumulator.snapshot_completed_episode(finished_episode_id);
 }
 
 fn mean_from_sum(sum: f32, count: u32) -> f32 {

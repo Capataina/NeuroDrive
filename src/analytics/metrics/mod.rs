@@ -1,8 +1,13 @@
 pub mod chunking;
+pub mod consistency;
 pub mod critic;
+pub mod diagnostics;
 pub mod inputs;
 pub mod insights;
+pub mod phases;
 pub mod sectors;
+pub mod sparkline;
 pub mod stats;
+pub mod timeseries;
 pub mod trajectory;
 pub mod turns;

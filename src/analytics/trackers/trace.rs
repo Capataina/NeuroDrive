@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::f32::consts::PI;
 
 use bevy::prelude::*;
@@ -6,14 +7,13 @@ use crate::agent::action::ActionState;
 use crate::agent::observation::{ObservationConfig, SensorReadings};
 use crate::analytics::metrics::turns::compute_trace_metrics;
 use crate::analytics::models::{EpisodeTrace, TickTraceRecord};
-use crate::brain::a2c::buffer::TrainerRolloutBuffer;
 use crate::brain::types::AgentMode;
-use crate::game::car::Car;
+use crate::game::car::{Car, EnvInstanceId};
 use crate::game::episode::{EpisodeEndReason, EpisodeState};
 use crate::maps::track::Track;
 
 /// Running per-tick trace for the active episode.
-#[derive(Resource, Debug)]
+#[derive(Debug)]
 pub struct EpisodeTraceAccumulator {
     pub episode_id: u32,
     pub ticks: Vec<TickTraceRecord>,
@@ -55,127 +55,143 @@ impl EpisodeTraceAccumulator {
             metrics,
         });
     }
+}
 
-    pub fn take_completed_trace(&mut self, episode_id: u32) -> Option<EpisodeTrace> {
-        if self
+/// Per-car trace accumulators keyed by env_id.
+#[derive(Resource, Debug, Default)]
+pub struct PerCarTraceAccumulators {
+    pub accumulators: HashMap<u32, EpisodeTraceAccumulator>,
+}
+
+impl PerCarTraceAccumulators {
+    /// Takes the completed trace for a specific car and episode,
+    /// returning it if one is ready.
+    pub fn take_completed_trace(
+        &mut self,
+        env_id: u32,
+        episode_id: u32,
+    ) -> Option<EpisodeTrace> {
+        let accumulator = self.accumulators.get_mut(&env_id)?;
+        if accumulator
             .last_completed_trace
             .as_ref()
-            .map(|trace| trace.episode_id)
+            .map(|t| t.episode_id)
             == Some(episode_id)
         {
-            self.last_completed_trace.take()
+            accumulator.last_completed_trace.take()
         } else {
             None
         }
     }
 }
 
-/// SHIM: captures trace from first car only until analytics overhaul.
+/// Captures per-tick trajectory data for every car's active episode.
 pub fn capture_episode_tick_trace_system(
     mode: Res<AgentMode>,
     observation_config: Res<ObservationConfig>,
-    car_query: Query<(&EpisodeState, &ActionState, &SensorReadings), With<Car>>,
+    car_query: Query<
+        (&EnvInstanceId, &EpisodeState, &ActionState, &SensorReadings),
+        With<Car>,
+    >,
     track_query: Query<&Track>,
-    trainer_buffer: Option<Res<TrainerRolloutBuffer>>,
-    mut accumulator: ResMut<EpisodeTraceAccumulator>,
+    mut accumulators: ResMut<PerCarTraceAccumulators>,
 ) {
-    // SHIM: first car only until analytics overhaul
-    let Some((episode_state, action_state, sensors)) = car_query.iter().next() else {
-        return;
-    };
+    for (env_id, episode_state, action_state, sensors) in car_query.iter() {
+        let done = episode_state.current_tick_end_reason.is_some();
+        let target_episode_id = if done {
+            episode_state.current_episode.saturating_sub(1)
+        } else {
+            episode_state.current_episode
+        };
 
-    let done = episode_state.current_tick_end_reason.is_some();
-    let target_episode_id = if done {
-        episode_state.current_episode.saturating_sub(1)
-    } else {
-        episode_state.current_episode
-    };
+        let accumulator = accumulators
+            .accumulators
+            .entry(env_id.0)
+            .or_default();
 
-    if accumulator.episode_id != target_episode_id {
-        accumulator.reset_for_episode(target_episode_id);
-    }
+        if accumulator.episode_id != target_episode_id {
+            accumulator.reset_for_episode(target_episode_id);
+        }
 
-    let (lookahead_heading_deltas, lookahead_curvatures) = if let Ok(track) = track_query.single() {
-        compute_lookahead_snapshot(track, episode_state, &observation_config)
-    } else {
-        (
-            vec![0.0; observation_config.lookahead_distances.len()],
-            vec![0.0; observation_config.lookahead_distances.len()],
-        )
-    };
-
-    let value_prediction = if *mode == AgentMode::Ai {
-        trainer_buffer.and_then(|buf| {
-            let values_len = buf.values.len();
-            let rewards_len = buf.rewards.len();
-            if !buf.values.is_empty()
-                && (values_len == rewards_len || values_len == rewards_len.saturating_add(1))
-            {
-                buf.values.last().copied()
+        let (lookahead_heading_deltas, lookahead_curvatures) =
+            if let Ok(track) = track_query.single() {
+                compute_lookahead_snapshot(track, episode_state, &observation_config)
             } else {
-                None
-            }
-        })
-    } else {
-        None
-    };
+                (
+                    vec![0.0; observation_config.lookahead_distances.len()],
+                    vec![0.0; observation_config.lookahead_distances.len()],
+                )
+            };
 
-    let tick_index = accumulator.ticks.len() as u32 + 1;
-    accumulator.ticks.push(TickTraceRecord {
-        tick_index,
-        progress_fraction: episode_state.current_tick_progress_fraction,
-        progress_s: episode_state.current_tick_progress_s,
-        centerline_distance: episode_state.current_tick_centerline_distance,
-        signed_lateral_offset: sensors.signed_lateral_offset,
-        speed: episode_state.current_tick_speed,
-        heading_error: episode_state.current_tick_heading_error,
-        steering: action_state.applied.steering,
-        throttle: action_state.applied.throttle,
-        reward: episode_state.current_tick_reward,
-        progress_reward: episode_state.current_tick_progress_reward,
-        time_penalty: episode_state.current_tick_time_penalty,
-        terminal_reward: episode_state.current_tick_terminal_reward,
-        done,
-        done_reason: episode_state
-            .current_tick_end_reason
-            .map(|reason| format!("{reason:?}")),
-        sector_index: progress_to_sector(episode_state.current_tick_progress_fraction),
-        ray_distances: sensors.ray_distances.to_vec(),
-        lookahead_heading_deltas,
-        lookahead_curvatures,
-        value_prediction,
-    });
+        // Value prediction: use None for now. Getting env_id-specific values
+        // from the shared rollout buffer is complex and will be addressed later.
+        let value_prediction = if *mode == AgentMode::Ai {
+            None
+        } else {
+            None
+        };
+
+        let tick_index = accumulator.ticks.len() as u32 + 1;
+        accumulator.ticks.push(TickTraceRecord {
+            env_id: env_id.0,
+            tick_index,
+            progress_fraction: episode_state.current_tick_progress_fraction,
+            progress_s: episode_state.current_tick_progress_s,
+            centerline_distance: episode_state.current_tick_centerline_distance,
+            signed_lateral_offset: sensors.signed_lateral_offset,
+            speed: episode_state.current_tick_speed,
+            heading_error: episode_state.current_tick_heading_error,
+            steering: action_state.applied.steering,
+            throttle: action_state.applied.throttle,
+            reward: episode_state.current_tick_reward,
+            progress_reward: episode_state.current_tick_progress_reward,
+            time_penalty: episode_state.current_tick_time_penalty,
+            terminal_reward: episode_state.current_tick_terminal_reward,
+            done,
+            done_reason: episode_state
+                .current_tick_end_reason
+                .map(|reason| format!("{reason:?}")),
+            sector_index: progress_to_sector(episode_state.current_tick_progress_fraction),
+            ray_distances: sensors.ray_distances.to_vec(),
+            lookahead_heading_deltas,
+            lookahead_curvatures,
+            value_prediction,
+        });
+    }
 }
 
-/// SHIM: snapshots from first car only until analytics overhaul.
+/// Snapshots completed episode traces for every car that finished an episode this tick.
 pub fn snapshot_completed_episode_trace_system(
-    car_query: Query<&EpisodeState, With<Car>>,
-    mut accumulator: ResMut<EpisodeTraceAccumulator>,
+    car_query: Query<(&EnvInstanceId, &EpisodeState), With<Car>>,
+    mut accumulators: ResMut<PerCarTraceAccumulators>,
 ) {
-    // SHIM: first car only until analytics overhaul
-    let Some(episode_state) = car_query.iter().next() else {
-        return;
-    };
+    for (env_id, episode_state) in car_query.iter() {
+        let Some(reason) = episode_state.current_tick_end_reason else {
+            continue;
+        };
 
-    let Some(reason) = episode_state.current_tick_end_reason else {
-        return;
-    };
+        let finished_episode_id = episode_state.current_episode.saturating_sub(1);
 
-    let finished_episode_id = episode_state.current_episode.saturating_sub(1);
-    if accumulator.last_completed_episode_id == Some(finished_episode_id) {
-        return;
+        let accumulator = accumulators
+            .accumulators
+            .entry(env_id.0)
+            .or_default();
+
+        if accumulator.last_completed_episode_id == Some(finished_episode_id) {
+            continue;
+        }
+
+        if accumulator.episode_id != finished_episode_id {
+            continue;
+        }
+
+        accumulator.snapshot_completed_episode(
+            finished_episode_id,
+            reason,
+            episode_state.last_episode_best_progress_fraction,
+        );
+        accumulator.reset_for_episode(episode_state.current_episode);
     }
-
-    if accumulator.episode_id != finished_episode_id {
-        return;
-    }
-
-    accumulator.snapshot_completed_episode(
-        finished_episode_id,
-        reason,
-        episode_state.last_episode_best_progress_fraction,
-    );
-    accumulator.reset_for_episode(episode_state.current_episode);
 }
 
 fn compute_lookahead_snapshot(

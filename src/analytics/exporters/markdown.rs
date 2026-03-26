@@ -3,16 +3,23 @@ use std::fs;
 use std::path::Path;
 
 use crate::analytics::metrics::chunking::{DEFAULT_CHUNK_COUNT, calculate_chunks};
-use crate::analytics::metrics::critic::compute_critic_diagnostics;
-use crate::analytics::metrics::inputs::{
-    calculate_input_learning_chunks, summarize_input_signal_trends,
+use crate::analytics::metrics::consistency::{
+    compute_sector_consistency, overall_consistency_score,
 };
-use crate::analytics::metrics::insights::build_report_insights;
+use crate::analytics::metrics::diagnostics::compute_diagnostic_flags;
+use crate::analytics::metrics::phases::detect_learning_phase;
 use crate::analytics::metrics::sectors::compute_sector_diagnostics;
-use crate::analytics::metrics::stats::{mean, percentile, std_dev};
+use crate::analytics::metrics::sparkline::{ascii_bar, heatmap_row, sparkline};
+use crate::analytics::metrics::stats::mean;
+use crate::analytics::metrics::timeseries::{
+    extract_episode_series, extract_update_series, rolling_mean,
+};
 use crate::analytics::metrics::trajectory::select_trajectory_snapshots;
-use crate::analytics::metrics::turns::{summarize_failure_modes, summarize_turn_execution};
+use crate::analytics::metrics::turns::summarize_failure_modes;
 use crate::analytics::models::{EpisodeRecord, EpisodeTracker, NUM_PROGRESS_SECTORS};
+
+const SPARKLINE_WIDTH: usize = 40;
+const BAR_WIDTH: usize = 20;
 
 pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str) {
     if tracker.episodes.is_empty() {
@@ -24,474 +31,396 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str) {
         let _ = fs::create_dir_all(parent);
     }
 
+    let mut md = String::with_capacity(8192);
+
+    // ── Pre-compute all analytics ──────────────────────────────────────
+    let ep_series = extract_episode_series(tracker);
+    let upd_series = extract_update_series(tracker);
     let chunks = calculate_chunks(&tracker.episodes, DEFAULT_CHUNK_COUNT);
-    let input_chunks = calculate_input_learning_chunks(&tracker.episodes);
-    let input_trends = summarize_input_signal_trends(&input_chunks);
-    let turn_summary = summarize_turn_execution(&tracker.episodes);
-    let failure_modes = summarize_failure_modes(&tracker.episodes);
+    let diag_flags = compute_diagnostic_flags(tracker);
+    let phase = detect_learning_phase(tracker);
     let sector_rows = compute_sector_diagnostics(&tracker.episode_traces);
-    let critic = compute_critic_diagnostics(&tracker.episode_traces);
+    let consistency_profiles = compute_sector_consistency(tracker, 50);
+    let consistency_score = overall_consistency_score(&consistency_profiles);
+    let failure_modes = summarize_failure_modes(&tracker.episodes);
     let trajectory_rows = select_trajectory_snapshots(&tracker.episode_traces);
-    let insights = build_report_insights(
-        &tracker.episodes,
-        &chunks,
-        &input_chunks,
-        &input_trends,
-        &turn_summary,
-        &failure_modes,
-        &sector_rows,
-        &critic,
-        &tracker.a2c_updates,
-    );
 
-    let reward_values: Vec<f32> = tracker.episodes.iter().map(|r| r.reward).collect();
-    let progress_values: Vec<f32> = tracker.episodes.iter().map(|r| r.progress).collect();
-    let pre_terminal_values: Vec<f32> = tracker
-        .episodes
+    // Progress/reward rolling means for sparklines.
+    let progress_pct: Vec<f32> = ep_series.progress.iter().map(|p| p * 100.0).collect();
+    let reward_vals: Vec<f32> = ep_series.reward.clone();
+    let progress_smooth = rolling_mean(&progress_pct, 20);
+    let reward_smooth = rolling_mean(&reward_vals, 20);
+    let crash_flags: Vec<f32> = ep_series
+        .is_crash
         .iter()
-        .map(|r| r.pre_terminal_return)
+        .map(|&c| if c { 1.0 } else { 0.0 })
         .collect();
-    let progress_reward_values: Vec<f32> = tracker
-        .episodes
-        .iter()
-        .map(|r| r.progress_reward_sum)
-        .collect();
-    let time_penalty_values: Vec<f32> = tracker
-        .episodes
-        .iter()
-        .map(|r| r.time_penalty_sum)
-        .collect();
-    let terminal_reward_values: Vec<f32> = tracker
-        .episodes
-        .iter()
-        .map(|r| r.terminal_reward_sum)
-        .collect();
-    let crash_penalty_values: Vec<f32> = tracker
-        .episodes
-        .iter()
-        .map(|r| r.crash_penalty_sum)
-        .collect();
-    let lap_bonus_values: Vec<f32> = tracker.episodes.iter().map(|r| r.lap_bonus_sum).collect();
-    let max_progress_ever = progress_values.iter().copied().fold(0.0, f32::max);
-    let lap_completion_rate = tracker
-        .episodes
-        .iter()
-        .filter(|record| record.lap_completed)
-        .count() as f32
-        / tracker.episodes.len() as f32;
-    let total_crashes: u32 = tracker.episodes.iter().map(|record| record.crashes).sum();
+    let crash_smooth = rolling_mean(&crash_flags, 20);
 
-    let mut md = String::new();
+    // ════════════════════════════════════════════════════════════════════
+    // 1. Run Summary
+    // ════════════════════════════════════════════════════════════════════
     md.push_str("# NeuroDrive Analytics Report\n\n");
-    md.push_str("> Auto-generated run summary with behaviour, turn-execution, and optimisation diagnostics.\n\n");
+    md.push_str("## 1. Run Summary\n\n");
 
-    md.push_str("## Executive Summary\n\n");
-    md.push_str(&format!(
-        "- Episodes: **{}**\n- Max progress: **{:.2}%**\n- Lap completion rate: **{:.2}%**\n- Total crashes: **{}**\n\n",
-        tracker.episodes.len(),
-        max_progress_ever * 100.0,
-        lap_completion_rate * 100.0,
-        total_crashes
-    ));
-    append_insights(&mut md, &insights.overview);
-
-    md.push_str("## Performance Overview\n\n");
     md.push_str("| Metric | Value |\n");
     md.push_str("|--------|-------|\n");
-    md.push_str(&format!(
-        "| Return mean / std | {:.2} / {:.2} |\n",
-        mean(&reward_values),
-        std_dev(&reward_values)
-    ));
-    md.push_str(&format!(
-        "| Progress mean / std | {:.2}% / {:.2}% |\n",
-        mean(&progress_values) * 100.0,
-        std_dev(&progress_values) * 100.0
-    ));
-    md.push_str(&format!(
-        "| Progress median / p90 | {:.2}% / {:.2}% |\n",
-        percentile(progress_values.clone(), 0.50) * 100.0,
-        percentile(progress_values.clone(), 0.90) * 100.0
-    ));
-    md.push_str(&format!(
-        "| Pre-terminal return mean / std | {:.4} / {:.4} |\n",
-        mean(&pre_terminal_values),
-        std_dev(&pre_terminal_values)
-    ));
-    md.push_str(&format!(
-        "| Progress reward mean / std | {:.4} / {:.4} |\n",
-        mean(&progress_reward_values),
-        std_dev(&progress_reward_values)
-    ));
-    md.push_str(&format!(
-        "| Time penalty mean / std | {:.4} / {:.4} |\n",
-        mean(&time_penalty_values),
-        std_dev(&time_penalty_values)
-    ));
-    md.push_str(&format!(
-        "| Terminal reward mean / std | {:.4} / {:.4} |\n",
-        mean(&terminal_reward_values),
-        std_dev(&terminal_reward_values)
-    ));
-    md.push_str(&format!(
-        "| Crash penalty mean | {:.4} |\n| Lap bonus mean | {:.4} |\n\n",
-        mean(&crash_penalty_values),
-        mean(&lap_bonus_values)
-    ));
-    append_insights(&mut md, &insights.performance);
+    md.push_str(&format!("| Episodes | {} |\n", tracker.episodes.len()));
 
-    md.push_str("### Progress Trend (10 Chunks)\n\n");
-    md.push_str("| Chunk | Episodes | Avg Progress | Max Progress | Std | Median | P90 | Avg Reward | Avg Ticks | Crash Rate | Lap Rate |\n");
-    md.push_str("|------:|----------|-------------:|-------------:|----:|-------:|----:|-----------:|----------:|-----------:|---------:|\n");
-    for chunk in &chunks {
-        md.push_str(&format!(
-            "| {} | {}-{} | {:.2}% | {:.2}% | {:.2}% | {:.2}% | {:.2}% | {:.2} | {:.1} | {:.2}% | {:.2}% |\n",
-            chunk.chunk_index + 1,
-            chunk.start_episode,
-            chunk.end_episode,
-            chunk.avg_progress * 100.0,
-            chunk.max_progress * 100.0,
-            chunk.progress_std * 100.0,
-            chunk.progress_median * 100.0,
-            chunk.progress_p90 * 100.0,
-            chunk.avg_reward,
-            chunk.avg_ticks,
-            chunk.crash_rate * 100.0,
-            chunk.lap_completion_rate * 100.0,
-        ));
-    }
+    // Per-car count.
+    let mut car_set: Vec<u32> = ep_series.env_ids.iter().copied().collect();
+    car_set.sort_unstable();
+    car_set.dedup();
+    md.push_str(&format!("| Cars | {} |\n", car_set.len()));
+
+    md.push_str(&format!(
+        "| PPO updates | {} |\n",
+        tracker.a2c_updates.len()
+    ));
+    md.push_str(&format!("| Learning phase | **{}** |\n", phase));
     md.push('\n');
-    append_ascii_chart(
-        &mut md,
-        "Average Progress by Chunk",
-        &chunks
+
+    if !diag_flags.is_empty() {
+        md.push_str("**Diagnostics:**\n");
+        for flag in &diag_flags {
+            let icon = match flag.severity {
+                crate::analytics::metrics::diagnostics::Severity::Warning => "[!]",
+                crate::analytics::metrics::diagnostics::Severity::Info => "[i]",
+            };
+            md.push_str(&format!("- {icon} {}\n", flag.message));
+        }
+        md.push('\n');
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 2. Is the Policy Learning?
+    // ════════════════════════════════════════════════════════════════════
+    md.push_str("## 2. Is the Policy Learning?\n\n");
+
+    md.push_str(&format!(
+        "**Progress:** `{}` trend: {}\n\n",
+        sparkline(&progress_smooth, SPARKLINE_WIDTH),
+        trend_word(&progress_smooth),
+    ));
+    md.push_str(&format!(
+        "**Reward:** `{}` trend: {}\n\n",
+        sparkline(&reward_smooth, SPARKLINE_WIDTH),
+        trend_word(&reward_smooth),
+    ));
+    md.push_str(&format!(
+        "**Crash rate:** `{}`\n\n",
+        sparkline(&crash_smooth, SPARKLINE_WIDTH),
+    ));
+
+    // 10-chunk trend table.
+    if !chunks.is_empty() {
+        md.push_str("| Chunk | Episodes | Avg Progress | Max | Crash % | Avg Reward | Ticks |\n");
+        md.push_str("|------:|---------:|-------------:|----:|--------:|-----------:|------:|\n");
+        for c in &chunks {
+            md.push_str(&format!(
+                "| {} | {}-{} | {:.1}% | {:.1}% | {:.0}% | {:.2} | {:.0} |\n",
+                c.chunk_index + 1,
+                c.start_episode,
+                c.end_episode,
+                c.avg_progress * 100.0,
+                c.max_progress * 100.0,
+                c.crash_rate * 100.0,
+                c.avg_reward,
+                c.avg_ticks,
+            ));
+        }
+        md.push('\n');
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 3. Has It Found a Route?
+    // ════════════════════════════════════════════════════════════════════
+    md.push_str("## 3. Has It Found a Route?\n\n");
+    md.push_str(&format!(
+        "**Overall consistency score:** {:.3}\n\n",
+        consistency_score
+    ));
+
+    // Speed profile bar chart by sector.
+    if !sector_rows.is_empty() {
+        let max_speed = sector_rows
             .iter()
-            .map(|chunk| (format!("C{:02}", chunk.chunk_index + 1), chunk.avg_progress))
-            .collect::<Vec<_>>(),
-        false,
-    );
-    md.push_str("### Reward Dynamics by Chunk\n\n");
-    md.push_str("| Chunk | Avg Return | Reward Std | Avg Pre-Terminal | Avg Progress Reward | Avg Time Penalty | Avg Terminal Reward | Avg Crash Penalty | Avg Lap Bonus |\n");
-    md.push_str("|------:|-----------:|-----------:|-----------------:|--------------------:|-----------------:|--------------------:|------------------:|--------------:|\n");
-    for chunk in &chunks {
-        md.push_str(&format!(
-            "| {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} |\n",
-            chunk.chunk_index + 1,
-            chunk.avg_reward,
-            chunk.reward_std,
-            chunk.avg_pre_terminal_return,
-            chunk.avg_progress_reward,
-            chunk.avg_time_penalty,
-            chunk.avg_terminal_reward,
-            chunk.avg_crash_penalty,
-            chunk.avg_lap_bonus,
-        ));
-    }
-    md.push('\n');
-    md.push_str("### Control Summary by Chunk\n\n");
-    md.push_str("| Chunk | Steering Mean | Steering Std | Throttle Mean | Throttle Std |\n");
-    md.push_str("|------:|--------------:|-------------:|--------------:|-------------:|\n");
-    for chunk in &chunks {
-        md.push_str(&format!(
-            "| {} | {:.4} | {:.4} | {:.4} | {:.4} |\n",
-            chunk.chunk_index + 1,
-            chunk.steering_mean,
-            chunk.steering_std,
-            chunk.throttle_mean,
-            chunk.throttle_std,
-        ));
-    }
-    md.push('\n');
+            .map(|r| r.speed_mean)
+            .fold(0.0_f32, f32::max);
 
-    md.push_str("## Input Learning Diagnostics\n\n");
-    md.push_str("| Chunk | Episodes | Mean Gap | Mean Abs Offset | Mean Abs Heading | Mean All Rays | Mean Front Rays | Mean Side Rays |\n");
-    md.push_str("|------:|----------|---------:|---------------:|----------------:|--------------:|----------------:|---------------:|\n");
-    for chunk in &input_chunks {
-        md.push_str(&format!(
-            "| {} | {}-{} | {:.2} | {:.2} | {:.2}° | {:.2} | {:.2} | {:.2} |\n",
-            chunk.chunk_index + 1,
-            chunk.start_episode,
-            chunk.end_episode,
-            chunk.mean_centerline_distance,
-            chunk.mean_abs_lateral_offset,
-            chunk.mean_abs_heading_error_deg,
-            chunk.mean_all_ray_distance,
-            chunk.mean_front_ray_distance,
-            chunk.mean_side_ray_distance,
-        ));
+        md.push_str("**Speed profile by sector:**\n\n```text\n");
+        for row in &sector_rows {
+            md.push_str(&format!(
+                "S{:02} | {}\n",
+                row.sector_index + 1,
+                ascii_bar(row.speed_mean, max_speed, BAR_WIDTH),
+            ));
+        }
+        md.push_str("```\n\n");
     }
-    md.push('\n');
-    md.push_str("| Signal | Desired | Early | Late | Delta |\n");
-    md.push_str("|--------|---------|------:|-----:|------:|\n");
-    for trend in &input_trends {
-        md.push_str(&format!(
-            "| {} | {} | {:.2} | {:.2} | {:+.2} |\n",
-            trend.name, trend.desired_direction, trend.early_value, trend.late_value, trend.delta
-        ));
+
+    // Per-sector consistency — show top 5 sectors by total variance.
+    let mut sorted_profiles: Vec<(usize, f32)> = consistency_profiles
+        .iter()
+        .filter(|p| p.sample_count > 0)
+        .map(|p| {
+            (
+                p.sector,
+                p.speed_var + p.steering_var + p.throttle_var + p.centerline_dist_var,
+            )
+        })
+        .collect();
+    sorted_profiles.sort_by(|a, b| b.1.total_cmp(&a.1));
+
+    if !sorted_profiles.is_empty() {
+        md.push_str("**Highest-variance sectors (least consistent):**\n\n");
+        md.push_str("| Sector | Speed Var | Steer Var | Throttle Var | CL Dist Var | Samples |\n");
+        md.push_str("|-------:|----------:|----------:|-------------:|------------:|--------:|\n");
+        for &(sector, _) in sorted_profiles.iter().take(5) {
+            let p = &consistency_profiles[sector];
+            md.push_str(&format!(
+                "| {} | {:.1} | {:.4} | {:.4} | {:.2} | {} |\n",
+                sector + 1,
+                p.speed_var,
+                p.steering_var,
+                p.throttle_var,
+                p.centerline_dist_var,
+                p.sample_count,
+            ));
+        }
+        md.push('\n');
     }
-    md.push('\n');
-    append_ascii_chart(
-        &mut md,
-        "Centreline Distance by Chunk (lower is better)",
-        &input_chunks
-            .iter()
-            .map(|chunk| {
-                (
-                    format!("C{:02}", chunk.chunk_index + 1),
-                    chunk.mean_centerline_distance,
-                )
-            })
-            .collect::<Vec<_>>(),
-        true,
-    );
-    append_ascii_chart(
-        &mut md,
-        "Front Ray Clearance by Chunk (higher is better)",
-        &input_chunks
-            .iter()
-            .map(|chunk| {
-                (
-                    format!("C{:02}", chunk.chunk_index + 1),
-                    chunk.mean_front_ray_distance,
-                )
-            })
-            .collect::<Vec<_>>(),
-        false,
-    );
-    append_insights(&mut md, &insights.inputs);
 
-    md.push_str("## Turn Execution Diagnostics\n\n");
-    md.push_str("### Curvature Demand vs Actual Steering\n\n");
-    md.push_str("| Metric | Value |\n");
-    md.push_str("|--------|-------|\n");
-    md.push_str(&format!(
-        "| Steering adequacy | {:.3} |\n| Curvature steering abs error mean | {:.3} |\n| Curvature steering bias mean | {:.3} |\n| Understeer rate | {:.1}% |\n| High-curvature throttle mean | {:.3} |\n\n",
-        turn_summary.steering_adequacy_mean,
-        turn_summary.curvature_steering_error_mean,
-        turn_summary.curvature_steering_bias_mean,
-        turn_summary.understeer_rate_mean * 100.0,
-        turn_summary.high_curvature_throttle_mean,
-    ));
-    md.push_str("### Turn Preparation\n\n");
-    md.push_str("| Metric | Mean | P90 |\n");
-    md.push_str("|--------|-----:|----:|\n");
-    md.push_str(&format!(
-        "| Turn-in latency (% track) | {} | {} |\n",
-        turn_summary
-            .turn_in_latency_fraction_mean
-            .map(|value| format!("{:.2}%", value * 100.0))
-            .unwrap_or_else(|| "N/A".to_string()),
-        turn_summary
-            .turn_in_latency_fraction_p90
-            .map(|value| format!("{:.2}%", value * 100.0))
-            .unwrap_or_else(|| "N/A".to_string()),
-    ));
-    md.push_str(&format!(
-        "| Turn-in latency (ticks) | {} | N/A |\n",
-        turn_summary
-            .turn_in_latency_ticks_mean
-            .map(|value| format!("{value:.2}"))
-            .unwrap_or_else(|| "N/A".to_string()),
-    ));
-    md.push_str(&format!(
-        "| Throttle-release latency (% track) | {} | N/A |\n",
-        turn_summary
-            .throttle_release_latency_fraction_mean
-            .map(|value| format!("{:.2}%", value * 100.0))
-            .unwrap_or_else(|| "N/A".to_string()),
-    ));
-    md.push_str(&format!(
-        "| Throttle-release latency (ticks) | {} | N/A |\n\n",
-        turn_summary
-            .throttle_release_latency_ticks_mean
-            .map(|value| format!("{value:.2}"))
-            .unwrap_or_else(|| "N/A".to_string()),
-    ));
+    // ════════════════════════════════════════════════════════════════════
+    // 4. Per-Car Performance
+    // ════════════════════════════════════════════════════════════════════
+    md.push_str("## 4. Per-Car Performance\n\n");
+    let car_stats = per_car_stats(&tracker.episodes);
+    if car_stats.len() > 1 {
+        md.push_str("| Car | Episodes | Avg Progress | Avg Reward | Crash % |\n");
+        md.push_str("|----:|---------:|-------------:|-----------:|--------:|\n");
+        for cs in &car_stats {
+            md.push_str(&format!(
+                "| {} | {} | {:.1}% | {:.2} | {:.0}% |\n",
+                cs.env_id,
+                cs.count,
+                cs.avg_progress * 100.0,
+                cs.avg_reward,
+                cs.crash_rate * 100.0,
+            ));
+        }
+        md.push('\n');
 
-    md.push_str("### Speed and Lane Position Through Turn\n\n");
-    md.push_str("| Metric | Value |\n");
-    md.push_str("|--------|-------|\n");
-    append_optional_row(
-        &mut md,
-        "Turn-entry speed mean",
-        turn_summary.turn_entry_speed_mean,
-        "",
-    );
-    append_optional_row(
-        &mut md,
-        "Turn-entry speed p90",
-        turn_summary.turn_entry_speed_p90,
-        "",
-    );
-    append_optional_row(
-        &mut md,
-        "Peak-curvature speed mean",
-        turn_summary.peak_curvature_speed_mean,
-        "",
-    );
-    append_optional_row(
-        &mut md,
-        "Crash speed mean",
-        turn_summary.crash_speed_mean,
-        "",
-    );
-    append_optional_row(
-        &mut md,
-        "Entry lateral offset mean",
-        turn_summary.entry_lateral_offset_mean,
-        "",
-    );
-    append_optional_row(
-        &mut md,
-        "Peak lateral offset mean",
-        turn_summary.peak_lateral_offset_mean,
-        "",
-    );
-    append_optional_row(
-        &mut md,
-        "Peak centreline distance mean",
-        turn_summary.peak_centerline_distance_mean,
-        "",
-    );
-    md.push('\n');
-
-    md.push_str("### Failure Mode Classification\n\n");
-    if failure_modes.is_empty() {
-        md.push_str("No classified crash modes were available.\n\n");
+        if let (Some(best), Some(worst)) = (
+            car_stats
+                .iter()
+                .max_by(|a, b| a.avg_progress.total_cmp(&b.avg_progress)),
+            car_stats
+                .iter()
+                .min_by(|a, b| a.avg_progress.total_cmp(&b.avg_progress)),
+        ) {
+            if best.env_id != worst.env_id {
+                md.push_str(&format!(
+                    "Best car {} ({:.1}% avg progress) vs worst car {} ({:.1}% avg progress).\n\n",
+                    best.env_id,
+                    best.avg_progress * 100.0,
+                    worst.env_id,
+                    worst.avg_progress * 100.0,
+                ));
+            }
+        }
     } else {
-        md.push_str("| Failure Mode | Count | Share |\n");
-        md.push_str("|--------------|------:|------:|\n");
+        md.push_str("Single-car run — no comparison available.\n\n");
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 5. Where Does It Fail?
+    // ════════════════════════════════════════════════════════════════════
+    md.push_str("## 5. Where Does It Fail?\n\n");
+
+    // Crash heatmap by sector.
+    let crash_by_sector = crash_counts_by_sector(&tracker.episodes);
+    let crash_sector_floats: Vec<f32> = crash_by_sector.iter().map(|&c| c as f32).collect();
+    let total_sector_crashes: usize = crash_by_sector.iter().sum();
+
+    if total_sector_crashes > 0 {
+        md.push_str(&format!(
+            "**Crash heatmap by sector:** `{}`\n\n",
+            heatmap_row(&crash_sector_floats),
+        ));
+
+        // Crash sector table — top 5.
+        let mut sector_crash_list: Vec<(usize, usize)> = crash_by_sector
+            .iter()
+            .enumerate()
+            .filter(|&(_, c)| *c > 0)
+            .map(|(i, &c)| (i, c))
+            .collect();
+        sector_crash_list.sort_by(|a, b| b.1.cmp(&a.1));
+
+        md.push_str("| Sector | Crashes | Share |\n");
+        md.push_str("|-------:|--------:|------:|\n");
+        for &(sector, count) in sector_crash_list.iter().take(5) {
+            md.push_str(&format!(
+                "| {} | {} | {:.0}% |\n",
+                sector + 1,
+                count,
+                count as f32 / total_sector_crashes.max(1) as f32 * 100.0,
+            ));
+        }
+        md.push('\n');
+    } else {
+        md.push_str("No sector-attributed crashes recorded.\n\n");
+    }
+
+    // Failure mode table.
+    if !failure_modes.is_empty() {
+        md.push_str("**Failure modes:**\n\n");
+        md.push_str("| Mode | Count | Share |\n");
+        md.push_str("|------|------:|------:|\n");
         for mode in &failure_modes {
             md.push_str(&format!(
-                "| {} | {} | {:.1}% |\n",
+                "| {} | {} | {:.0}% |\n",
                 mode.label,
                 mode.count,
-                mode.share * 100.0
+                mode.share * 100.0,
             ));
         }
         md.push('\n');
     }
-    append_insights(&mut md, &insights.turns);
 
-    md.push_str("## Sector and Crash Geography\n\n");
-    append_crash_location_summary(&mut md, &tracker.episodes);
-    if sector_rows.is_empty() {
-        md.push_str("No trajectory traces were recorded for sector diagnostics.\n\n");
-    } else {
-        md.push_str("| Sector | Progress Range | Ticks | Tick Share | Mean Speed | Mean Abs Heading | Mean Gap | Mean Throttle | Terminal Ticks | Crash Terminals |\n");
-        md.push_str("|------:|----------------|------:|-----------:|-----------:|---------------:|---------:|--------------:|---------------:|----------------:|\n");
-        for row in &sector_rows {
-            let start = row.sector_index as f32 / NUM_PROGRESS_SECTORS as f32;
-            let end = (row.sector_index + 1) as f32 / NUM_PROGRESS_SECTORS as f32;
+    // Corner vs straight crash comparison.
+    if !sector_rows.is_empty() {
+        let (corner_crashes, corner_total, straight_crashes, straight_total) =
+            corner_vs_straight_crashes(&sector_rows);
+        if corner_total > 0 || straight_total > 0 {
+            let corner_rate = if corner_total > 0 {
+                corner_crashes as f32 / corner_total as f32 * 100.0
+            } else {
+                0.0
+            };
+            let straight_rate = if straight_total > 0 {
+                straight_crashes as f32 / straight_total as f32 * 100.0
+            } else {
+                0.0
+            };
             md.push_str(&format!(
-                "| {} | {:.1}%–{:.1}% | {} | {:.2}% | {:.1} | {:.2}° | {:.2} | {:.3} | {} | {} |\n",
-                row.sector_index + 1,
-                start * 100.0,
-                end * 100.0,
-                row.samples,
-                row.tick_share * 100.0,
-                row.speed_mean,
-                row.heading_abs_mean_rad.to_degrees(),
-                row.centerline_distance_mean,
-                row.throttle_mean,
-                row.terminal_count,
-                row.crash_terminal_count,
+                "Corner crash rate: {:.0}% ({}/{}) | Straight crash rate: {:.0}% ({}/{})\n\n",
+                corner_rate, corner_crashes, corner_total, straight_rate, straight_crashes,
+                straight_total,
             ));
         }
-        md.push('\n');
     }
-    append_insights(&mut md, &insights.sectors);
 
-    md.push_str("## Critic and Optimisation Diagnostics\n\n");
-    md.push_str("### Critic Quality by Context\n\n");
-    md.push_str("| Context | Samples | MAE | Bias | Explained Var |\n");
-    md.push_str("|---------|--------:|----:|-----:|--------------:|\n");
-    md.push_str(&format!(
-        "| Straight-ish ticks | {} | {:.4} | {:.4} | {:.4} |\n",
-        critic.straight.count,
-        critic.straight.mae(),
-        critic.straight.bias(),
-        critic.straight.explained_variance(),
-    ));
-    md.push_str(&format!(
-        "| High-curvature ticks | {} | {:.4} | {:.4} | {:.4} |\n",
-        critic.high_curvature.count,
-        critic.high_curvature.mae(),
-        critic.high_curvature.bias(),
-        critic.high_curvature.explained_variance(),
-    ));
-    md.push_str(&format!(
-        "| Terminal ticks | {} | {:.4} | {:.4} | {:.4} |\n\n",
-        critic.terminal.count,
-        critic.terminal.mae(),
-        critic.terminal.bias(),
-        critic.terminal.explained_variance(),
-    ));
-    append_insights(&mut md, &insights.critic);
+    // ════════════════════════════════════════════════════════════════════
+    // 6. Training Health
+    // ════════════════════════════════════════════════════════════════════
+    md.push_str("## 6. Training Health\n\n");
 
+    if !upd_series.entropy.is_empty() {
+        md.push_str(&format!(
+            "**Entropy:** `{}`\n\n",
+            sparkline(&upd_series.entropy, SPARKLINE_WIDTH),
+        ));
+        md.push_str(&format!(
+            "**Clip %:** `{}`\n\n",
+            sparkline(&upd_series.clip_fraction, SPARKLINE_WIDTH),
+        ));
+        md.push_str(&format!(
+            "**Approx KL:** `{}`\n\n",
+            sparkline(&upd_series.approx_kl, SPARKLINE_WIDTH),
+        ));
+        md.push_str(&format!(
+            "**Explained Var:** `{}`\n\n",
+            sparkline(&upd_series.explained_variance, SPARKLINE_WIDTH),
+        ));
+    }
+
+    // Latest update snapshot.
     if let Some(latest) = tracker.a2c_updates.last() {
-        md.push_str("### Latest A2C Snapshot\n\n");
+        md.push_str("**Latest update:**\n\n");
         md.push_str("| Metric | Value |\n");
         md.push_str("|--------|-------|\n");
         md.push_str(&format!(
-            "| Total updates | {} |\n| Latest policy entropy | {:.4} |\n| Latest value loss | {:.4} |\n| Latest explained variance | {:.4} |\n| Latest steering mean / std | {:.4} / {:.4} |\n| Latest throttle mean / std | {:.4} / {:.4} |\n| Latest clamped action fraction | {:.2}% |\n\n",
-            tracker.a2c_updates.len(),
-            latest.policy_entropy,
-            latest.value_loss,
-            latest.explained_variance,
-            latest.steering_mean,
-            latest.steering_std,
-            latest.throttle_mean,
-            latest.throttle_std,
-            latest.clamped_action_fraction * 100.0,
+            "| Policy entropy | {:.4} |\n",
+            latest.policy_entropy
         ));
+        md.push_str(&format!(
+            "| Value loss | {:.4} |\n",
+            latest.value_loss
+        ));
+        md.push_str(&format!(
+            "| Explained variance | {:.4} |\n",
+            latest.explained_variance
+        ));
+        md.push_str(&format!(
+            "| Clip fraction | {:.2}% |\n",
+            latest.clip_fraction * 100.0
+        ));
+        md.push_str(&format!(
+            "| Approx KL | {:.5} |\n",
+            latest.approx_kl
+        ));
+        md.push_str(&format!(
+            "| Steering mean / std | {:.4} / {:.4} |\n",
+            latest.steering_mean, latest.steering_std
+        ));
+        md.push_str(&format!(
+            "| Throttle mean / std | {:.4} / {:.4} |\n",
+            latest.throttle_mean, latest.throttle_std
+        ));
+        md.push('\n');
 
-        md.push_str("### Recent A2C Updates\n\n");
-        md.push_str(
-            "| Update | Batch | Policy Loss | Value Loss | Entropy | Explained Var | Clamp % |\n",
-        );
-        md.push_str(
-            "|------:|------:|------------:|-----------:|--------:|--------------:|--------:|\n",
-        );
-        for update in tracker.a2c_updates.iter().rev().take(5).rev() {
-            md.push_str(&format!(
-                "| {} | {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.2}% |\n",
-                update.update_index,
-                update.batch_size,
-                update.policy_loss,
-                update.value_loss,
-                update.policy_entropy,
-                update.explained_variance,
-                update.clamped_action_fraction * 100.0,
-            ));
+        // Layer health table.
+        if !latest.layer_health.is_empty() {
+            md.push_str("**Layer health:**\n\n");
+            md.push_str("| Layer | Weight Norm | Grad Norm | Dead ReLU % |\n");
+            md.push_str("|-------|------------:|----------:|------------:|\n");
+            for layer in &latest.layer_health {
+                let dead = layer
+                    .dead_relu_fraction
+                    .map(|v| format!("{:.1}%", v * 100.0))
+                    .unwrap_or_else(|| "N/A".to_string());
+                md.push_str(&format!(
+                    "| {} | {:.4} | {:.4} | {} |\n",
+                    layer.layer_name, layer.weight_l2_norm, layer.gradient_l2_norm, dead,
+                ));
+            }
+            md.push('\n');
         }
-        md.push('\n');
-        md.push_str("### Latest Layer Health\n\n");
-        md.push_str("| Layer | Weight Norm | Grad Norm | Dead ReLU % |\n");
-        md.push_str("|-------|------------:|----------:|------------:|\n");
-        for layer in &latest.layer_health {
-            let dead = layer
-                .dead_relu_fraction
-                .map(|value| format!("{:.2}%", value * 100.0))
-                .unwrap_or_else(|| "N/A".to_string());
-            md.push_str(&format!(
-                "| {} | {:.4} | {:.4} | {} |\n",
-                layer.layer_name, layer.weight_l2_norm, layer.gradient_l2_norm, dead
-            ));
-        }
-        md.push('\n');
-        append_insights(&mut md, &insights.optimisation);
     }
 
-    md.push_str("## Trajectory Snapshots\n\n");
+    // Reward decomposition trends by chunk.
+    if !chunks.is_empty() {
+        md.push_str("**Reward decomposition by chunk:**\n\n");
+        md.push_str("| Chunk | Progress R | Time Pen | Crash Pen | Lap Bonus |\n");
+        md.push_str("|------:|-----------:|---------:|----------:|----------:|\n");
+        for c in &chunks {
+            md.push_str(&format!(
+                "| {} | {:.3} | {:.3} | {:.3} | {:.3} |\n",
+                c.chunk_index + 1,
+                c.avg_progress_reward,
+                c.avg_time_penalty,
+                c.avg_crash_penalty,
+                c.avg_lap_bonus,
+            ));
+        }
+        md.push('\n');
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 7. Trajectory Snapshots
+    // ════════════════════════════════════════════════════════════════════
+    md.push_str("## 7. Trajectory Snapshots\n\n");
+
     if trajectory_rows.is_empty() {
         md.push_str("No per-tick traces were captured.\n");
     } else {
-        md.push_str("| Selection | Episode | End | Best Progress | Ticks | Mean Speed | Peak Speed | Mean Abs Heading | Max Abs Heading |\n");
-        md.push_str("|-----------|--------:|-----|--------------:|------:|-----------:|-----------:|---------------:|--------------:|\n");
+        md.push_str("| Selection | Episode | End | Progress | Ticks | Mean Speed | Peak Speed |\n");
+        md.push_str("|-----------|--------:|-----|--------:|------:|-----------:|-----------:|\n");
         for row in &trajectory_rows {
             md.push_str(&format!(
-                "| {} | {} | {} | {:.2}% | {} | {:.1} | {:.1} | {:.2}° | {:.2}° |\n",
+                "| {} | {} | {} | {:.1}% | {} | {:.1} | {:.1} |\n",
                 row.selection,
                 row.episode_id,
                 row.end_reason,
@@ -499,8 +428,6 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str) {
                 row.ticks,
                 row.mean_speed,
                 row.peak_speed,
-                row.mean_abs_heading_deg,
-                row.max_abs_heading_deg,
             ));
         }
     }
@@ -508,79 +435,106 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str) {
     let _ = fs::write(filepath, md);
 }
 
-fn append_optional_row(md: &mut String, label: &str, value: Option<f32>, suffix: &str) {
-    let value = value
-        .map(|value| format!("{value:.2}{suffix}"))
-        .unwrap_or_else(|| "N/A".to_string());
-    md.push_str(&format!("| {label} | {value} |\n"));
+// ── Helpers ────────────────────────────────────────────────────────────
+
+/// Summarises the direction of a smoothed series in a single word.
+fn trend_word(smoothed: &[f32]) -> &'static str {
+    if smoothed.len() < 4 {
+        return "insufficient data";
+    }
+    let n = smoothed.len();
+    let recent = mean(&smoothed[n.saturating_sub(10)..].to_vec());
+    let early = mean(&smoothed[..10.min(n)].to_vec());
+    let delta = recent - early;
+    if delta > 3.0 {
+        "rising"
+    } else if delta < -3.0 {
+        "falling"
+    } else {
+        "flat"
+    }
 }
 
-fn append_insights(md: &mut String, insights: &[String]) {
-    if insights.is_empty() {
-        return;
-    }
-    md.push_str("> Insights\n");
-    for insight in insights {
-        md.push_str(&format!("> - {insight}\n"));
-    }
-    md.push('\n');
+struct CarStats {
+    env_id: u32,
+    count: usize,
+    avg_progress: f32,
+    avg_reward: f32,
+    crash_rate: f32,
 }
 
-fn append_ascii_chart(md: &mut String, title: &str, rows: &[(String, f32)], invert: bool) {
-    if rows.is_empty() {
-        return;
-    }
-    let max_value = rows
-        .iter()
-        .map(|(_, value)| *value)
-        .fold(0.0, f32::max)
-        .max(1e-6);
-    let min_value = rows
-        .iter()
-        .map(|(_, value)| *value)
-        .fold(f32::MAX, f32::min);
-    md.push_str(&format!("### {title}\n\n```text\n"));
-    for (label, value) in rows {
-        let normalized = if invert {
-            1.0 - ((*value - min_value) / (max_value - min_value).max(1e-6))
-        } else {
-            *value / max_value
-        };
-        let bar = "█".repeat((normalized.clamp(0.0, 1.0) * 32.0).round() as usize);
-        md.push_str(&format!("{label:>4} | {bar} {value:.2}\n"));
-    }
-    md.push_str("```\n\n");
-}
-
-fn append_crash_location_summary(md: &mut String, records: &[EpisodeRecord]) {
-    md.push_str("### Crash Location Summary\n\n");
-    let bins = crash_bins(records);
-    if bins.is_empty() {
-        md.push_str("No crash positions were recorded.\n\n");
-        return;
-    }
-
-    md.push_str("| Bin Center (x, y) | Crash Count |\n");
-    md.push_str("|-------------------|------------:|\n");
-    for ((x, y), count) in bins.iter().take(8) {
-        md.push_str(&format!("| ({x:.0}, {y:.0}) | {} |\n", count));
-    }
-    md.push('\n');
-}
-
-fn crash_bins(records: &[EpisodeRecord]) -> Vec<((f32, f32), usize)> {
-    let mut bins = HashMap::<(i32, i32), usize>::new();
-    for record in records {
-        if let Some([x, y]) = record.crash_position {
-            let key = ((x / 100.0).round() as i32, (y / 100.0).round() as i32);
-            *bins.entry(key).or_insert(0) += 1;
+fn per_car_stats(episodes: &[EpisodeRecord]) -> Vec<CarStats> {
+    let mut map: HashMap<u32, (usize, f32, f32, usize)> = HashMap::new();
+    for ep in episodes {
+        let entry = map.entry(ep.env_id).or_insert((0, 0.0, 0.0, 0));
+        entry.0 += 1;
+        entry.1 += ep.progress;
+        entry.2 += ep.reward;
+        if ep.end_reason == "crash" {
+            entry.3 += 1;
         }
     }
 
-    let mut sorted: Vec<((f32, f32), usize)> = bins
+    let mut stats: Vec<CarStats> = map
         .into_iter()
-        .map(|((x, y), count)| ((x as f32 * 100.0, y as f32 * 100.0), count))
+        .map(|(env_id, (count, progress_sum, reward_sum, crashes))| {
+            let c = count as f32;
+            CarStats {
+                env_id,
+                count,
+                avg_progress: progress_sum / c,
+                avg_reward: reward_sum / c,
+                crash_rate: crashes as f32 / c,
+            }
+        })
         .collect();
-    sorted.sort_by(|a, b| b.1.cmp(&a.1));
-    sorted
+    stats.sort_by_key(|s| s.env_id);
+    stats
+}
+
+/// Counts crashes per progress sector. Episodes without `crash_position`
+/// contribute nothing. We estimate the sector from `progress` as a fraction
+/// of the track.
+fn crash_counts_by_sector(episodes: &[EpisodeRecord]) -> Vec<usize> {
+    let mut counts = vec![0usize; NUM_PROGRESS_SECTORS];
+    for ep in episodes {
+        if ep.end_reason == "crash" || ep.end_reason.contains("Crash") {
+            // Use the episode progress to estimate sector.
+            let sector = (ep.progress * NUM_PROGRESS_SECTORS as f32).floor() as usize;
+            let sector = sector.min(NUM_PROGRESS_SECTORS - 1);
+            counts[sector] += 1;
+        }
+    }
+    counts
+}
+
+/// Classifies sectors as corners (high mean steering magnitude in traces) or
+/// straights, then computes crash rates for each category.
+///
+/// Returns (corner_crashes, corner_terminals, straight_crashes, straight_terminals).
+fn corner_vs_straight_crashes(
+    sector_rows: &[crate::analytics::metrics::sectors::SectorDiagnosticsRow],
+) -> (usize, usize, usize, usize) {
+    // A sector is a "corner" if the mean absolute heading error exceeds 0.05 rad (~3 deg).
+    let heading_threshold = 0.05_f32;
+
+    let mut corner_crashes = 0usize;
+    let mut corner_total = 0usize;
+    let mut straight_crashes = 0usize;
+    let mut straight_total = 0usize;
+
+    for row in sector_rows {
+        if row.terminal_count == 0 {
+            continue;
+        }
+        if row.heading_abs_mean_rad > heading_threshold {
+            corner_crashes += row.crash_terminal_count;
+            corner_total += row.terminal_count;
+        } else {
+            straight_crashes += row.crash_terminal_count;
+            straight_total += row.terminal_count;
+        }
+    }
+
+    (corner_crashes, corner_total, straight_crashes, straight_total)
 }

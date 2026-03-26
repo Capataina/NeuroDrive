@@ -41,12 +41,16 @@ Draws ray segments and hit points from `SensorReadings` — 11 rays with their d
 
 ### HUD Panel (F3)
 
-The HUD is a **Bevy UI panel** (fixed-position root node, not a debug-print overlay):
+The HUD is a compact **Bevy UI panel** (440px wide, 72% opacity, blue accent palette, positioned top-left):
 
-- **Current state section:** progress, lane offset, centreline gap, heading error
-- **Run state section:** episode count, death count, best-ever progress, moving averages (return, progress, crash rate over last 20 episodes)
-- **Learning section:** live A2C update-health line when training stats exist (losses, entropy, explained variance, action spread)
-- **Quarter summary grid:** recent episode history split into four real-time quarters with per-quarter stats and an overall assessment
+- **Assessment line:** learning phase status and guidance (blue accent text)
+- **Live metrics line:** progress %, life-best %, centreline gap, heading error, lateral offset
+- **Run line:** episode count, life seconds, reward, death count, last end reason
+- **Run detail line:** best-ever progress with episode number, rolling average progress and return
+- **PPO learning line:** update count, explained variance, value loss, entropy, clip %, KL divergence
+- **Quarter summary table:** six-column grid (Q, N, Prog, Life, Rwd, C/L/T) — Gap and Heading columns removed for compactness; assessment heuristic still uses them internally
+
+Text lines use condensed labels and 1-decimal precision to prevent wrapping within the 440px panel.
 
 ### Quarter Summary Assessment
 
@@ -68,14 +72,14 @@ A live leaderboard panel in the top-right corner, toggled with F3 alongside the 
 ### Scheduling
 
 - **Fixed-tick** (`SimSet::Measurement`):
-  - `update_driving_hud_stats_system` — updates live HUD values (SHIM: first car only)
-  - `capture_driving_hud_episode_metrics_system` — captures episode-end data for quarter summaries (SHIM: first car only)
+  - `update_driving_hud_stats_system` — tracks best progress and deaths across **all cars**
+  - `capture_driving_hud_episode_metrics_system` — folds **all cars'** completed episodes into HUD history
 - **Update** (every frame):
   - `debug_overlay_toggle_system` — F1/F2/F3 key handling
   - `draw_geometry_overlay_system` — centreline and car vector gizmos (all cars)
   - `draw_sensor_overlay_system` — ray rendering (all cars)
   - `update_driving_hud_visibility_system` — shows/hides HUD based on F3
-  - `update_driving_hud_text_system` — refreshes all HUD text sections (SHIM: first car only)
+  - `update_driving_hud_text_system` — refreshes all HUD text sections (displays **best car** via `TrainerLiveRanking`, falls back to first car)
   - `update_leaderboard_system` — refreshes leaderboard ranking display (all cars)
 
 ## Key Interfaces / Data Flow
@@ -100,7 +104,6 @@ A live leaderboard panel in the top-right corner, toggled with F3 alongside the 
 ## Known Issues / Active Risks
 
 - The HUD is informative but still **summary-oriented** — it does not expose full rollout-buffer internals or detailed per-layer update history.
-- HUD stats and text systems use **temporary shims** that target the first car only, pending a full HUD overhaul. The leaderboard is fully multi-car.
 - Overlay performance under very long AI runs with multiple cars has not been explicitly evaluated.
 - The assessment heuristic is intentionally lightweight and should not substitute for offline analytics.
 
@@ -113,8 +116,6 @@ A live leaderboard panel in the top-right corner, toggled with F3 alongside the 
 
 - Brain-specific live inspection could be added: sampled vs mean action, rollout size, update cadence, richer network-health display.
 - A dedicated heading-error glyph or clearer lane-position visualisation may be worthwhile.
-- Full HUD redesign to show trainer-wide stats (not just first car) is part of the planned analytics overhaul.
-- The leaderboard panel is implemented and live; HUD stats sections still need multi-car migration.
 
 ## Durable Notes / Discarded Approaches
 

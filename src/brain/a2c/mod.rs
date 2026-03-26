@@ -21,7 +21,10 @@ use crate::game::episode::EpisodeState;
 
 use self::buffer::TrainerRolloutBuffer;
 use self::model::ActorCritic;
-use self::update::a2c_update;
+use self::update::{
+    PreparedUpdate, ppo_finish_epoch, ppo_prepare_update, ppo_process_chunk,
+    ppo_update_blocking, squashed_gaussian_log_prob,
+};
 
 /// Shared A2C brain resource. Owns the policy/value network and hyperparameters.
 /// The rollout buffer is now a separate `TrainerRolloutBuffer` resource.
@@ -34,6 +37,9 @@ pub struct A2cBrain {
     pub max_steps: usize,
     pub min_update_steps: usize,
     pub step_counter: usize,
+    pub ppo_epochs: usize,
+    pub clip_epsilon: f32,
+    pub samples_per_tick: usize,
 }
 
 impl Default for A2cBrain {
@@ -47,6 +53,9 @@ impl Default for A2cBrain {
             max_steps: 512,
             min_update_steps: 128,
             step_counter: 0,
+            ppo_epochs: 4,
+            clip_epsilon: 0.2,
+            samples_per_tick: 128,
         }
     }
 }
@@ -74,7 +83,16 @@ pub struct A2cTrainingStats {
     pub throttle_mean: f32,
     pub throttle_std: f32,
     pub clamped_action_fraction: f32,
+    pub clip_fraction: f32,
+    pub approx_kl: f32,
     pub layer_health: Vec<A2cLayerHealth>,
+}
+
+/// Holds an in-progress PPO update that is amortised across frames.
+/// One epoch runs per `FixedUpdate` tick to keep the simulation smooth.
+#[derive(Resource, Default)]
+pub struct PpoUpdateState {
+    prepared: Option<PreparedUpdate>,
 }
 
 pub struct A2cPlugin;
@@ -84,6 +102,7 @@ impl Plugin for A2cPlugin {
         app.init_resource::<A2cBrain>()
             .init_resource::<A2cTrainingStats>()
             .init_resource::<TrainerRolloutBuffer>()
+            .init_resource::<PpoUpdateState>()
             .add_systems(
                 FixedUpdate,
                 a2c_act_all_cars_system
@@ -93,7 +112,10 @@ impl Plugin for A2cPlugin {
             )
             .add_systems(
                 FixedUpdate,
-                a2c_collect_rewards_all_cars_system
+                (
+                    a2c_collect_rewards_all_cars_system,
+                    ppo_epoch_system.after(a2c_collect_rewards_all_cars_system),
+                )
                     .after(crate::game::episode::episode_loop_system)
                     .after(crate::agent::observation::build_observation_vector_system)
                     .in_set(crate::sim::sets::SimSet::Measurement),
@@ -151,6 +173,22 @@ pub fn a2c_act_all_cars_system(
 
         action_state.desired = applied_action;
 
+        let mut old_log_prob = 0.0;
+        for j in 0..2 {
+            let squashed = if j == 0 {
+                actions[j]
+            } else {
+                2.0 * actions[j] - 1.0
+            };
+            old_log_prob += squashed_gaussian_log_prob(
+                latent_actions[j],
+                squashed,
+                action_dist.mean[j],
+                action_dist.std[j],
+                j,
+            );
+        }
+
         buffer.push_pre_step(
             env_id.0,
             obs.values.to_vec(),
@@ -158,33 +196,31 @@ pub fn a2c_act_all_cars_system(
             latent_actions.to_vec(),
             safety_clamp_hits,
             value,
+            old_log_prob,
         );
     }
 
     brain.step_counter += car_query.iter().count();
 }
 
-/// Collects per-car rewards and done flags, then triggers a shared A2C update
-/// when the total buffer reaches the horizon.
+/// Collects per-car rewards and done flags. When the buffer reaches the
+/// horizon, prepares a PPO update (GAE + frozen buffer) for the epoch system
+/// to process one epoch per tick.
 pub fn a2c_collect_rewards_all_cars_system(
     mode: Res<AgentMode>,
     car_query: Query<(&EnvInstanceId, &ObservationVector, &EpisodeState), With<Car>>,
     mut brain: ResMut<A2cBrain>,
     mut buffer: ResMut<TrainerRolloutBuffer>,
-    mut stats: ResMut<A2cTrainingStats>,
+    mut update_state: ResMut<PpoUpdateState>,
 ) {
     if *mode != AgentMode::Ai {
         return;
     }
 
-    // Only push rewards if we have pending pre-step entries
     if buffer.pending_rewards() == 0 {
         return;
     }
 
-    // Push reward/done for each car, matching the order they were acted on
-    // The pre-step entries were pushed in query iteration order, so we push
-    // rewards in the same order.
     let mut any_done = false;
     for (_, _, episode_state) in car_query.iter() {
         let done = episode_state.current_tick_end_reason.is_some();
@@ -205,8 +241,8 @@ pub fn a2c_collect_rewards_all_cars_system(
     let reached_horizon = buffer.len() >= brain.max_steps;
     let reached_terminal_batch = any_done && buffer.len() >= brain.min_update_steps;
 
-    if reached_horizon || reached_terminal_batch {
-        // Compute per-env bootstrap values for non-terminal envs
+    // Only start a new update if there is no epoch-spread update in progress
+    if (reached_horizon || reached_terminal_batch) && update_state.prepared.is_none() {
         let mut bootstrap_values: HashMap<u32, f32> = HashMap::new();
         for (env_id, obs, episode_state) in car_query.iter() {
             let done = episode_state.current_tick_end_reason.is_some();
@@ -218,17 +254,61 @@ pub fn a2c_collect_rewards_all_cars_system(
             }
         }
 
-        a2c_update(&mut brain, &mut buffer, &mut stats, &bootstrap_values);
+        if let Some(prepared) = ppo_prepare_update(&brain, &buffer, &bootstrap_values) {
+            update_state.prepared = Some(prepared);
+            buffer.clear();
+        } else {
+            buffer.clear();
+        }
     }
 }
 
-/// Flushes any remaining rollout data on application exit.
+/// Processes a chunk of samples per tick from the in-progress PPO update.
+/// A full epoch is split across multiple ticks (samples_per_tick samples each)
+/// so the simulation stays smooth.
+pub fn ppo_epoch_system(
+    mode: Res<AgentMode>,
+    mut brain: ResMut<A2cBrain>,
+    mut update_state: ResMut<PpoUpdateState>,
+    mut stats: ResMut<A2cTrainingStats>,
+) {
+    if *mode != AgentMode::Ai {
+        return;
+    }
+
+    let Some(prepared) = update_state.prepared.as_mut() else {
+        return;
+    };
+
+    if !prepared.is_active() {
+        update_state.prepared = None;
+        return;
+    }
+
+    let chunk_size = brain.samples_per_tick;
+    let epoch_complete = ppo_process_chunk(&mut brain, prepared, chunk_size);
+
+    if epoch_complete {
+        let is_final = prepared.epochs_remaining == 1;
+        ppo_finish_epoch(&mut brain, prepared, &mut stats, is_final);
+        prepared.epochs_remaining -= 1;
+        prepared.sample_offset = 0;
+
+        if prepared.epochs_remaining == 0 {
+            update_state.prepared = None;
+        }
+    }
+}
+
+/// Flushes any in-progress PPO epochs and remaining rollout data on exit.
+/// Runs synchronously since frame budget does not matter at shutdown.
 pub fn a2c_flush_on_exit_system(
     mut exit_events: MessageReader<AppExit>,
     mode: Res<AgentMode>,
     car_query: Query<(&EnvInstanceId, &ObservationVector, &EpisodeState), With<Car>>,
     mut brain: ResMut<A2cBrain>,
     mut buffer: ResMut<TrainerRolloutBuffer>,
+    mut update_state: ResMut<PpoUpdateState>,
     mut stats: ResMut<A2cTrainingStats>,
 ) {
     if exit_events.read().next().is_none() {
@@ -237,14 +317,37 @@ pub fn a2c_flush_on_exit_system(
 
     if *mode != AgentMode::Ai {
         buffer.clear();
+        update_state.prepared = None;
         return;
     }
 
+    // Finish any in-progress staged update
+    if let Some(prepared) = update_state.prepared.as_mut() {
+        let batch_size = prepared.frozen_buffer.len();
+        // Finish current epoch if partially processed
+        if prepared.sample_offset > 0 {
+            ppo_process_chunk(&mut brain, prepared, batch_size);
+            let is_final = prepared.epochs_remaining == 1;
+            ppo_finish_epoch(&mut brain, prepared, &mut stats, is_final);
+            prepared.epochs_remaining -= 1;
+            prepared.sample_offset = 0;
+        }
+        // Run any remaining full epochs
+        while prepared.is_active() {
+            let is_final = prepared.epochs_remaining == 1;
+            ppo_process_chunk(&mut brain, prepared, batch_size);
+            ppo_finish_epoch(&mut brain, prepared, &mut stats, is_final);
+            prepared.epochs_remaining -= 1;
+            prepared.sample_offset = 0;
+        }
+        update_state.prepared = None;
+    }
+
+    // Flush any remaining buffer data
     if buffer.len() == 0 {
         return;
     }
 
-    // Compute per-env bootstrap values
     let mut bootstrap_values: HashMap<u32, f32> = HashMap::new();
     for (env_id, obs, episode_state) in car_query.iter() {
         let done = episode_state.current_tick_end_reason.is_some();
@@ -256,5 +359,6 @@ pub fn a2c_flush_on_exit_system(
         }
     }
 
-    a2c_update(&mut brain, &mut buffer, &mut stats, &bootstrap_values);
+    ppo_update_blocking(&mut brain, &buffer, &mut stats, &bootstrap_values);
+    buffer.clear();
 }

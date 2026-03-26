@@ -402,6 +402,7 @@ mod tests {
         curvature: f32,
     ) -> TickTraceRecord {
         TickTraceRecord {
+            env_id: 0,
             tick_index: 0,
             progress_fraction,
             progress_s: 0.0,
