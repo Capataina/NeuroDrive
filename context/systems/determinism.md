@@ -28,8 +28,8 @@
 | Controller boundary | **Strong** | `CarAction`/`ActionState` insulates physics from controller implementation |
 | Centreline projection | **Strong** | Purely geometric, no RNG |
 | Observation production | **Strong** | Grid raycasts and math are deterministic given car state and track |
-| A2C action sampling | **Weak** | Uses ad hoc `rand::rng()` per act call — no centralised seed |
-| A2C model initialisation | **Weak** | Uses `rand::rng()` once at startup — no controlled seed |
+| A2C action sampling | **Improved** | Uses a seeded `StdRng` stored in `A2cBrain` — deterministic given the same seed |
+| A2C model initialisation | **Weak** | Uses `rand::rng()` once at startup for init, then seeds a `StdRng` for runtime — init seed not yet user-controllable |
 | Analytics export filenames | **Weak** | Timestamp-based, naturally non-deterministic (acceptable) |
 | Full ECS replay | **Missing** | No end-to-end action/observation/reward replay harness |
 
@@ -39,11 +39,11 @@ Given the same compiled binary and identical fixed-tick action streams, the envi
 
 ### What Is Not Reproducible
 
-The A2C path introduces non-determinism at two points:
-1. **Model initialisation** — weights depend on thread-local RNG state.
-2. **Action sampling** — each act call creates a new `rand::rng()`.
+The A2C path has **improved** determinism but is not fully controlled:
+1. **Model initialisation** — weights still depend on thread-local RNG state at startup (not user-seeded).
+2. **Action sampling** — now uses a seeded `StdRng` stored in `A2cBrain`, derived from the init RNG. Given the same init state, all subsequent policy sampling is deterministic.
 
-This means two runs of the same binary will produce different A2C behaviour, making comparison of training runs unreliable.
+Two runs of the same binary will still produce different A2C behaviour because the init seed is not user-controllable, but within a run, the policy sampling is now reproducible from the seeded state.
 
 ## Key Interfaces / Data Flow
 
@@ -83,7 +83,7 @@ Any violation of this ordering could produce:
 
 ## Planned / Missing / Likely Changes
 
-- A **single owned RNG/seed strategy** is the clearest missing prerequisite for reproducible AI runs.
+- A **user-controllable init seed** is the remaining prerequisite for fully reproducible AI runs (the runtime RNG is now seeded, but the init seed itself is not configurable).
 - Full replay would need recorded streams for actions, observations, rewards, episode endings, and possibly update summaries.
 - If headless training is added, determinism expectations should be rechecked at the **whole-app level**.
 

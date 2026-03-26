@@ -5,6 +5,7 @@
 //! of the environment or agent interfaces.
 
 pub mod hud;
+pub mod leaderboard;
 pub mod overlays;
 pub mod plugin;
 

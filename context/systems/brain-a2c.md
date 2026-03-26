@@ -10,9 +10,10 @@
 
 | Owner | Owns | Does not own |
 |-------|------|-------------|
-| `src/brain/plugin.rs` | `BrainPlugin`, `AgentMode` toggle (F4), rollout-buffer reset on mode switch | Policy implementation details |
-| `src/brain/types.rs` | `AgentMode` enum (`Keyboard` / `Ai`), minimal `Brain` trait | Observation or reward production |
-| `src/brain/a2c/` | `A2cBrain`, `A2cPlugin`, act/reward-collect/flush systems, `ActorCritic` model, `RolloutBuffer`, update logic, training stats | Environment truth, observation construction |
+| `src/brain/plugin.rs` | `BrainPlugin`, `AgentMode` toggle (F4), registers `TrainerLiveRanking`, wires ranking and visual-role systems, rollout-buffer reset on mode switch | Policy implementation details |
+| `src/brain/types.rs` | `AgentMode` enum (`Keyboard` / `Ai`), `Brain` trait (**dead code** — unused, tagged for Stage 5 removal) | Observation or reward production |
+| `src/brain/a2c/` | `A2cBrain` (model + hyperparams + seeded RNG, **no buffer**), `TrainerRolloutBuffer` (separate resource with env_id tagging), `A2cPlugin`, vectorised act/collect/flush systems, per-env GAE, `ActorCritic` model, update logic, training stats | Environment truth, observation construction |
+| `src/brain/ranking.rs` | `TrainerLiveRanking` resource, ranking computation, `update_car_visual_roles_system` (best-car highlighting via alpha + z-order), `CarColour`-aware sprite updates | Policy, observation, reward |
 | `src/brain/common/` | Reusable handwritten ML primitives: `Linear`, `Relu`, `AdamOptimizer`, Gaussian math | Algorithm-specific logic |
 | `src/brain/biological/` | **Empty placeholder** for future local-plasticity brain | Nothing yet |
 
@@ -22,7 +23,7 @@
 
 - `AgentMode` defaults to `Ai`.
 - `F4` toggles between `Ai` and `Keyboard` in the `Update` schedule.
-- Toggling clears the A2C rollout buffer and resets `step_counter` to avoid mixed-control trajectories.
+- Toggling clears `TrainerRolloutBuffer` (separate resource, not brain-owned) and resets `step_counter` to avoid mixed-control trajectories.
 
 ### Model Architecture
 
@@ -47,31 +48,33 @@ obs (23) → Linear(23,64) → ReLU    obs (23) → Linear(23,64) → ReLU
   - steering: tanh output directly → `[-1, 1]`
   - throttle: `0.5 * (tanh + 1.0)` → `[0, 1]`
 - Safety clamping applied after squashing; clamp-hit flags tracked per step.
-- RNG is created via `rand::rng()` **per act call** — no centralised seed ownership.
+- RNG is a **seeded `StdRng`** stored in `A2cBrain` — deterministic within a session. Initialised from `rand::rng()` at brain construction, then reused for all sampling.
+- All cars receive actions from the shared policy each tick (not just one car).
 
 ### Rollout Collection
 
-- `a2c_act_system` runs in `SimSet::Input` after keyboard input and before action smoothing.
-- Each act call appends to `RolloutBuffer`: state, action, latent action, clamp-hit flags, critic value.
-- `a2c_collect_reward_system` runs in `SimSet::Measurement` after episode truth and observation rebuild.
-- Reward collection appends one reward and one done flag per step.
+- `a2c_act_all_cars_system` (replaces old `a2c_act_system`) runs in `SimSet::Input` after keyboard input and before action smoothing. Iterates **all** cars, calls `model.forward()` for each, samples stochastic actions via the seeded RNG, writes per-car `ActionState`, and pushes transitions tagged with `env_id` to `TrainerRolloutBuffer`.
+- `a2c_collect_rewards_all_cars_system` (replaces old `a2c_collect_reward_system`) runs in `SimSet::Measurement` after episode truth and observation rebuild. Pushes per-car reward and done flag for all cars.
+- `TrainerRolloutBuffer` stores: `states`, `actions`, `latent_actions`, `safety_clamp_hits`, `rewards`, `values`, `dones`, `env_ids`.
+- GAE is computed **per-env** to prevent cross-env value leakage. Transitions are grouped by `env_id`; GAE runs within each group independently. Advantages are normalised globally across all envs in the batch.
+- Bootstrap values are computed per-env at update time: non-terminal envs get a fresh `model.forward()` value; terminal envs get 0.
 
 ### Update Triggering
 
 | Condition | Trigger |
 |-----------|---------|
-| Rollout horizon | `buffer.states.len() >= max_steps` (512) |
-| Terminal batch | Episode ended AND `buffer.states.len() >= min_update_steps` (128) |
+| Rollout horizon | `buffer.len() >= max_steps` (512) — total transitions across **all** cars |
+| Terminal batch | **Any car** terminal AND `buffer.len() >= min_update_steps` (128) |
 | App exit | Residual rollout data exists |
 
-- Non-terminal rollouts bootstrap from the current observation.
-- Update calls `a2c_update()`, which:
+- Per-env bootstrap values are computed at update time (non-terminal envs forward-pass, terminal envs 0).
+- Update calls `a2c_update(brain, buffer, stats, bootstrap_values: &HashMap<u32, f32>)`, which:
   1. Computes GAE advantages and returns.
   2. Standardises advantages (zero mean, unit variance).
   3. Computes policy loss (negative log-prob × advantage + entropy bonus).
   4. Computes value loss (Huber loss on returns vs values).
   5. Backpropagates through actor and critic separately.
-  6. Clips gradients (actor: 0.5, critic: 1.0).
+  6. Clips gradients (actor: 0.5, critic: 0.5).
   7. Steps Adam optimisers.
   8. Snapshots `A2cTrainingStats` with losses, entropy, explained variance, action spread, clamp fraction, and per-layer health.
 
@@ -81,6 +84,15 @@ obs (23) → Linear(23,64) → ReLU    obs (23) → Linear(23,64) → ReLU
 - `policy_loss`, `value_loss`, `policy_entropy`, `explained_variance`
 - `steering_mean/std`, `throttle_mean/std`, `clamped_action_fraction`
 - Per-layer `A2cLayerHealth`: weight L2 norm, gradient L2 norm, dead-ReLU fraction
+
+### Trainer Ranking
+
+- `TrainerLiveRanking` resource tracks best/worst `env_id` with hysteresis (5% margin to prevent flicker).
+- Score formula: `0.7 * best_progress_mean + 0.3 * normalised_return_mean`.
+- Recomputed once per second (60-tick cadence, gated by `update_cadence_ticks`).
+- `update_car_visual_roles_system` sets the best car to full opacity + z=11; all others are dimmed + z=10.
+- Each car has a unique colour from a 25-colour palette via its `CarColour` component; ranking only adjusts alpha and z-order, never the base colour.
+- Owned by `src/brain/ranking.rs`; registered by `BrainPlugin` in `src/brain/plugin.rs`.
 
 ### Hyperparameters (defaults)
 
@@ -95,7 +107,7 @@ obs (23) → Linear(23,64) → ReLU    obs (23) → Linear(23,64) → ReLU
 | Actor LR | 3e-4 |
 | Critic LR | 5e-4 |
 | Actor grad clip | 0.5 |
-| Critic grad clip | 1.0 |
+| Critic grad clip | 0.5 |
 | Entropy coefficient | 0.01 |
 | Value loss coefficient | 0.5 |
 
@@ -110,29 +122,29 @@ obs (23) → Linear(23,64) → ReLU    obs (23) → Linear(23,64) → ReLU
 | `A2cTrainingStats` | A2C update path | debug HUD, analytics tracker | Snapshot of latest completed update |
 
 ```text
-Tick lifecycle:
-  observation_t → a2c_act_system → desired action
-  → smoothing → physics → environment step
-  → episode_loop_system computes reward_t and done_t
-  → observation_t+1 rebuilt (post-reset if terminal)
-  → a2c_collect_reward_system appends reward_t, done_t
-  → optionally triggers a2c_update()
+Tick lifecycle (vectorised):
+  observation_t (all cars) → a2c_act_all_cars_system → per-car desired action + buffer push
+  → smoothing → physics → environment step (all cars)
+  → episode_loop_system computes reward_t and done_t (per car)
+  → observation_t+1 rebuilt (post-reset if terminal, per car)
+  → a2c_collect_rewards_all_cars_system appends per-car reward_t, done_t
+  → optionally triggers a2c_update() with per-env bootstrap values
 ```
 
 ## Implemented Outputs / Artifacts
 
-- **Runtime resources:** `AgentMode`, `A2cBrain`, `A2cTrainingStats`
+- **Runtime resources:** `AgentMode`, `A2cBrain` (no buffer), `A2cTrainingStats`, `TrainerRolloutBuffer`, `TrainerLiveRanking`
 - **Handwritten ML primitives:** `Linear` (forward + backward + Glorot init), `Relu` (with dead-neuron tracking), `AdamOptimizer` (per-layer), `sample_normal`, `log_prob_normal`, `tanh_correction`
-- **No tests** specific to the A2C path itself.
+- **Unit tests in `buffer.rs`:** single-env GAE regression test (verifies per-env GAE matches flat GAE for one env), multi-env GAE isolation test (verifies no cross-env value leakage in interleaved buffer).
 
 ## Known Issues / Active Risks
 
-- **RNG ownership is ad hoc** — `rand::rng()` created per act call. Deterministic replay does not extend into the A2C path.
 - **No save/load path**, no evaluation mode, no headless training loop.
-- **No dedicated A2C integration tests**, no explicit behavioural success threshold, limited protection against silent training regressions beyond runtime stats.
-- The `Brain` trait is minimal and does not yet drive a broader pluggable-brain architecture.
-- `a2c_act_system` uses `single()` for observation query — singleton-car assumption.
-- All rollout buffer alignment is checked by `debug_assert_eq!` only — not active in release builds.
+- **No dedicated A2C integration tests**, no explicit behavioural success threshold, limited protection against silent training regressions beyond runtime stats (unit tests cover GAE only).
+- The `Brain` trait is **dead code** — unused by the vectorised path, tagged for Stage 5 removal.
+- **Analytics and HUD systems use temporary shims** (target first car only) pending a full overhaul.
+- **Observed policy oscillation** (learn-then-forget cycle) — PPO upgrade planned to address via clipped policy ratio.
+- All rollout buffer alignment is checked by `debug_assert!` only — not active in release builds.
 
 ## Partial / In Progress
 
@@ -147,9 +159,9 @@ Tick lifecycle:
 
 ## Planned / Missing / Likely Changes
 
-- **Controlled seeding** is the most obvious missing prerequisite for reproducible learning experiments.
+- **PPO upgrade** planned to clip the policy ratio and address observed oscillation — see `context/plans/ppo-upgrade-brief.md`.
+- **Full analytics overhaul** planned (visual outputs: heat maps, graphs, charts) — see `context/plans/analytics-overhaul-brief.md`.
 - **Headless training, persistence, and evaluation mode** are likely to matter before longer experiments become credible.
-- **Vectorised multi-car training** has a concrete implementation plan in `context/plans/vectorised-a2c-visual-trainer.md`.
 - The final project direction points toward biological/local-plasticity systems; A2C should stay modular enough to be **retired later** without distorting the rest of the runtime.
 - Activation switch from ReLU to tanh is a credible upgrade candidate based on on-policy literature.
 

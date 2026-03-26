@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 
 use bevy::ecs::hierarchy::ChildSpawnerCommands;
-use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 use bevy::ui::widget::{Text, TextUiWriter};
 use bevy::ui::{
@@ -13,7 +12,7 @@ use crate::agent::observation::SensorReadings;
 use crate::brain::a2c::A2cTrainingStats;
 use crate::debug::overlays::DebugOverlayState;
 use crate::game::car::Car;
-use crate::game::collision::CollisionEvent;
+use crate::game::collision::Collided;
 use crate::game::episode::{EpisodeConfig, EpisodeEndReason, EpisodeMovingAverages, EpisodeState};
 use crate::game::progress::TrackProgress;
 
@@ -372,20 +371,19 @@ pub(crate) fn spawn_driving_hud_system(mut commands: Commands) {
         });
 }
 
-/// Tracks live death count and the best progress reached in any episode so far.
+/// SHIM: tracks stats from first car only until HUD overhaul.
 pub(crate) fn update_driving_hud_stats_system(
     mut hud_stats: ResMut<DrivingHudStats>,
-    mut collision_events: MessageReader<CollisionEvent>,
-    episode_state: Res<EpisodeState>,
-    progress_query: Query<&TrackProgress, With<Car>>,
+    car_query: Query<(&TrackProgress, &EpisodeState, Has<Collided>), With<Car>>,
 ) {
-    for _ in collision_events.read() {
-        hud_stats.deaths = hud_stats.deaths.saturating_add(1);
-    }
-
-    let Ok(progress) = progress_query.single() else {
+    // SHIM: first car only until HUD overhaul
+    let Some((progress, episode_state, collided)) = car_query.iter().next() else {
         return;
     };
+
+    if collided {
+        hud_stats.deaths = hud_stats.deaths.saturating_add(1);
+    }
 
     if progress.fraction > hud_stats.best_progress_fraction {
         hud_stats.best_progress_fraction = progress.fraction;
@@ -393,13 +391,18 @@ pub(crate) fn update_driving_hud_stats_system(
     }
 }
 
-/// Captures per-tick centreline-following metrics and snapshots one summary per completed episode.
+/// SHIM: captures HUD metrics from first car only until HUD overhaul.
 pub(crate) fn capture_driving_hud_episode_metrics_system(
     config: Res<EpisodeConfig>,
-    episode_state: Res<EpisodeState>,
+    car_query: Query<&EpisodeState, With<Car>>,
     mut accumulator: ResMut<DrivingHudEpisodeAccumulator>,
     mut history: ResMut<DrivingHudHistory>,
 ) {
+    // SHIM: first car only until HUD overhaul
+    let Some(episode_state) = car_query.iter().next() else {
+        return;
+    };
+
     let finished_episode_id = episode_state.current_episode.saturating_sub(1);
     let target_episode_id = if episode_state.current_tick_end_reason.is_some() {
         finished_episode_id
@@ -411,7 +414,7 @@ pub(crate) fn capture_driving_hud_episode_metrics_system(
         accumulator.reset_for_episode(target_episode_id);
     }
 
-    accumulator.record_tick(&episode_state);
+    accumulator.record_tick(episode_state);
 
     let Some(end_reason) = episode_state.current_tick_end_reason else {
         return;
@@ -449,15 +452,16 @@ pub(crate) fn update_driving_hud_visibility_system(
     };
 }
 
-/// Rebuilds the diagnostics text and quarter grid shown in the HUD.
+/// SHIM: reads from first car only until HUD overhaul.
 pub(crate) fn update_driving_hud_text_system(
     overlay: Res<DebugOverlayState>,
     hud_stats: Res<DrivingHudStats>,
     history: Res<DrivingHudHistory>,
-    episode_state: Res<EpisodeState>,
-    moving_avg: Res<EpisodeMovingAverages>,
     a2c_stats: Option<Res<A2cTrainingStats>>,
-    car_query: Query<(&TrackProgress, &SensorReadings), With<Car>>,
+    car_query: Query<
+        (&TrackProgress, &SensorReadings, &EpisodeState, &EpisodeMovingAverages),
+        With<Car>,
+    >,
     summary_query: Query<(Entity, &HudTextRole)>,
     quarter_query: Query<(Entity, &QuarterCell)>,
     mut text_writer: TextUiWriter,
@@ -466,7 +470,8 @@ pub(crate) fn update_driving_hud_text_system(
         return;
     }
 
-    let Ok((progress, sensors)) = car_query.single() else {
+    // SHIM: first car only until HUD overhaul
+    let Some((progress, sensors, episode_state, moving_avg)) = car_query.iter().next() else {
         return;
     };
 

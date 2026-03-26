@@ -19,20 +19,19 @@ pub struct CarDynamicsParams {
     pub drag: f32,
 }
 
-/// Applies the current action to the car on the fixed simulation tick.
+/// Applies each car's per-car action on the fixed simulation tick.
 ///
 /// This system is the only place where actions become state mutation:
-/// it updates the car transform and velocity deterministically given the fixed
-/// timestep and the fixed-tick `ActionState`.
+/// it updates each car's transform and velocity deterministically given the
+/// fixed timestep and that car's `ActionState`.
 pub fn car_physics_system(
     time: Res<Time<bevy::time::Fixed>>,
-    action_state: Res<ActionState>,
-    mut query: Query<(&mut Transform, &mut Car)>,
+    mut query: Query<(&mut Transform, &mut Car, &ActionState)>,
 ) {
     let dt = time.delta_secs();
-    let action = action_state.applied;
 
-    for (mut transform, mut car) in query.iter_mut() {
+    for (mut transform, mut car, action_state) in query.iter_mut() {
+        let action = action_state.applied;
         let forward = (transform.rotation * Vec3::X).truncate();
         let heading = forward.y.atan2(forward.x);
         let mut state = CarKinematicState {

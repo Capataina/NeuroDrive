@@ -21,13 +21,12 @@
 - `CarAction` is the stable control surface:
   - `steering`: clamped to `[-1, 1]` (left negative, right positive)
   - `throttle`: clamped to `[0, 1]` (0 = coast, 1 = full throttle)
-- `ActionState` separates `desired` from `applied`:
+- `ActionState` is a **per-car Component** separating `desired` from `applied`:
   - Controllers write `desired` once per fixed tick.
-  - `action_smoothing_system` copies or low-pass filters `desired → applied`.
+  - `action_smoothing_system` iterates all cars and copies or low-pass filters `desired → applied`.
   - Physics and analytics consume `applied` only.
-- `ActionSmoothing` exists but defaults to **disabled** (`enabled: false`, time_constant=0.12s).
-- **Keyboard control** is mode-gated: `keyboard_action_input_system` exits immediately unless `AgentMode` is `Keyboard`. Controls: A/D steer, W throttle.
-- Both `ActionState` and `ActionSmoothing` are currently **singleton resources**, not per-car components.
+- `ActionSmoothing` exists as a **global Resource** but defaults to **disabled** (`enabled: false`, time_constant=0.12s). The smoothing config is shared; the smoothing state (previous `applied`) lives in each car's `ActionState` component.
+- **Keyboard control** is mode-gated: `keyboard_action_input_system` exits immediately unless `AgentMode` is `Keyboard`. In multi-car mode, keyboard controls **`EnvInstanceId(0)` only**. Controls: A/D steer, W throttle.
 
 ### Observation Contract
 
@@ -70,8 +69,8 @@ The observation vector has **23 dimensions** (`OBSERVATION_DIM = 23`):
 
 ## Implemented Outputs / Artifacts
 
-- **Runtime resources:** `ActionState`, `ActionSmoothing`, `ObservationConfig`
-- **Runtime components (per car):** `SensorReadings`, `ObservationVector`
+- **Runtime resources:** `ActionSmoothing`, `ObservationConfig`
+- **Runtime components (per car):** `ActionState`, `SensorReadings`, `ObservationVector`
 - **Tests:** Signed lateral offset sign convention test in `observation.rs`
 
 ## Known Issues / Active Risks
@@ -80,7 +79,6 @@ The observation vector has **23 dimensions** (`OBSERVATION_DIM = 23`):
 - The ray layout is **manually enumerated** rather than generated from a higher-level spread specification.
 - No dedicated runtime assertion that observation producer and all consumers remain **dimension-aligned** beyond shared constant use.
 - **No brake channel** — throttle is currently coast-or-accelerate only.
-- `ActionState` is a singleton resource, which is the main blocker for multi-car action handling.
 
 ## Partial / In Progress
 
@@ -92,7 +90,7 @@ The observation vector has **23 dimensions** (`OBSERVATION_DIM = 23`):
 - A more explicit centreline-first observation hierarchy is a likely next step if A2C continues to underperform on turn anticipation.
 - A reduced ray bundle remains a plausible experiment, but only after geometry-derived features are measured cleanly.
 - Input-health validation would be useful: saturation detection, dead-ray detection, feature distribution drift.
-- Migration from singleton `ActionState` resource to per-car components is required for multi-car training.
+- `ActionState` has been migrated to a per-car Component as part of the vectorised trainer work.
 
 ## Durable Notes / Discarded Approaches
 

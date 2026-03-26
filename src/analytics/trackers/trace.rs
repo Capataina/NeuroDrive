@@ -6,7 +6,7 @@ use crate::agent::action::ActionState;
 use crate::agent::observation::{ObservationConfig, SensorReadings};
 use crate::analytics::metrics::turns::compute_trace_metrics;
 use crate::analytics::models::{EpisodeTrace, TickTraceRecord};
-use crate::brain::a2c::A2cBrain;
+use crate::brain::a2c::buffer::TrainerRolloutBuffer;
 use crate::brain::types::AgentMode;
 use crate::game::car::Car;
 use crate::game::episode::{EpisodeEndReason, EpisodeState};
@@ -70,16 +70,20 @@ impl EpisodeTraceAccumulator {
     }
 }
 
+/// SHIM: captures trace from first car only until analytics overhaul.
 pub fn capture_episode_tick_trace_system(
     mode: Res<AgentMode>,
-    episode_state: Res<EpisodeState>,
-    action_state: Res<ActionState>,
     observation_config: Res<ObservationConfig>,
-    sensor_query: Query<&SensorReadings, With<Car>>,
+    car_query: Query<(&EpisodeState, &ActionState, &SensorReadings), With<Car>>,
     track_query: Query<&Track>,
-    a2c_brain: Option<Res<A2cBrain>>,
+    trainer_buffer: Option<Res<TrainerRolloutBuffer>>,
     mut accumulator: ResMut<EpisodeTraceAccumulator>,
 ) {
+    // SHIM: first car only until analytics overhaul
+    let Some((episode_state, action_state, sensors)) = car_query.iter().next() else {
+        return;
+    };
+
     let done = episode_state.current_tick_end_reason.is_some();
     let target_episode_id = if done {
         episode_state.current_episode.saturating_sub(1)
@@ -91,12 +95,8 @@ pub fn capture_episode_tick_trace_system(
         accumulator.reset_for_episode(target_episode_id);
     }
 
-    let Ok(sensors) = sensor_query.single() else {
-        return;
-    };
-
     let (lookahead_heading_deltas, lookahead_curvatures) = if let Ok(track) = track_query.single() {
-        compute_lookahead_snapshot(track, &episode_state, &observation_config)
+        compute_lookahead_snapshot(track, episode_state, &observation_config)
     } else {
         (
             vec![0.0; observation_config.lookahead_distances.len()],
@@ -105,13 +105,13 @@ pub fn capture_episode_tick_trace_system(
     };
 
     let value_prediction = if *mode == AgentMode::Ai {
-        a2c_brain.and_then(|brain| {
-            let values_len = brain.buffer.values.len();
-            let rewards_len = brain.buffer.rewards.len();
-            if !brain.buffer.values.is_empty()
+        trainer_buffer.and_then(|buf| {
+            let values_len = buf.values.len();
+            let rewards_len = buf.rewards.len();
+            if !buf.values.is_empty()
                 && (values_len == rewards_len || values_len == rewards_len.saturating_add(1))
             {
-                brain.buffer.values.last().copied()
+                buf.values.last().copied()
             } else {
                 None
             }
@@ -147,10 +147,16 @@ pub fn capture_episode_tick_trace_system(
     });
 }
 
+/// SHIM: snapshots from first car only until analytics overhaul.
 pub fn snapshot_completed_episode_trace_system(
-    episode_state: Res<EpisodeState>,
+    car_query: Query<&EpisodeState, With<Car>>,
     mut accumulator: ResMut<EpisodeTraceAccumulator>,
 ) {
+    // SHIM: first car only until analytics overhaul
+    let Some(episode_state) = car_query.iter().next() else {
+        return;
+    };
+
     let Some(reason) = episode_state.current_tick_end_reason else {
         return;
     };

@@ -6,6 +6,7 @@ use crate::debug::hud::{
     update_driving_hud_stats_system, update_driving_hud_text_system,
     update_driving_hud_visibility_system,
 };
+use crate::debug::leaderboard::{spawn_leaderboard_system, update_leaderboard_system};
 use crate::debug::overlays::{
     DebugOverlayState, debug_overlay_toggle_system, draw_geometry_overlay_system,
     draw_sensor_overlay_system,
@@ -21,7 +22,7 @@ impl Plugin for DebugPlugin {
             .init_resource::<DrivingHudStats>()
             .init_resource::<DrivingHudHistory>()
             .init_resource::<DrivingHudEpisodeAccumulator>()
-            .add_systems(Startup, spawn_driving_hud_system)
+            .add_systems(Startup, (spawn_driving_hud_system, spawn_leaderboard_system))
             .add_systems(
                 FixedUpdate,
                 update_driving_hud_stats_system.in_set(SimSet::Measurement),
@@ -40,6 +41,7 @@ impl Plugin for DebugPlugin {
                     draw_sensor_overlay_system,
                     update_driving_hud_visibility_system,
                     update_driving_hud_text_system,
+                    update_leaderboard_system,
                 ),
             );
     }

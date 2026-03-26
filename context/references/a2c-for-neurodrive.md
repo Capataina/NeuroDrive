@@ -115,7 +115,7 @@ A mediocre A2C is the stage where the code is not wrong, but the experiments are
 
 Typical traits:
 
-- single environment only
+- ~~single environment only~~ (now vectorised with configurable multi-env)
 - fixed learning rates
 - no run metadata
 - weak reproducibility
@@ -212,8 +212,8 @@ Verdict:
 | Running observation normalisation | no; only fixed scaling/clipping | meaningful gap |
 | Running return/value normalisation | no | meaningful gap |
 | LR annealing / schedules | no | moderate gap |
-| Seed-controlled RNG | no | major experimental gap |
-| Multi-env synchronous rollout | no | major A2C-identity gap |
+| Seed-controlled RNG | **yes** (seeded StdRng in A2cBrain; init seed not yet user-configurable) | partially closed |
+| Multi-env synchronous rollout | **yes** (TrainerRolloutBuffer with per-env GAE, default 3 cars) | **closed** |
 | Save/load checkpoints | no | major practical gap |
 | Evaluation-only mode | no | major practical gap |
 | Behavioural test harness | very limited | major validation gap |

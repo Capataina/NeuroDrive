@@ -1,34 +1,29 @@
-use bevy::ecs::message::MessageWriter;
 use bevy::prelude::*;
 
 use crate::game::car::{CAR_HEIGHT, CAR_WIDTH, Car};
 use crate::maps::track::Track;
 
-/// Message emitted when the car leaves the driveable road surface.
-#[derive(Message)]
-pub struct CollisionEvent;
+/// Marker component added to car entities that are off the driveable road surface
+/// this tick. Removed when the car is back on road.
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+pub struct Collided;
 
-/// Checks each fixed tick whether any corner of the car's bounding rectangle lies
+/// Checks each fixed tick whether any corner of each car's bounding rectangle lies
 /// off the driveable road surface.
 ///
-/// The four corners of the car sprite (defined by [`CAR_WIDTH`] × [`CAR_HEIGHT`])
-/// are rotated into world space and tested individually against
-/// `track.grid.is_road_at()`. A collision is triggered as soon as any corner
-/// leaves the road, giving accurate edge-level detection rather than
-/// centre-only checking.
+/// Adds the `Collided` marker to cars with an off-road corner; removes it from
+/// cars that are fully on-road. This replaces the old global `CollisionEvent`
+/// message so each car's collision state is independent.
 pub fn collision_detection_system(
-    car_query: Query<&Transform, With<Car>>,
+    car_query: Query<(Entity, &Transform), With<Car>>,
     track_query: Query<&Track>,
-    mut collision_events: MessageWriter<CollisionEvent>,
+    mut commands: Commands,
 ) {
-    let Ok(car_transform) = car_query.single() else {
-        return;
-    };
     let Ok(track) = track_query.single() else {
         return;
     };
 
-    let car_pos = Vec2::new(car_transform.translation.x, car_transform.translation.y);
     let half_w = CAR_WIDTH * 0.5;
     let half_h = CAR_HEIGHT * 0.5;
 
@@ -39,11 +34,23 @@ pub fn collision_detection_system(
         Vec2::new(-half_w, -half_h),
     ];
 
-    for local in &local_corners {
-        let rotated = (car_transform.rotation * Vec3::new(local.x, local.y, 0.0)).truncate();
-        if !track.grid.is_road_at(car_pos + rotated) {
-            collision_events.write(CollisionEvent);
-            return;
+    for (entity, car_transform) in car_query.iter() {
+        let car_pos = Vec2::new(car_transform.translation.x, car_transform.translation.y);
+        let mut off_road = false;
+
+        for local in &local_corners {
+            let rotated =
+                (car_transform.rotation * Vec3::new(local.x, local.y, 0.0)).truncate();
+            if !track.grid.is_road_at(car_pos + rotated) {
+                off_road = true;
+                break;
+            }
+        }
+
+        if off_road {
+            commands.entity(entity).insert(Collided);
+        } else {
+            commands.entity(entity).remove::<Collided>();
         }
     }
 }

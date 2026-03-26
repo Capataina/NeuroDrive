@@ -15,7 +15,7 @@ use crate::analytics::trackers::trace::{
     EpisodeTraceAccumulator, capture_episode_tick_trace_system,
     snapshot_completed_episode_trace_system,
 };
-use crate::brain::a2c::a2c_collect_reward_system;
+use crate::brain::a2c::a2c_collect_rewards_all_cars_system;
 use crate::game::episode::episode_loop_system;
 use crate::sim::sets::SimSet;
 
@@ -35,7 +35,7 @@ impl Plugin for AnalyticsPlugin {
                 capture_episode_tick_trace_system
                     .after(build_observation_vector_system)
                     .after(episode_loop_system)
-                    .before(a2c_collect_reward_system)
+                    .before(a2c_collect_rewards_all_cars_system)
                     .in_set(SimSet::Measurement),
             )
             .add_systems(

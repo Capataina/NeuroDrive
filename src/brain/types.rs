@@ -17,6 +17,8 @@ impl Default for AgentMode {
 }
 
 /// Interface for any Brain algorithm.
+/// TODO: remove in Stage 5 cleanup — vectorised path calls model.forward() directly.
+#[allow(dead_code)]
 pub trait Brain: Send + Sync {
     /// Given an observation, returns the chosen action and any algorithm-specific state.
     fn act(&mut self, obs: &ObservationVector) -> CarAction;

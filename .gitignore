@@ -1,5 +1,6 @@
 /target
 .cursor
+.claude
 
 claude.md
 AGENTS.md

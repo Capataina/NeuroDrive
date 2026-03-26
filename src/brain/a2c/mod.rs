@@ -2,26 +2,33 @@ pub mod buffer;
 pub mod model;
 pub mod update;
 
+use std::collections::HashMap;
+
 use bevy::app::AppExit;
 use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 use serde::{Deserialize, Serialize};
 
 use crate::agent::action::{
     ActionState, CarAction, action_smoothing_system, keyboard_action_input_system,
 };
 use crate::agent::observation::{OBSERVATION_DIM, ObservationVector};
-use crate::brain::types::{AgentMode, Brain};
+use crate::brain::types::AgentMode;
+use crate::game::car::{Car, EnvInstanceId};
 use crate::game::episode::EpisodeState;
 
-use self::buffer::RolloutBuffer;
+use self::buffer::TrainerRolloutBuffer;
 use self::model::ActorCritic;
 use self::update::a2c_update;
 
+/// Shared A2C brain resource. Owns the policy/value network and hyperparameters.
+/// The rollout buffer is now a separate `TrainerRolloutBuffer` resource.
 #[derive(Resource)]
 pub struct A2cBrain {
     pub model: ActorCritic,
-    pub buffer: RolloutBuffer,
+    pub rng: StdRng,
     pub gamma: f32,
     pub gae_lambda: f32,
     pub max_steps: usize,
@@ -31,10 +38,10 @@ pub struct A2cBrain {
 
 impl Default for A2cBrain {
     fn default() -> Self {
-        let mut rng = rand::rng();
+        let mut init_rng = rand::rng();
         Self {
-            model: ActorCritic::new(OBSERVATION_DIM, 64, 2, &mut rng),
-            buffer: RolloutBuffer::new(),
+            model: ActorCritic::new(OBSERVATION_DIM, 64, 2, &mut init_rng),
+            rng: StdRng::from_rng(&mut init_rng),
             gamma: 0.99,
             gae_lambda: 0.95,
             max_steps: 512,
@@ -70,18 +77,55 @@ pub struct A2cTrainingStats {
     pub layer_health: Vec<A2cLayerHealth>,
 }
 
-impl Brain for A2cBrain {
-    fn act(&mut self, obs: &ObservationVector) -> CarAction {
-        let mut rng = rand::rng();
-        let (action_dist, value) = self.model.forward(&obs.values);
+pub struct A2cPlugin;
 
-        let mut actions = vec![0.0; 2];
-        let mut latent_actions = vec![0.0; 2];
+impl Plugin for A2cPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<A2cBrain>()
+            .init_resource::<A2cTrainingStats>()
+            .init_resource::<TrainerRolloutBuffer>()
+            .add_systems(
+                FixedUpdate,
+                a2c_act_all_cars_system
+                    .after(keyboard_action_input_system)
+                    .before(action_smoothing_system)
+                    .in_set(crate::sim::sets::SimSet::Input),
+            )
+            .add_systems(
+                FixedUpdate,
+                a2c_collect_rewards_all_cars_system
+                    .after(crate::game::episode::episode_loop_system)
+                    .after(crate::agent::observation::build_observation_vector_system)
+                    .in_set(crate::sim::sets::SimSet::Measurement),
+            )
+            .add_systems(Last, a2c_flush_on_exit_system);
+    }
+}
+
+/// Runs the shared policy for all cars, writes per-car actions, and pushes
+/// all transitions to the TrainerRolloutBuffer with env_id tagging.
+pub fn a2c_act_all_cars_system(
+    mode: Res<AgentMode>,
+    mut car_query: Query<(&EnvInstanceId, &ObservationVector, &mut ActionState), With<Car>>,
+    mut brain: ResMut<A2cBrain>,
+    mut buffer: ResMut<TrainerRolloutBuffer>,
+) {
+    if *mode != AgentMode::Ai {
+        return;
+    }
+
+    for (env_id, obs, mut action_state) in car_query.iter_mut() {
+        let (action_dist, value) = brain.model.forward(&obs.values);
+
+        let mut actions = [0.0f32; 2];
+        let mut latent_actions = [0.0f32; 2];
 
         for i in 0..2 {
-            let mean = action_dist.mean[i];
-            let std = action_dist.std[i];
-            let latent = crate::brain::common::math::sample_normal(mean, std, &mut rng);
+            let latent = crate::brain::common::math::sample_normal(
+                action_dist.mean[i],
+                action_dist.std[i],
+                &mut brain.rng,
+            );
             latent_actions[i] = latent;
 
             let squashed = latent.tanh();
@@ -105,102 +149,86 @@ impl Brain for A2cBrain {
         actions[0] = applied_action.steering;
         actions[1] = applied_action.throttle;
 
-        self.buffer.states.push(obs.values.to_vec());
-        self.buffer.actions.push(actions.clone());
-        self.buffer.latent_actions.push(latent_actions);
-        self.buffer.safety_clamp_hits.push(safety_clamp_hits);
-        self.buffer.values.push(value);
+        action_state.desired = applied_action;
 
-        applied_action
+        buffer.push_pre_step(
+            env_id.0,
+            obs.values.to_vec(),
+            actions.to_vec(),
+            latent_actions.to_vec(),
+            safety_clamp_hits,
+            value,
+        );
     }
+
+    brain.step_counter += car_query.iter().count();
 }
 
-pub struct A2cPlugin;
-
-impl Plugin for A2cPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<A2cBrain>()
-            .init_resource::<A2cTrainingStats>()
-            .add_systems(
-                FixedUpdate,
-                a2c_act_system
-                    .after(keyboard_action_input_system)
-                    .before(action_smoothing_system)
-                    .in_set(crate::sim::sets::SimSet::Input),
-            )
-            .add_systems(
-                FixedUpdate,
-                a2c_collect_reward_system
-                    .after(crate::game::episode::episode_loop_system)
-                    .after(crate::agent::observation::build_observation_vector_system)
-                    .in_set(crate::sim::sets::SimSet::Measurement),
-            )
-            .add_systems(Last, a2c_flush_on_exit_system);
-    }
-}
-
-pub fn a2c_act_system(
+/// Collects per-car rewards and done flags, then triggers a shared A2C update
+/// when the total buffer reaches the horizon.
+pub fn a2c_collect_rewards_all_cars_system(
     mode: Res<AgentMode>,
-    obs_query: Query<&ObservationVector>,
-    mut action_state: ResMut<ActionState>,
+    car_query: Query<(&EnvInstanceId, &ObservationVector, &EpisodeState), With<Car>>,
     mut brain: ResMut<A2cBrain>,
-) {
-    if *mode != AgentMode::Ai {
-        return;
-    }
-
-    if let Ok(obs) = obs_query.single() {
-        let action = brain.act(obs);
-        action_state.desired = action;
-        brain.step_counter += 1;
-    }
-}
-
-pub fn a2c_collect_reward_system(
-    mode: Res<AgentMode>,
-    obs_query: Query<&ObservationVector>,
-    episode_state: Res<EpisodeState>,
-    mut brain: ResMut<A2cBrain>,
+    mut buffer: ResMut<TrainerRolloutBuffer>,
     mut stats: ResMut<A2cTrainingStats>,
 ) {
     if *mode != AgentMode::Ai {
         return;
     }
 
-    if brain.buffer.states.len() > brain.buffer.rewards.len() {
-        brain.buffer.rewards.push(episode_state.current_tick_reward);
+    // Only push rewards if we have pending pre-step entries
+    if buffer.pending_rewards() == 0 {
+        return;
+    }
 
+    // Push reward/done for each car, matching the order they were acted on
+    // The pre-step entries were pushed in query iteration order, so we push
+    // rewards in the same order.
+    let mut any_done = false;
+    for (_, _, episode_state) in car_query.iter() {
         let done = episode_state.current_tick_end_reason.is_some();
-        brain.buffer.dones.push(done);
-
-        debug_assert_eq!(brain.buffer.states.len(), brain.buffer.actions.len());
-        debug_assert_eq!(brain.buffer.states.len(), brain.buffer.latent_actions.len());
-        debug_assert_eq!(brain.buffer.states.len(), brain.buffer.values.len());
-        debug_assert_eq!(
-            brain.buffer.states.len(),
-            brain.buffer.safety_clamp_hits.len()
-        );
-        debug_assert_eq!(brain.buffer.rewards.len(), brain.buffer.dones.len());
-
-        let reached_horizon = brain.buffer.states.len() >= brain.max_steps;
-        let reached_terminal_batch = done && brain.buffer.states.len() >= brain.min_update_steps;
-
-        if reached_horizon || reached_terminal_batch {
-            let bootstrap_state = if done {
-                None
-            } else {
-                obs_query.single().ok().map(|obs| obs.values.to_vec())
-            };
-            a2c_update(&mut brain, &mut stats, bootstrap_state.as_deref());
+        buffer.push_reward(episode_state.current_tick_reward, done);
+        if done {
+            any_done = true;
         }
+    }
+
+    debug_assert!(
+        buffer.is_aligned(),
+        "Trainer rollout buffer misaligned: states={}, rewards={}, env_ids={}",
+        buffer.pre_step_count(),
+        buffer.len(),
+        buffer.env_ids.len(),
+    );
+
+    let reached_horizon = buffer.len() >= brain.max_steps;
+    let reached_terminal_batch = any_done && buffer.len() >= brain.min_update_steps;
+
+    if reached_horizon || reached_terminal_batch {
+        // Compute per-env bootstrap values for non-terminal envs
+        let mut bootstrap_values: HashMap<u32, f32> = HashMap::new();
+        for (env_id, obs, episode_state) in car_query.iter() {
+            let done = episode_state.current_tick_end_reason.is_some();
+            if done {
+                bootstrap_values.insert(env_id.0, 0.0);
+            } else {
+                let (_, value) = brain.model.forward(&obs.values);
+                bootstrap_values.insert(env_id.0, value);
+            }
+        }
+
+        a2c_update(&mut brain, &mut buffer, &mut stats, &bootstrap_values);
     }
 }
 
+/// Flushes any remaining rollout data on application exit.
 pub fn a2c_flush_on_exit_system(
     mut exit_events: MessageReader<AppExit>,
     mode: Res<AgentMode>,
-    obs_query: Query<&ObservationVector>,
+    car_query: Query<(&EnvInstanceId, &ObservationVector, &EpisodeState), With<Car>>,
     mut brain: ResMut<A2cBrain>,
+    mut buffer: ResMut<TrainerRolloutBuffer>,
     mut stats: ResMut<A2cTrainingStats>,
 ) {
     if exit_events.read().next().is_none() {
@@ -208,18 +236,25 @@ pub fn a2c_flush_on_exit_system(
     }
 
     if *mode != AgentMode::Ai {
-        brain.buffer.clear();
+        buffer.clear();
         return;
     }
 
-    if brain.buffer.rewards.is_empty() {
+    if buffer.len() == 0 {
         return;
     }
 
-    let bootstrap_state = if brain.buffer.dones.last().copied().unwrap_or(true) {
-        None
-    } else {
-        obs_query.single().ok().map(|obs| obs.values.to_vec())
-    };
-    a2c_update(&mut brain, &mut stats, bootstrap_state.as_deref());
+    // Compute per-env bootstrap values
+    let mut bootstrap_values: HashMap<u32, f32> = HashMap::new();
+    for (env_id, obs, episode_state) in car_query.iter() {
+        let done = episode_state.current_tick_end_reason.is_some();
+        if done {
+            bootstrap_values.insert(env_id.0, 0.0);
+        } else {
+            let (_, value) = brain.model.forward(&obs.values);
+            bootstrap_values.insert(env_id.0, value);
+        }
+    }
+
+    a2c_update(&mut brain, &mut buffer, &mut stats, &bootstrap_values);
 }

@@ -4,15 +4,22 @@ use crate::analytics::models::{A2cLayerRecord, A2cUpdateRecord, EpisodeRecord, E
 use crate::analytics::trackers::action::EpisodeActionAccumulator;
 use crate::analytics::trackers::trace::EpisodeTraceAccumulator;
 use crate::brain::a2c::A2cTrainingStats;
+use crate::game::car::Car;
 use crate::game::episode::{EpisodeEndReason, EpisodeState};
 
+/// SHIM: folds episodes from first car only until analytics overhaul.
 pub fn episode_tracker_system(
-    episode_state: Res<EpisodeState>,
+    car_query: Query<&EpisodeState, With<Car>>,
     a2c_stats: Option<Res<A2cTrainingStats>>,
     mut action_accumulator: ResMut<EpisodeActionAccumulator>,
     mut trace_accumulator: ResMut<EpisodeTraceAccumulator>,
     mut tracker: ResMut<EpisodeTracker>,
 ) {
+    // SHIM: first car only until analytics overhaul
+    let Some(episode_state) = car_query.iter().next() else {
+        return;
+    };
+
     if let Some(reason) = episode_state.last_end_reason {
         let finished_episode_id = episode_state.current_episode - 1;
 

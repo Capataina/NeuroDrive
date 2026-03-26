@@ -107,7 +107,8 @@ Each `TickTraceRecord` captures:
 - **Missing experiment metadata:** no RNG seed, config snapshot, git revision, active mode, or track identity in reports.
 - No dedicated validation that every finished episode is recorded exactly once across all terminal paths.
 - The heuristic failure-mode classification is useful for triage but is **not ground truth**.
-- Trace capture assumes singleton episode state and sensor readings.
+- All analytics capture systems use **temporary shims** that target the first car (`car_query.iter().next()`) only. Per-car analytics with `env_id` tagging is planned as part of the full analytics overhaul.
+- The value prediction in trace capture reads from `TrainerRolloutBuffer.values` (the shared trainer buffer), not a per-car buffer.
 
 ## Partial / In Progress
 
@@ -120,7 +121,7 @@ Each `TickTraceRecord` captures:
 - **Run metadata capture** is the clearest missing capability for cross-run comparisons.
 - Comparison tooling across multiple exported runs does not exist.
 - If a brake channel or new observation features are added, trace and metrics schemas will need coordinated extension.
-- Multi-car analytics (per-car + cohort summaries) required for vectorised trainer.
+- **Full analytics visual overhaul** planned: heat maps, time-series graphs, distribution charts, trajectory overlays, ASCII visualisations. See `context/plans/analytics-overhaul-brief.md`. This will also include per-car `env_id` tagging and cohort summaries (best/worst/quartile breakdowns).
 
 ## Durable Notes / Discarded Approaches
 

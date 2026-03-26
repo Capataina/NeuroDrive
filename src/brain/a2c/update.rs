@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use crate::brain::a2c::{A2cBrain, A2cLayerHealth, A2cTrainingStats};
+use crate::brain::a2c::buffer::TrainerRolloutBuffer;
 use crate::brain::common::math::{normal_entropy, normal_log_prob};
 use crate::brain::common::mlp::Linear;
 
@@ -6,54 +9,36 @@ const VALUE_HUBER_DELTA: f32 = 1.0;
 const ACTOR_GRAD_CLIP_NORM: f32 = 0.5;
 const CRITIC_GRAD_CLIP_NORM: f32 = 0.5;
 
-/// Runs one full A2C update from the currently buffered rollout and records
-/// learning and network-health metrics for analytics export.
+/// Runs one full A2C update from the trainer rollout buffer using per-env GAE.
 pub fn a2c_update(
     brain: &mut A2cBrain,
+    buffer: &mut TrainerRolloutBuffer,
     stats: &mut A2cTrainingStats,
-    bootstrap_state: Option<&[f32]>,
+    bootstrap_values: &HashMap<u32, f32>,
 ) {
-    if brain.buffer.rewards.is_empty() {
+    if buffer.len() == 0 {
         return;
     }
 
-    let batch_size = brain.buffer.rewards.len();
-    if brain.buffer.states.len() != batch_size
-        || brain.buffer.actions.len() != batch_size
-        || brain.buffer.latent_actions.len() != batch_size
-        || brain.buffer.values.len() != batch_size
-        || brain.buffer.dones.len() != batch_size
-        || brain.buffer.safety_clamp_hits.len() != batch_size
-    {
+    let batch_size = buffer.len();
+    if !buffer.is_aligned() {
         bevy::log::warn!(
-            "A2C rollout misalignment detected (s={}, a={}, z={}, v={}, r={}, d={}, c={}); skipping update.",
-            brain.buffer.states.len(),
-            brain.buffer.actions.len(),
-            brain.buffer.latent_actions.len(),
-            brain.buffer.values.len(),
-            brain.buffer.rewards.len(),
-            brain.buffer.dones.len(),
-            brain.buffer.safety_clamp_hits.len(),
+            "Trainer rollout misalignment detected (s={}, a={}, z={}, v={}, r={}, d={}, c={}, e={}); skipping update.",
+            buffer.states.len(),
+            buffer.actions.len(),
+            buffer.latent_actions.len(),
+            buffer.values.len(),
+            buffer.rewards.len(),
+            buffer.dones.len(),
+            buffer.safety_clamp_hits.len(),
+            buffer.env_ids.len(),
         );
-        brain.buffer.clear();
+        buffer.clear();
         return;
     }
 
-    let mut next_value = 0.0;
-    if !brain.buffer.dones.last().unwrap_or(&false) {
-        if let Some(bootstrap_state) = bootstrap_state {
-            let (_, val) = brain.model.forward(bootstrap_state);
-            next_value = val;
-        } else {
-            bevy::log::warn!(
-                "Missing bootstrap observation for non-terminal A2C rollout; using zero bootstrap value."
-            );
-        }
-    }
-
-    let (advantages, returns) = brain
-        .buffer
-        .compute_gae(next_value, brain.gamma, brain.gae_lambda);
+    let (advantages, returns) =
+        buffer.compute_gae_per_env(bootstrap_values, brain.gamma, brain.gae_lambda);
     let entropy_coef = 0.01;
 
     brain.model.zero_grad();
@@ -71,9 +56,9 @@ pub fn a2c_update(
     let mut critic_seen = [0usize; 2];
 
     for i in 0..batch_size {
-        let state = &brain.buffer.states[i];
-        let action = &brain.buffer.actions[i];
-        let latent_action = &brain.buffer.latent_actions[i];
+        let state = &buffer.states[i];
+        let action = &buffer.actions[i];
+        let latent_action = &buffer.latent_actions[i];
         let adv = advantages[i];
         let ret = returns[i];
 
@@ -142,7 +127,7 @@ pub fn a2c_update(
             entropy_sum += entropy;
             action_sum[j] += a;
             action_sumsq[j] += a * a;
-            if brain.buffer.safety_clamp_hits[i][j] {
+            if buffer.safety_clamp_hits[i][j] {
                 clamped_action_count += 1;
             }
         }
@@ -195,7 +180,7 @@ pub fn a2c_update(
         brain.model.a_log_std[j] = brain.model.a_log_std[j].clamp(-2.0, 0.5);
     }
 
-    let value_predictions = brain.buffer.values.clone();
+    let value_predictions = buffer.values.clone();
     stats.last_completed_update = stats.last_completed_update.saturating_add(1);
     stats.batch_size = batch_size;
     stats.policy_loss = policy_loss_sum / batch_size_f32.max(1.0);
@@ -247,7 +232,17 @@ pub fn a2c_update(
         },
     ];
 
-    brain.buffer.clear();
+    bevy::log::info!(
+        "A2C update #{}: batch={} policy_loss={:.4} value_loss={:.4} entropy={:.4} ev={:.4}",
+        stats.last_completed_update,
+        batch_size,
+        stats.policy_loss,
+        stats.value_loss,
+        stats.policy_entropy,
+        stats.explained_variance,
+    );
+
+    buffer.clear();
 }
 
 fn std_from_sums(sum: f32, sumsq: f32, count: usize) -> f32 {

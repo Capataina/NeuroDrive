@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+use crate::game::car::EnvInstanceId;
+
 /// Continuous action interface for the car.
 ///
 /// This is the stable control surface used by all controllers (keyboard,
@@ -24,11 +26,11 @@ impl CarAction {
     }
 }
 
-/// Resource holding the current desired and applied actions.
+/// Per-car component holding the current desired and applied actions.
 ///
 /// Controllers should write `desired` once per fixed tick. Vehicle dynamics
 /// should consume `applied`, which may differ if smoothing is enabled.
-#[derive(Resource, Clone, Copy, Debug)]
+#[derive(Component, Clone, Copy, Debug)]
 pub struct ActionState {
     pub desired: CarAction,
     pub applied: CarAction,
@@ -64,12 +66,11 @@ impl Default for ActionSmoothing {
 
 /// Latches keyboard input into the fixed-tick `ActionState.desired`.
 ///
-/// This is a temporary controller used for Milestone 0 manual validation.
-/// It is intentionally minimal: A/D steer, W throttle.
+/// In multi-car mode, keyboard controls `EnvInstanceId(0)` only.
 pub fn keyboard_action_input_system(
     mode: Option<Res<crate::brain::types::AgentMode>>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut action_state: ResMut<ActionState>,
+    mut car_query: Query<(&EnvInstanceId, &mut ActionState)>,
 ) {
     if let Some(m) = mode {
         if *m != crate::brain::types::AgentMode::Keyboard {
@@ -91,32 +92,40 @@ pub fn keyboard_action_input_system(
         0.0
     };
 
-    action_state.desired = CarAction { steering, throttle }.clamped();
+    let desired = CarAction { steering, throttle }.clamped();
+    for (env_id, mut action_state) in car_query.iter_mut() {
+        if env_id.0 == 0 {
+            action_state.desired = desired;
+            break;
+        }
+    }
 }
 
-/// Updates `ActionState.applied` from `ActionState.desired`.
+/// Updates `ActionState.applied` from `ActionState.desired` for all cars.
 ///
 /// When smoothing is disabled, this is a direct copy.
 pub fn action_smoothing_system(
     time: Res<Time<bevy::time::Fixed>>,
     smoothing: Res<ActionSmoothing>,
-    mut action_state: ResMut<ActionState>,
+    mut car_query: Query<&mut ActionState>,
 ) {
-    let desired = action_state.desired.clamped();
-
-    if !smoothing.enabled {
-        action_state.applied = desired;
-        return;
-    }
-
     let dt = time.delta_secs();
     let tau = smoothing.time_constant_s.max(1e-4);
     let alpha = 1.0 - (-dt / tau).exp();
 
-    let applied = action_state.applied;
-    action_state.applied = CarAction {
-        steering: applied.steering + (desired.steering - applied.steering) * alpha,
-        throttle: applied.throttle + (desired.throttle - applied.throttle) * alpha,
+    for mut action_state in car_query.iter_mut() {
+        let desired = action_state.desired.clamped();
+
+        if !smoothing.enabled {
+            action_state.applied = desired;
+            continue;
+        }
+
+        let applied = action_state.applied;
+        action_state.applied = CarAction {
+            steering: applied.steering + (desired.steering - applied.steering) * alpha,
+            throttle: applied.throttle + (desired.throttle - applied.throttle) * alpha,
+        }
+        .clamped();
     }
-    .clamped();
 }

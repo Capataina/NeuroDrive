@@ -1,4 +1,5 @@
 use crate::agent::action::ActionState;
+use crate::game::car::Car;
 use crate::game::episode::EpisodeState;
 use bevy::prelude::*;
 
@@ -101,22 +102,31 @@ impl EpisodeActionAccumulator {
     }
 }
 
+/// SHIM: captures action stats from first car only until analytics overhaul.
 pub fn capture_episode_action_stats_system(
-    episode_state: Res<EpisodeState>,
-    action_state: Res<ActionState>,
+    car_query: Query<(&EpisodeState, &ActionState), With<Car>>,
     mut accumulator: ResMut<EpisodeActionAccumulator>,
 ) {
+    let Some((episode_state, action_state)) = car_query.iter().next() else {
+        return;
+    };
+
     if accumulator.episode_id != episode_state.current_episode {
         accumulator.reset_for_episode(episode_state.current_episode);
     }
 
-    accumulator.record_step(&action_state);
+    accumulator.record_step(action_state);
 }
 
+/// SHIM: snapshots from first car only until analytics overhaul.
 pub fn snapshot_completed_episode_action_stats_system(
-    episode_state: Res<EpisodeState>,
+    car_query: Query<&EpisodeState, With<Car>>,
     mut accumulator: ResMut<EpisodeActionAccumulator>,
 ) {
+    let Some(episode_state) = car_query.iter().next() else {
+        return;
+    };
+
     let Some(_reason) = episode_state.current_tick_end_reason else {
         return;
     };

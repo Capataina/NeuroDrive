@@ -12,6 +12,7 @@
 |-------|------|-------------|
 | `src/debug/overlays.rs` | World-space gizmo overlays, `DebugOverlayState`, F1/F2/F3 toggle systems | Environment geometry production |
 | `src/debug/hud.rs` | `DrivingHudStats`, `DrivingHudHistory`, quarter summaries, assessment logic, Bevy UI panel | Reward computation, episode truth |
+| `src/debug/leaderboard.rs` | Live leaderboard panel with colour-coded per-car ranking, `LeaderboardRoot` | Ranking computation (owned by `brain/ranking.rs`) |
 | `src/debug/plugin.rs` | Debug resource setup and scheduling | SimSet definitions |
 
 ## Current Implemented Reality
@@ -55,17 +56,27 @@ The HUD is a **Bevy UI panel** (fixed-position root node, not a debug-print over
 - Classifies the run as **Improving / Mixed / Regressing / Warm-up** based on whether the most recent quarter shows improvement over earlier quarters.
 - A unit test covers the assessment heuristic.
 
+### Leaderboard Panel (F3)
+
+A live leaderboard panel in the top-right corner, toggled with F3 alongside the HUD:
+
+- Shows all training cars ranked by `TrainerLiveRanking` score.
+- Each row displays: rank number, colour swatch matching the car's unique `CarColour`, car ID, live progress %, average progress %, and a `*` marker for the current best.
+- Rows re-sort when rankings change.
+- Reads from `TrainerLiveRanking`, `TrackProgress`, and `EpisodeMovingAverages` per car.
+
 ### Scheduling
 
 - **Fixed-tick** (`SimSet::Measurement`):
-  - `update_driving_hud_stats_system` — updates live HUD values from current episode/sensor state
-  - `capture_driving_hud_episode_metrics_system` — captures episode-end data for quarter summaries
+  - `update_driving_hud_stats_system` — updates live HUD values (SHIM: first car only)
+  - `capture_driving_hud_episode_metrics_system` — captures episode-end data for quarter summaries (SHIM: first car only)
 - **Update** (every frame):
   - `debug_overlay_toggle_system` — F1/F2/F3 key handling
-  - `draw_geometry_overlay_system` — centreline and car vector gizmos
-  - `draw_sensor_overlay_system` — ray rendering
+  - `draw_geometry_overlay_system` — centreline and car vector gizmos (all cars)
+  - `draw_sensor_overlay_system` — ray rendering (all cars)
   - `update_driving_hud_visibility_system` — shows/hides HUD based on F3
-  - `update_driving_hud_text_system` — refreshes all HUD text sections
+  - `update_driving_hud_text_system` — refreshes all HUD text sections (SHIM: first car only)
+  - `update_leaderboard_system` — refreshes leaderboard ranking display (all cars)
 
 ## Key Interfaces / Data Flow
 
@@ -73,22 +84,24 @@ The HUD is a **Bevy UI panel** (fixed-position root node, not a debug-print over
 |-----------|--------|----------|
 | `Track` and `TrackProgress` | maps/game | Geometry overlay and progress display |
 | `SensorReadings` | agent | Sensor overlay and current HUD values |
-| `EpisodeState` and `EpisodeMovingAverages` | game | Run status, current reward, quarter summaries |
-| `CollisionEvent` | game | Death counting in HUD stats |
+| `EpisodeState` and `EpisodeMovingAverages` | game (per-car Components) | Run status, current reward, quarter summaries, leaderboard |
+| `Collided` marker | game | Death counting in HUD stats |
 | `A2cTrainingStats` | brain | Live learning-health line in HUD |
+| `TrainerLiveRanking` | brain/ranking | Leaderboard ordering and best-car identification |
+| `CarColour` | game/car | Leaderboard swatch colours |
 
 ## Implemented Outputs / Artifacts
 
 - **Runtime resources:** `DebugOverlayState`, `DrivingHudStats`, `DrivingHudHistory`, `DrivingHudEpisodeAccumulator`
-- **Runtime UI entities:** `DrivingHudRoot`, fixed-column quarter summary grid
+- **Runtime UI entities:** `DrivingHudRoot`, fixed-column quarter summary grid, `LeaderboardRoot` with per-car rows
 - **World-space overlays:** via Bevy gizmos
 - **Tests:** HUD assessment unit test covering the "recent quarter is cleaner" improvement heuristic
 
 ## Known Issues / Active Risks
 
 - The HUD is informative but still **summary-oriented** — it does not expose full rollout-buffer internals or detailed per-layer update history.
-- The debug runtime assumes a **single active car** in several `single()` queries — structural work needed before multi-car training.
-- Overlay performance under very long AI runs has not been explicitly evaluated.
+- HUD stats and text systems use **temporary shims** that target the first car only, pending a full HUD overhaul. The leaderboard is fully multi-car.
+- Overlay performance under very long AI runs with multiple cars has not been explicitly evaluated.
 - The assessment heuristic is intentionally lightweight and should not substitute for offline analytics.
 
 ## Partial / In Progress
@@ -100,7 +113,8 @@ The HUD is a **Bevy UI panel** (fixed-position root node, not a debug-print over
 
 - Brain-specific live inspection could be added: sampled vs mean action, rollout size, update cadence, richer network-health display.
 - A dedicated heading-error glyph or clearer lane-position visualisation may be worthwhile.
-- Multi-car HUD redesign (trainer summary + focused best-car detail) is part of the vectorised trainer plan.
+- Full HUD redesign to show trainer-wide stats (not just first car) is part of the planned analytics overhaul.
+- The leaderboard panel is implemented and live; HUD stats sections still need multi-car migration.
 
 ## Durable Notes / Discarded Approaches
 

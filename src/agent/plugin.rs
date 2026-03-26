@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::agent::action::{
-    ActionSmoothing, ActionState, action_smoothing_system, keyboard_action_input_system,
+    ActionSmoothing, action_smoothing_system, keyboard_action_input_system,
 };
 use crate::agent::observation::{
     ObservationConfig, build_observation_vector_system, update_sensor_readings_system,
@@ -15,8 +15,7 @@ pub struct AgentPlugin;
 
 impl Plugin for AgentPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ActionState>()
-            .init_resource::<ActionSmoothing>()
+        app.init_resource::<ActionSmoothing>()
             .init_resource::<ObservationConfig>()
             // Actions must be updated on the fixed simulation tick.
             .add_systems(

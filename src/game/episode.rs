@@ -1,11 +1,10 @@
 use std::collections::VecDeque;
 use std::f32::consts::PI;
 
-use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 
-use crate::game::car::Car;
-use crate::game::collision::CollisionEvent;
+use crate::game::car::{Car, SpawnConfig};
+use crate::game::collision::Collided;
 use crate::game::progress::TrackProgress;
 use crate::maps::track::Track;
 
@@ -62,8 +61,8 @@ impl Default for EpisodeConfig {
     }
 }
 
-/// Episode state and accumulators.
-#[derive(Resource, Debug)]
+/// Per-car episode state and accumulators.
+#[derive(Component, Debug)]
 pub struct EpisodeState {
     pub current_episode: u32,
     pub ticks_in_episode: u32,
@@ -146,8 +145,8 @@ impl Default for EpisodeState {
     }
 }
 
-/// Rolling episode-level telemetry for moving averages.
-#[derive(Resource, Debug)]
+/// Per-car rolling episode-level telemetry for moving averages.
+#[derive(Component, Debug)]
 pub struct EpisodeMovingAverages {
     pub returns: VecDeque<f32>,
     pub best_progress_fractions: VecDeque<f32>,
@@ -170,119 +169,128 @@ impl Default for EpisodeMovingAverages {
     }
 }
 
-/// Handles per-tick reward accumulation and episode boundaries:
-/// crash, timeout, and lap completion.
+/// Handles per-tick reward accumulation and episode boundaries for all cars.
+/// Each car runs its own independent episode lifecycle.
 pub fn episode_loop_system(
     time: Res<Time<bevy::time::Fixed>>,
     config: Res<EpisodeConfig>,
-    mut episode_state: ResMut<EpisodeState>,
-    mut moving_avg: ResMut<EpisodeMovingAverages>,
-    mut collision_events: MessageReader<CollisionEvent>,
     track_query: Query<&Track>,
-    mut car_query: Query<(&mut Transform, &mut Car, &mut TrackProgress)>,
+    mut car_query: Query<(
+        &mut Transform,
+        &mut Car,
+        &mut TrackProgress,
+        &mut EpisodeState,
+        &mut EpisodeMovingAverages,
+        &SpawnConfig,
+        Has<Collided>,
+    )>,
 ) {
     let Ok(track) = track_query.single() else {
         return;
     };
-    let Ok((mut transform, mut car, mut progress)) = car_query.single_mut() else {
-        return;
-    };
-    let forward = (transform.rotation * Vec3::X)
-        .truncate()
-        .normalize_or_zero();
 
-    episode_state.current_tick_reward = 0.0;
-    episode_state.current_tick_progress_reward = 0.0;
-    episode_state.current_tick_time_penalty = 0.0;
-    episode_state.current_tick_terminal_reward = 0.0;
-    episode_state.current_tick_end_reason = None;
-    episode_state.ticks_in_episode = episode_state.ticks_in_episode.saturating_add(1);
-    let previous_best_progress = episode_state.current_best_progress_fraction;
-    let progress_gain = (progress.fraction - previous_best_progress).max(0.0);
-    episode_state.current_best_progress_fraction = previous_best_progress.max(progress.fraction);
-    let progress_reward = progress_gain * config.progress_reward_scale;
-    let heading_error = signed_angle_between(forward, progress.tangent);
-    let heading_error_norm = (heading_error.abs() / PI).clamp(0.0, 1.0);
-    let speed_norm = (car.velocity.length() / config.speed_norm_max_for_penalty).clamp(0.0, 1.0);
-    let heading_speed_penalty =
-        -config.heading_speed_penalty_scale * heading_error_norm * speed_norm;
-    let time_penalty = config.time_penalty_per_tick + heading_speed_penalty;
-    let mut terminal_reward = 0.0;
+    for (mut transform, mut car, mut progress, mut episode_state, mut moving_avg, spawn_config, crashed) in
+        car_query.iter_mut()
+    {
+        let forward = (transform.rotation * Vec3::X)
+            .truncate()
+            .normalize_or_zero();
 
-    if progress.fraction >= config.lap_arm_fraction {
-        episode_state.lap_armed = true;
-    }
+        episode_state.current_tick_reward = 0.0;
+        episode_state.current_tick_progress_reward = 0.0;
+        episode_state.current_tick_time_penalty = 0.0;
+        episode_state.current_tick_terminal_reward = 0.0;
+        episode_state.current_tick_end_reason = None;
+        episode_state.ticks_in_episode = episode_state.ticks_in_episode.saturating_add(1);
+        let previous_best_progress = episode_state.current_best_progress_fraction;
+        let progress_gain = (progress.fraction - previous_best_progress).max(0.0);
+        episode_state.current_best_progress_fraction =
+            previous_best_progress.max(progress.fraction);
+        let progress_reward = progress_gain * config.progress_reward_scale;
+        let heading_error = signed_angle_between(forward, progress.tangent);
+        let heading_error_norm = (heading_error.abs() / PI).clamp(0.0, 1.0);
+        let speed_norm =
+            (car.velocity.length() / config.speed_norm_max_for_penalty).clamp(0.0, 1.0);
+        let heading_speed_penalty =
+            -config.heading_speed_penalty_scale * heading_error_norm * speed_norm;
+        let time_penalty = config.time_penalty_per_tick + heading_speed_penalty;
+        let mut terminal_reward = 0.0;
 
-    let crashed = collision_events.read().next().is_some();
-    let mut crash_position = None;
-    if crashed {
-        episode_state.current_crashes = episode_state.current_crashes.saturating_add(1);
-        terminal_reward += config.crash_penalty;
-        crash_position = Some(transform.translation.truncate());
-    }
+        if progress.fraction >= config.lap_arm_fraction {
+            episode_state.lap_armed = true;
+        }
 
-    let timed_out = (episode_state.ticks_in_episode as f32) * time.delta_secs() >= config.timeout_s;
-    let lap_complete = episode_state.lap_armed
-        && episode_state.previous_progress_fraction >= config.lap_wrap_from_fraction
-        && progress.fraction <= config.lap_wrap_to_fraction;
+        let mut crash_position = None;
+        if crashed {
+            episode_state.current_crashes = episode_state.current_crashes.saturating_add(1);
+            terminal_reward += config.crash_penalty;
+            crash_position = Some(transform.translation.truncate());
+        }
 
-    if lap_complete {
-        terminal_reward += config.lap_bonus;
-    }
-    let tick_reward = progress_reward + time_penalty + terminal_reward;
+        let timed_out =
+            (episode_state.ticks_in_episode as f32) * time.delta_secs() >= config.timeout_s;
+        let lap_complete = episode_state.lap_armed
+            && episode_state.previous_progress_fraction >= config.lap_wrap_from_fraction
+            && progress.fraction <= config.lap_wrap_to_fraction;
 
-    episode_state.current_tick_reward = tick_reward;
-    episode_state.current_tick_progress_reward = progress_reward;
-    episode_state.current_tick_time_penalty = time_penalty;
-    episode_state.current_tick_terminal_reward = terminal_reward;
-    episode_state.current_tick_progress_fraction = progress.fraction;
-    episode_state.current_tick_progress_s = progress.s;
-    episode_state.current_tick_centerline_distance = progress.distance;
-    episode_state.current_tick_speed = car.velocity.length();
-    episode_state.current_tick_heading_error = heading_error;
-    episode_state.current_tick_forward = forward;
-    episode_state.current_tick_tangent = progress.tangent;
-    episode_state.current_progress_reward_sum += progress_reward;
-    episode_state.current_time_penalty_sum += time_penalty;
-    episode_state.current_terminal_reward_sum += terminal_reward;
-    if crashed {
-        episode_state.current_crash_penalty_sum += config.crash_penalty;
-    }
-    if lap_complete {
-        episode_state.current_lap_bonus_sum += config.lap_bonus;
-    }
-    episode_state.current_return += tick_reward;
+        if lap_complete {
+            terminal_reward += config.lap_bonus;
+        }
+        let tick_reward = progress_reward + time_penalty + terminal_reward;
 
-    let end_reason = if crashed {
-        Some(EpisodeEndReason::Crash)
-    } else if lap_complete {
-        Some(EpisodeEndReason::LapComplete)
-    } else if timed_out {
-        Some(EpisodeEndReason::Timeout)
-    } else {
-        None
-    };
+        episode_state.current_tick_reward = tick_reward;
+        episode_state.current_tick_progress_reward = progress_reward;
+        episode_state.current_tick_time_penalty = time_penalty;
+        episode_state.current_tick_terminal_reward = terminal_reward;
+        episode_state.current_tick_progress_fraction = progress.fraction;
+        episode_state.current_tick_progress_s = progress.s;
+        episode_state.current_tick_centerline_distance = progress.distance;
+        episode_state.current_tick_speed = car.velocity.length();
+        episode_state.current_tick_heading_error = heading_error;
+        episode_state.current_tick_forward = forward;
+        episode_state.current_tick_tangent = progress.tangent;
+        episode_state.current_progress_reward_sum += progress_reward;
+        episode_state.current_time_penalty_sum += time_penalty;
+        episode_state.current_terminal_reward_sum += terminal_reward;
+        if crashed {
+            episode_state.current_crash_penalty_sum += config.crash_penalty;
+        }
+        if lap_complete {
+            episode_state.current_lap_bonus_sum += config.lap_bonus;
+        }
+        episode_state.current_return += tick_reward;
 
-    if let Some(reason) = end_reason {
-        episode_state.current_tick_end_reason = Some(reason);
-        finalize_episode(
-            &config,
-            &mut episode_state,
-            &mut moving_avg,
-            reason,
-            crash_position,
-        );
-        reset_car_to_spawn(&mut transform, &mut car, track);
-        sync_progress_to_transform(track, &transform, &mut progress);
-    } else {
-        episode_state.previous_progress_fraction = progress.fraction;
+        let end_reason = if crashed {
+            Some(EpisodeEndReason::Crash)
+        } else if lap_complete {
+            Some(EpisodeEndReason::LapComplete)
+        } else if timed_out {
+            Some(EpisodeEndReason::Timeout)
+        } else {
+            None
+        };
+
+        if let Some(reason) = end_reason {
+            episode_state.current_tick_end_reason = Some(reason);
+            finalize_episode(
+                &config,
+                &mut episode_state,
+                &mut moving_avg,
+                reason,
+                crash_position,
+            );
+            reset_car_to_spawn(&mut transform, &mut car, spawn_config);
+            sync_progress_to_transform(track, &transform, &mut progress);
+        } else {
+            episode_state.previous_progress_fraction = progress.fraction;
+        }
     }
 }
 
-fn reset_car_to_spawn(transform: &mut Transform, car: &mut Car, track: &Track) {
-    transform.translation.x = track.spawn_position.x;
-    transform.translation.y = track.spawn_position.y;
-    transform.rotation = Quat::from_rotation_z(track.spawn_rotation);
+fn reset_car_to_spawn(transform: &mut Transform, car: &mut Car, spawn: &SpawnConfig) {
+    transform.translation.x = spawn.position.x;
+    transform.translation.y = spawn.position.y;
+    transform.rotation = Quat::from_rotation_z(spawn.rotation);
     car.velocity = Vec2::ZERO;
 }
 

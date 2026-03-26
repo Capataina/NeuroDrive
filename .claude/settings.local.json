@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(mkdir:*)",
-      "Bash(python3 /Users/atacanercetinkaya/.claude/skills/upkeep-context/scripts/scan_repo.py)",
-      "Bash(python3 /Users/atacanercetinkaya/.claude/skills/upkeep-context/scripts/lint_context.py)"
-    ]
-  }
-}

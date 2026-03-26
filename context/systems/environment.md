@@ -29,11 +29,19 @@
 
 ### Car
 
-- A single car entity spawned by `setup_game` in `GamePlugin` after the track is ready.
-- The car entity carries:
-  - `Sprite` (red, 12×6 world units),
+- Multiple car entities spawned by `setup_game` in `GamePlugin` after the track is ready.
+- `TrainerConfig` controls the number of cars (default 3), lateral spawn spread, and alpha values.
+- Cars are spawned with deterministic lateral offsets perpendicular to the track heading at the spawn point.
+- Each car entity carries:
+  - `Sprite` (unique colour from 25-colour palette, 12×6 world units),
   - `Transform`,
   - `Car` component (velocity, rotation_speed=4.0, thrust=750.0, drag=0.985),
+  - `EnvInstanceId(u32)` — stable identity for the car's lifetime,
+  - `SpawnConfig { position, rotation }` — per-car reset target,
+  - `CarColour { r, g, b }` — unique visual colour,
+  - `ActionState` — per-car desired/applied action (Component, not Resource),
+  - `EpisodeState` — per-car episode counters, rewards, progress (Component, not Resource),
+  - `EpisodeMovingAverages` — per-car rolling statistics (Component, not Resource),
   - `TrackProgress`,
   - `SensorReadings`,
   - `ObservationVector`.
@@ -51,9 +59,9 @@
 ### Collision
 
 - `collision_detection_system` runs in `SimSet::Collision`.
-- Checks the four rotated corners of the car's bounding rectangle against `track.grid.is_road_at()`.
-- Emits a zero-payload `CollisionEvent` message when any corner leaves the road.
-- Currently uses `single()` query — assumes one car.
+- Iterates all car entities and checks the four rotated corners of each car's bounding rectangle against `track.grid.is_road_at()`.
+- Adds a `Collided` marker component (SparseSet storage) to cars with an off-road corner; removes it from cars that are on-road.
+- Each car's collision state is independent — one car crashing does not affect others.
 
 ### Progress
 
@@ -64,8 +72,8 @@
 ### Episode Loop
 
 - `episode_loop_system` runs after progress update in `SimSet::Measurement`.
-- **Currently uses `single_mut()` for the car query** — assumes one car.
-- Per-tick processing:
+- Iterates all car entities, processing each car's episode independently via per-car `EpisodeState` and `EpisodeMovingAverages` components.
+- Per-tick processing (for each car):
   1. Computes progress-gain reward: `(fraction - previous_best) * progress_reward_scale` (140.0).
   2. Computes heading-speed penalty: `-heading_speed_penalty_scale * |heading_error|/π * speed/speed_norm_max`.
   3. Adds fixed time penalty: -0.005 per tick.
@@ -87,22 +95,22 @@
 
 | Condition | Detection | Reset |
 |-----------|-----------|-------|
-| **Crash** | `CollisionEvent` received | Immediate |
+| **Crash** | `Collided` marker present on car entity | Immediate |
 | **Lap complete** | Lap armed (≥25% progress) AND previous fraction ≥0.85 AND current ≤0.15 | Immediate |
 | **Timeout** | Ticks × dt ≥ 30 seconds | Immediate |
 
 - Lap detection is **progress-wrap based**, not finish-line-crossing based.
-- Reset always returns the car to the canonical track spawn pose and re-syncs `TrackProgress`.
+- Reset returns each car to its own `SpawnConfig` position/rotation (not the canonical track spawn) and re-syncs `TrackProgress`.
 
 ## Key Interfaces / Data Flow
 
 | Interface | Producer | Consumer(s) | Notes |
 |-----------|----------|-------------|-------|
 | `Track` | `maps` startup | physics queries, observations, debug | Single authoritative track entity |
-| `CollisionEvent` | collision system | episode system, HUD stats | Emitted before reward finalisation |
+| `Collided` marker | collision system | episode system, HUD stats | Per-car component, checked before reward finalisation |
 | `TrackProgress` | progress system | episode logic, debug, analytics, observations | Environment measurement, not policy input |
-| `EpisodeState` | episode system | A2C reward collection, HUD, analytics | Current-tick and last-episode summaries |
-| `EpisodeMovingAverages` | episode system | HUD | Rolling return/progress/crash means (window=20) |
+| `EpisodeState` | episode system (per-car Component) | A2C reward collection, HUD, analytics | Current-tick and last-episode summaries per car |
+| `EpisodeMovingAverages` | episode system (per-car Component) | HUD, ranking | Rolling return/progress/crash means (window=20) per car |
 | `EpisodeConfig` | resource defaults | episode system | All reward and timing parameters |
 
 ```text
@@ -113,14 +121,15 @@ Physics mutates car → Progress recomputed → Episode records reward and check
 
 ## Implemented Outputs / Artifacts
 
-- **Runtime resources:** `EpisodeConfig`, `EpisodeState`, `EpisodeMovingAverages`
-- **Runtime messages:** `CollisionEvent`
-- **Runtime components:** `Track`, `Car`, `TrackProgress`
+- **Runtime resources:** `EpisodeConfig`, `TrainerConfig`
+- **Runtime components (per car):** `Car`, `EnvInstanceId`, `SpawnConfig`, `CarColour`, `ActionState`, `EpisodeState`, `EpisodeMovingAverages`, `TrackProgress`, `Collided` (marker)
+- **Runtime components (track):** `Track`
 - **Tests:** Deterministic replay test for `step_car_dynamics()` in `src/game/physics.rs`
 
 ## Known Issues / Active Risks
 
-- **Singleton-car assumptions** are spread across collision (`single()`), episode logic (`single_mut()`), and implicitly in `EpisodeState` being a global resource. This is the main structural blocker for multi-car work.
+- **Singleton-car assumptions have been removed** from the game layer. Collision, episode, physics, and progress systems all iterate all cars. `EpisodeState`, `EpisodeMovingAverages`, and `ActionState` are per-car Components.
+- Analytics and HUD systems still use **temporary shims** that target the first car only, pending a full analytics overhaul.
 - **Environment regression coverage is thin:** no ECS-level tests for collision timing, lap wrapping, reset correctness, or episode-summary edge cases.
 - The track layer assumes a **single closed loop** with no branching.
 - Finish-line rendering is cosmetic only; lap completion relies on **progress thresholds** rather than explicit crossing logic.
