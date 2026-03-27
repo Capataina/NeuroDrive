@@ -1,4 +1,6 @@
 use bevy::prelude::*;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 
 use crate::agent::action::ActionState;
 use crate::agent::observation::{ObservationVector, SensorReadings};
@@ -37,6 +39,16 @@ impl Default for TrainerConfig {
             default_car_alpha: 0.35,
             best_car_alpha: 1.0,
         }
+    }
+}
+
+/// Global RNG resource used for generating random spawn positions.
+#[derive(Resource)]
+pub struct SpawnRng(pub StdRng);
+
+impl Default for SpawnRng {
+    fn default() -> Self {
+        Self(StdRng::from_rng(&mut rand::rng()))
     }
 }
 

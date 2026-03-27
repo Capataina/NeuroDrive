@@ -119,7 +119,7 @@ pub struct A2cLayerRecord {
     pub layer_name: String,
     pub weight_l2_norm: f32,
     pub gradient_l2_norm: f32,
-    pub dead_relu_fraction: Option<f32>,
+    pub saturated_fraction: Option<f32>,
 }
 
 /// Exported analytics snapshot for one completed A2C update.

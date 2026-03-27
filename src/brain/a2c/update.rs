@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use rand::RngExt;
+
 use crate::brain::a2c::{A2cBrain, A2cLayerHealth, A2cTrainingStats};
 use crate::brain::a2c::buffer::TrainerRolloutBuffer;
 use crate::brain::common::math::{normal_entropy, normal_log_prob};
@@ -38,6 +40,7 @@ pub struct PreparedUpdate {
     pub epochs_remaining: usize,
     pub sample_offset: usize,
     pub accum: EpochAccumulator,
+    pub shuffled_indices: Vec<usize>,
 }
 
 impl PreparedUpdate {
@@ -49,7 +52,7 @@ impl PreparedUpdate {
 /// Validates the buffer, computes per-env GAE, and freezes the data for staged
 /// epoch processing. Returns `None` if the buffer is empty or misaligned.
 pub fn ppo_prepare_update(
-    brain: &A2cBrain,
+    brain: &mut A2cBrain,
     buffer: &TrainerRolloutBuffer,
     bootstrap_values: &HashMap<u32, f32>,
 ) -> Option<PreparedUpdate> {
@@ -76,6 +79,13 @@ pub fn ppo_prepare_update(
         buffer.compute_gae_per_env(bootstrap_values, brain.gamma, brain.gae_lambda);
     let value_predictions = buffer.values.clone();
 
+    // Fisher-Yates shuffle for minibatch sample ordering
+    let mut indices: Vec<usize> = (0..buffer.len()).collect();
+    for i in (1..indices.len()).rev() {
+        let j = brain.rng.random_range(0..=i);
+        indices.swap(i, j);
+    }
+
     Some(PreparedUpdate {
         frozen_buffer: buffer.clone(),
         advantages,
@@ -84,6 +94,7 @@ pub fn ppo_prepare_update(
         epochs_remaining: brain.ppo_epochs,
         sample_offset: 0,
         accum: EpochAccumulator::default(),
+        shuffled_indices: indices,
     })
 }
 
@@ -99,6 +110,11 @@ pub fn ppo_process_chunk(
     if prepared.sample_offset == 0 {
         brain.model.zero_grad();
         prepared.accum = EpochAccumulator::default();
+        // Re-shuffle indices for this epoch
+        for i in (1..prepared.shuffled_indices.len()).rev() {
+            let j = brain.rng.random_range(0..=i);
+            prepared.shuffled_indices.swap(i, j);
+        }
     }
 
     let buffer = &prepared.frozen_buffer;
@@ -110,32 +126,40 @@ pub fn ppo_process_chunk(
     let end = (prepared.sample_offset + max_samples).min(batch_size);
     let acc = &mut prepared.accum;
 
+    // Per-chunk advantage normalisation
+    let chunk_indices = &prepared.shuffled_indices[prepared.sample_offset..end];
+    let chunk_size_f = (end - prepared.sample_offset) as f32;
+    let chunk_adv_mean = chunk_indices.iter().map(|&idx| advantages[idx]).sum::<f32>() / chunk_size_f.max(1.0);
+    let chunk_adv_var = chunk_indices.iter().map(|&idx| (advantages[idx] - chunk_adv_mean).powi(2)).sum::<f32>() / chunk_size_f.max(1.0);
+    let chunk_adv_std = (chunk_adv_var + 1e-8).sqrt();
+
     for i in prepared.sample_offset..end {
-        let state = &buffer.states[i];
-        let action = &buffer.actions[i];
-        let latent_action = &buffer.latent_actions[i];
-        let old_log_prob = buffer.old_log_probs[i];
-        let adv = advantages[i];
-        let ret = returns[i];
+        let idx = prepared.shuffled_indices[i];
+        let state = &buffer.states[idx];
+        let action = &buffer.actions[idx];
+        let latent_action = &buffer.latent_actions[idx];
+        let old_log_prob = buffer.old_log_probs[idx];
+        let adv = (advantages[idx] - chunk_adv_mean) / chunk_adv_std;
+        let ret = returns[idx];
 
         let (action_dist, value) = brain.model.forward(state);
-        collect_dead_relu(
-            brain.model.a_relu1.input_cache.as_deref(),
+        collect_saturated_tanh(
+            brain.model.a_tanh1.output_cache.as_deref(),
             &mut acc.actor_dead[0],
             &mut acc.actor_seen[0],
         );
-        collect_dead_relu(
-            brain.model.a_relu2.input_cache.as_deref(),
+        collect_saturated_tanh(
+            brain.model.a_tanh2.output_cache.as_deref(),
             &mut acc.actor_dead[1],
             &mut acc.actor_seen[1],
         );
-        collect_dead_relu(
-            brain.model.c_relu1.input_cache.as_deref(),
+        collect_saturated_tanh(
+            brain.model.c_tanh1.output_cache.as_deref(),
             &mut acc.critic_dead[0],
             &mut acc.critic_seen[0],
         );
-        collect_dead_relu(
-            brain.model.c_relu2.input_cache.as_deref(),
+        collect_saturated_tanh(
+            brain.model.c_tanh2.output_cache.as_deref(),
             &mut acc.critic_dead[1],
             &mut acc.critic_seen[1],
         );
@@ -155,9 +179,9 @@ pub fn ppo_process_chunk(
         let d_value = vec![value_grad / batch_size_f32];
 
         let c2_g = brain.model.c_value.backward(&d_value);
-        let c2_r_g = brain.model.c_relu2.backward(&c2_g);
+        let c2_r_g = brain.model.c_tanh2.backward(&c2_g);
         let c1_g = brain.model.c_fc2.backward(&c2_r_g);
-        let c1_r_g = brain.model.c_relu1.backward(&c1_g);
+        let c1_r_g = brain.model.c_tanh1.backward(&c1_g);
         brain.model.c_fc1.backward(&c1_r_g);
 
         // --- PPO clipped policy loss ---
@@ -180,7 +204,7 @@ pub fn ppo_process_chunk(
             acc.entropy_sum += normal_entropy(std);
             acc.action_sum[j] += a;
             acc.action_sumsq[j] += a * a;
-            if buffer.safety_clamp_hits[i][j] {
+            if buffer.safety_clamp_hits[idx][j] {
                 acc.clamped_count += 1;
             }
         }
@@ -206,9 +230,9 @@ pub fn ppo_process_chunk(
         }
 
         let a2_g = brain.model.a_mean.backward(&d_mean);
-        let a2_r_g = brain.model.a_relu2.backward(&a2_g);
+        let a2_r_g = brain.model.a_tanh2.backward(&a2_g);
         let a1_g = brain.model.a_fc2.backward(&a2_r_g);
-        let a1_r_g = brain.model.a_relu1.backward(&a1_g);
+        let a1_r_g = brain.model.a_tanh1.backward(&a1_g);
         brain.model.a_fc1.backward(&a1_r_g);
     }
 
@@ -293,37 +317,37 @@ pub fn ppo_finish_epoch(
                 layer_name: "actor_fc1".to_string(),
                 weight_l2_norm: brain.model.a_fc1.weight_l2_norm(),
                 gradient_l2_norm: brain.model.a_fc1.grad_l2_norm(),
-                dead_relu_fraction: Some(fraction(acc.actor_dead[0], acc.actor_seen[0])),
+                saturated_fraction: Some(fraction(acc.actor_dead[0], acc.actor_seen[0])),
             },
             A2cLayerHealth {
                 layer_name: "actor_fc2".to_string(),
                 weight_l2_norm: brain.model.a_fc2.weight_l2_norm(),
                 gradient_l2_norm: brain.model.a_fc2.grad_l2_norm(),
-                dead_relu_fraction: Some(fraction(acc.actor_dead[1], acc.actor_seen[1])),
+                saturated_fraction: Some(fraction(acc.actor_dead[1], acc.actor_seen[1])),
             },
             A2cLayerHealth {
                 layer_name: "actor_mean".to_string(),
                 weight_l2_norm: brain.model.a_mean.weight_l2_norm(),
                 gradient_l2_norm: brain.model.a_mean.grad_l2_norm(),
-                dead_relu_fraction: None,
+                saturated_fraction: None,
             },
             A2cLayerHealth {
                 layer_name: "critic_fc1".to_string(),
                 weight_l2_norm: brain.model.c_fc1.weight_l2_norm(),
                 gradient_l2_norm: brain.model.c_fc1.grad_l2_norm(),
-                dead_relu_fraction: Some(fraction(acc.critic_dead[0], acc.critic_seen[0])),
+                saturated_fraction: Some(fraction(acc.critic_dead[0], acc.critic_seen[0])),
             },
             A2cLayerHealth {
                 layer_name: "critic_fc2".to_string(),
                 weight_l2_norm: brain.model.c_fc2.weight_l2_norm(),
                 gradient_l2_norm: brain.model.c_fc2.grad_l2_norm(),
-                dead_relu_fraction: Some(fraction(acc.critic_dead[1], acc.critic_seen[1])),
+                saturated_fraction: Some(fraction(acc.critic_dead[1], acc.critic_seen[1])),
             },
             A2cLayerHealth {
                 layer_name: "critic_value".to_string(),
                 weight_l2_norm: brain.model.c_value.weight_l2_norm(),
                 gradient_l2_norm: brain.model.c_value.grad_l2_norm(),
-                dead_relu_fraction: None,
+                saturated_fraction: None,
             },
         ];
 
@@ -398,12 +422,12 @@ fn explained_variance(targets: &[f32], predictions: &[f32]) -> f32 {
     1.0 - (error_variance / variance_target)
 }
 
-fn collect_dead_relu(cache: Option<&[f32]>, dead: &mut usize, seen: &mut usize) {
+fn collect_saturated_tanh(cache: Option<&[f32]>, saturated: &mut usize, seen: &mut usize) {
     let Some(values) = cache else {
         return;
     };
     *seen += values.len();
-    *dead += values.iter().filter(|value| **value <= 0.0).count();
+    *saturated += values.iter().filter(|value| value.abs() > 0.99).count();
 }
 
 fn fraction(numerator: usize, denominator: usize) -> f32 {

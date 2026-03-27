@@ -66,7 +66,7 @@ pub struct A2cLayerHealth {
     pub layer_name: String,
     pub weight_l2_norm: f32,
     pub gradient_l2_norm: f32,
-    pub dead_relu_fraction: Option<f32>,
+    pub saturated_fraction: Option<f32>,
 }
 
 /// Aggregated learning-health metrics for the most recent completed A2C update.
@@ -254,7 +254,7 @@ pub fn a2c_collect_rewards_all_cars_system(
             }
         }
 
-        if let Some(prepared) = ppo_prepare_update(&brain, &buffer, &bootstrap_values) {
+        if let Some(prepared) = ppo_prepare_update(&mut brain, &buffer, &bootstrap_values) {
             update_state.prepared = Some(prepared);
             buffer.clear();
         } else {

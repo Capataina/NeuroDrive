@@ -14,7 +14,7 @@
 | `src/brain/types.rs` | `AgentMode` enum (`Keyboard` / `Ai`), `Brain` trait (**dead code** — unused, tagged for Stage 5 removal) | Observation or reward production |
 | `src/brain/a2c/` | `A2cBrain` (model + hyperparams + seeded RNG, **no buffer**), `TrainerRolloutBuffer` (separate resource with env_id tagging + old log-probs), `PpoUpdateState` (staged update resource), `A2cPlugin`, vectorised act/collect/epoch/flush systems, per-env GAE, `ActorCritic` model, PPO clipped update logic, training stats | Environment truth, observation construction |
 | `src/brain/ranking.rs` | `TrainerLiveRanking` resource, ranking computation, `update_car_visual_roles_system` (best-car highlighting via alpha + z-order), `CarColour`-aware sprite updates | Policy, observation, reward |
-| `src/brain/common/` | Reusable handwritten ML primitives: `Linear`, `Relu`, `AdamOptimizer`, Gaussian math | Algorithm-specific logic |
+| `src/brain/common/` | Reusable handwritten ML primitives: `Linear`, `Tanh`, `Relu` (legacy), `AdamOptimizer`, Gaussian math, orthogonal init | Algorithm-specific logic |
 | `src/brain/biological/` | **Empty placeholder** for future local-plasticity brain | Nothing yet |
 
 ## Current Implemented Reality
@@ -29,17 +29,17 @@
 
 ```text
 Actor:                              Critic:
-obs (23) → Linear(23,64) → ReLU    obs (23) → Linear(23,64) → ReLU
-         → Linear(64,64) → ReLU             → Linear(64,64) → ReLU
+obs (23) → Linear(23,64) → Tanh    obs (23) → Linear(23,64) → Tanh
+         → Linear(64,64) → Tanh             → Linear(64,64) → Tanh
          → Linear(64,2)  → mean             → Linear(64,1)  → value
          + learnable log_std (2)
 ```
 
 - Separate actor and critic stacks (no shared backbone).
-- Glorot initialisation for all weights.
+- Orthogonal initialisation: √2 scale for hidden layers, 0.01× for actor mean output (near-zero initial policy), 1.0× for critic value output.
 - `log_std` initialised to `[0.0, 0.0]` (initial σ = 1.0).
 - Actor LR: 3e-4, Critic LR: 5e-4 (both Adam).
-- Activation: ReLU throughout.
+- Activation: Tanh throughout (switched from ReLU — eliminates dead-neuron capacity loss that was starving the actor at 34–57% dead neurons).
 
 ### Action Selection
 
@@ -57,7 +57,7 @@ obs (23) → Linear(23,64) → ReLU    obs (23) → Linear(23,64) → ReLU
 - `a2c_collect_rewards_all_cars_system` runs in `SimSet::Measurement` after episode truth and observation rebuild. Pushes per-car reward and done flag for all cars. When the buffer reaches the horizon and no update is in progress, calls `ppo_prepare_update` to compute per-env GAE, freeze the buffer into a `PreparedUpdate`, and clear the live buffer.
 - `ppo_epoch_system` runs in `SimSet::Measurement` after the collect system. Processes a chunk of `samples_per_tick` (default 128) samples from the `PreparedUpdate` per tick. When an epoch's samples are exhausted, calls `ppo_finish_epoch` (clip gradients, step optimiser). Advances to the next epoch or clears the update state when all epochs are done.
 - `TrainerRolloutBuffer` stores: `states`, `actions`, `latent_actions`, `safety_clamp_hits`, `old_log_probs`, `rewards`, `values`, `dones`, `env_ids`.
-- GAE is computed **per-env** to prevent cross-env value leakage. Transitions are grouped by `env_id`; GAE runs within each group independently. Advantages are normalised globally across all envs in the batch.
+- GAE is computed **per-env** to prevent cross-env value leakage. Transitions are grouped by `env_id`; GAE runs within each group independently. Advantages are normalised **per-minibatch** (per-chunk) rather than globally. Sample indices are shuffled at the start of each epoch via Fisher-Yates shuffle to ensure diverse gradient updates.
 - Bootstrap values are computed per-env at prepare time: non-terminal envs get a fresh `model.forward()` value; terminal envs get 0.
 
 ### Update Triggering
@@ -92,7 +92,7 @@ Each epoch:
 - `steering_mean/std`, `throttle_mean/std`, `clamped_action_fraction`
 - `clip_fraction` — fraction of samples where the PPO ratio was clipped (healthy: 10–30%)
 - `approx_kl` — approximate KL divergence between old and new policy (healthy: < 0.02)
-- Per-layer `A2cLayerHealth`: weight L2 norm, gradient L2 norm, dead-ReLU fraction
+- Per-layer `A2cLayerHealth`: weight L2 norm, gradient L2 norm, tanh saturation fraction
 
 ### Trainer Ranking
 
@@ -145,7 +145,7 @@ Tick lifecycle (vectorised):
 ## Implemented Outputs / Artifacts
 
 - **Runtime resources:** `AgentMode`, `A2cBrain` (no buffer), `A2cTrainingStats`, `TrainerRolloutBuffer`, `TrainerLiveRanking`
-- **Handwritten ML primitives:** `Linear` (forward + backward + Glorot init), `Relu` (with dead-neuron tracking), `AdamOptimizer` (per-layer), `sample_normal`, `log_prob_normal`, `tanh_correction`
+- **Handwritten ML primitives:** `Linear` (forward + backward + Glorot/orthogonal init), `Tanh` (with saturation tracking), `Relu` (legacy, unused), `AdamOptimizer` (per-layer, ε=1e-5), `sample_normal`, `log_prob_normal`, `tanh_correction`, `orthogonal_init`
 - **Unit tests in `buffer.rs`:** single-env GAE regression test (verifies per-env GAE matches flat GAE for one env), multi-env GAE isolation test (verifies no cross-env value leakage in interleaved buffer).
 
 ## Known Issues / Active Risks
@@ -173,12 +173,13 @@ Tick lifecycle (vectorised):
 - **Full analytics overhaul** planned (multi-car capture, visual outputs, diagnostic automation) — see `context/plans/analytics-overhaul-brief.md`.
 - **Headless training, persistence, and evaluation mode** are likely to matter before longer experiments become credible.
 - The final project direction points toward biological/local-plasticity systems; PPO should stay modular enough to be **retired later** without distorting the rest of the runtime.
-- Activation switch from ReLU to tanh is a credible upgrade candidate based on on-policy literature.
+
 
 ## Durable Notes / Discarded Approaches
 
 - The **bounded tanh-squashed action contract** is a deliberate improvement over sampling unconstrained values and relying on later clamping. It ensures actions are naturally within physical bounds.
 - PPO exists as a **baseline for learnability validation**, not the intended final learning architecture. Engineering investment should stay proportionate.
+- **ReLU was replaced by tanh** after observing 34–57% dead neuron rates across all hidden layers. The dead neurons starved the actor of capacity, preventing corner-learning. Tanh eliminates this problem entirely (0% saturation observed). This is consistent with the Andrychowicz et al. finding that tanh outperforms ReLU in on-policy continuous control.
 - External A2C/PPO research and a NeuroDrive-specific implementation ladder live in `context/references/a2c-for-neurodrive.md` — deep algorithm research belongs there rather than in this system file.
 - **PPO upgrade resolved the A2C policy oscillation problem.** The clipped surrogate objective prevents any single update from destabilising the policy. The amortised epoch processing (128 samples/tick) resolved frame stutter that appeared when all 4 epochs ran in a single tick.
 

@@ -35,7 +35,7 @@ impl AdamOptimizer {
             learning_rate: lr,
             beta1: 0.9,
             beta2: 0.999,
-            epsilon: 1e-8,
+            epsilon: 1e-5,
             t: 0.0,
             m_weights,
             v_weights,

@@ -66,7 +66,7 @@ Each `TickTraceRecord` captures:
 `EpisodeRecord` combines:
 - `env_id` — which car completed this episode
 - episode identity and summary (id, progress, return, ticks, crashes, end reason)
-- reward decomposition sums (progress, time penalty, terminal, crash, lap bonus)
+- reward decomposition sums (progress, time penalty, terminal, crash, lap bonus — centreline and progress bonus columns removed)
 - action statistics (steering/throttle mean and std)
 - turn-execution diagnostics (turn-in latency, throttle release latency, steering adequacy, understeer rate)
 - input-level summaries (mean centreline distance, heading error, ray distances)
@@ -149,6 +149,7 @@ ASCII visuals include Unicode sparklines (▁▂▃▄▅▆▇█), horizontal 
 - The heuristic failure-mode classification is useful for triage but is **not ground truth**.
 - The value prediction in trace capture currently returns `None` for all cars — per-car value lookup from the shared trainer buffer is pending.
 - Some older metric modules (`inputs`, `insights`, `critic`) are not wired into the current markdown report and produce dead-code warnings. They remain valid API for future re-integration.
+- **Progress metrics are misleading with random spawns.** Ghost cars spawn at random positions along the track, so their "progress" (absolute track position) doesn't reflect distance actually driven. A car spawning at 90% and driving 10% to complete a lap shows 100% progress. The analytics pipeline needs a rework to track distance-from-spawn rather than absolute position. Car 0 (always at canonical start) remains the honest benchmark until this is fixed.
 
 ## Partial / In Progress
 
@@ -162,6 +163,8 @@ ASCII visuals include Unicode sparklines (▁▂▃▄▅▆▇█), horizontal 
 - **Per-car value predictions** in trace capture need a per-car lookup from the shared buffer rather than reading the last value.
 - If a brake channel or new observation features are added, trace and metrics schemas will need coordinated extension.
 - Re-integrating the older metric modules (critic diagnostics by region, input learning trends) into the markdown report would deepen the diagnostic capability.
+- **Distance-from-spawn progress rework** is the most urgent analytics change. This requires: (a) tracking cumulative forward arc-length from each car's spawn point, (b) reporting distance-driven rather than absolute track position, (c) separating car 0 reporting from ghost car reporting, (d) removing lap-complete as a metric once the finish line is removed.
+- **Reward decomposition columns simplified** — centreline reward, progress bonus, and heading-speed penalty have been removed from the reward system. The markdown report and chunking metrics have been updated accordingly.
 
 ## Durable Notes / Discarded Approaches
 

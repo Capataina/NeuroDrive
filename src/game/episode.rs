@@ -2,8 +2,9 @@ use std::collections::VecDeque;
 use std::f32::consts::PI;
 
 use bevy::prelude::*;
+use rand::RngExt;
 
-use crate::game::car::{Car, SpawnConfig};
+use crate::game::car::{Car, EnvInstanceId, SpawnConfig, SpawnRng};
 use crate::game::collision::Collided;
 use crate::game::progress::TrackProgress;
 use crate::maps::track::Track;
@@ -31,10 +32,8 @@ pub struct EpisodeConfig {
     pub progress_reward_scale: f32,
     /// Small per-tick time penalty to discourage stalling.
     pub time_penalty_per_tick: f32,
-    /// Extra per-tick penalty for high-speed heading misalignment.
-    pub heading_speed_penalty_scale: f32,
-    /// Speed scale used to normalise heading-risk penalty.
-    pub speed_norm_max_for_penalty: f32,
+    /// Reference speed at which the speed multiplier equals 1.0.
+    pub speed_reward_reference: f32,
     /// Crash penalty applied once on crash episode end.
     pub crash_penalty: f32,
     /// Lap-complete bonus applied once on lap episode end.
@@ -50,10 +49,9 @@ impl Default for EpisodeConfig {
             lap_arm_fraction: 0.25,
             lap_wrap_from_fraction: 0.85,
             lap_wrap_to_fraction: 0.15,
-            progress_reward_scale: 140.0,
+            progress_reward_scale: 100.0,
             time_penalty_per_tick: -0.005,
-            heading_speed_penalty_scale: 0.02,
-            speed_norm_max_for_penalty: 900.0,
+            speed_reward_reference: 200.0,
             crash_penalty: -5.0,
             lap_bonus: 100.0,
             moving_average_window: 20,
@@ -175,13 +173,15 @@ pub fn episode_loop_system(
     time: Res<Time<bevy::time::Fixed>>,
     config: Res<EpisodeConfig>,
     track_query: Query<&Track>,
+    mut spawn_rng: ResMut<SpawnRng>,
     mut car_query: Query<(
         &mut Transform,
         &mut Car,
         &mut TrackProgress,
         &mut EpisodeState,
         &mut EpisodeMovingAverages,
-        &SpawnConfig,
+        &mut SpawnConfig,
+        &EnvInstanceId,
         Has<Collided>,
     )>,
 ) {
@@ -189,7 +189,7 @@ pub fn episode_loop_system(
         return;
     };
 
-    for (mut transform, mut car, mut progress, mut episode_state, mut moving_avg, spawn_config, crashed) in
+    for (mut transform, mut car, mut progress, mut episode_state, mut moving_avg, mut spawn_config, env_id, crashed) in
         car_query.iter_mut()
     {
         let forward = (transform.rotation * Vec3::X)
@@ -206,14 +206,11 @@ pub fn episode_loop_system(
         let progress_gain = (progress.fraction - previous_best_progress).max(0.0);
         episode_state.current_best_progress_fraction =
             previous_best_progress.max(progress.fraction);
-        let progress_reward = progress_gain * config.progress_reward_scale;
+        let speed = car.velocity.length();
+        let speed_multiplier = speed / config.speed_reward_reference;
+        let progress_reward = progress_gain * speed_multiplier * config.progress_reward_scale;
         let heading_error = signed_angle_between(forward, progress.tangent);
-        let heading_error_norm = (heading_error.abs() / PI).clamp(0.0, 1.0);
-        let speed_norm =
-            (car.velocity.length() / config.speed_norm_max_for_penalty).clamp(0.0, 1.0);
-        let heading_speed_penalty =
-            -config.heading_speed_penalty_scale * heading_error_norm * speed_norm;
-        let time_penalty = config.time_penalty_per_tick + heading_speed_penalty;
+        let time_penalty = config.time_penalty_per_tick;
         let mut terminal_reward = 0.0;
 
         if progress.fraction >= config.lap_arm_fraction {
@@ -279,7 +276,16 @@ pub fn episode_loop_system(
                 reason,
                 crash_position,
             );
-            reset_car_to_spawn(&mut transform, &mut car, spawn_config);
+            // Ghost cars get a new random spawn position each episode.
+            if env_id.0 != 0 {
+                let s = spawn_rng.0.random::<f32>() * track.centerline.total_length();
+                let position = track.centerline.point_at_s(s);
+                let tangent = track.centerline.tangent_at_s(s);
+                let rotation = tangent.y.atan2(tangent.x);
+                spawn_config.position = position;
+                spawn_config.rotation = rotation;
+            }
+            reset_car_to_spawn(&mut transform, &mut car, &spawn_config);
             sync_progress_to_transform(track, &transform, &mut progress);
         } else {
             episode_state.previous_progress_fraction = progress.fraction;

@@ -374,11 +374,11 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str) {
         // Layer health table.
         if !latest.layer_health.is_empty() {
             md.push_str("**Layer health:**\n\n");
-            md.push_str("| Layer | Weight Norm | Grad Norm | Dead ReLU % |\n");
+            md.push_str("| Layer | Weight Norm | Grad Norm | Saturated % |\n");
             md.push_str("|-------|------------:|----------:|------------:|\n");
             for layer in &latest.layer_health {
                 let dead = layer
-                    .dead_relu_fraction
+                    .saturated_fraction
                     .map(|v| format!("{:.1}%", v * 100.0))
                     .unwrap_or_else(|| "N/A".to_string());
                 md.push_str(&format!(

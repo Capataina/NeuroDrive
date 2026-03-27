@@ -1,4 +1,4 @@
-use crate::game::car::{SpawnConfig, TrainerConfig, spawn_car};
+use crate::game::car::{SpawnConfig, SpawnRng, TrainerConfig, spawn_car};
 use crate::game::collision::collision_detection_system;
 use crate::game::episode::EpisodeConfig;
 use crate::game::physics::car_physics_system;
@@ -6,6 +6,7 @@ use crate::game::progress::update_track_progress_system;
 use crate::maps::track::Track;
 use crate::sim::sets::SimSet;
 use bevy::prelude::*;
+use rand::RngExt;
 
 /// Main game plugin that bundles all game systems.
 pub struct GamePlugin;
@@ -14,6 +15,7 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EpisodeConfig>()
             .init_resource::<TrainerConfig>()
+            .init_resource::<SpawnRng>()
             .add_systems(PostStartup, setup_game)
             .configure_sets(
                 FixedUpdate,
@@ -49,11 +51,12 @@ fn setup_game(
     mut commands: Commands,
     track_query: Query<&Track>,
     trainer_config: Res<TrainerConfig>,
+    mut spawn_rng: ResMut<SpawnRng>,
 ) {
     // Spawn 2D camera
     commands.spawn(Camera2d::default());
 
-    // Spawn training cars at track start with lateral offsets
+    // Spawn training cars: car 0 at canonical position, others at random centreline positions
     let Ok(track) = track_query.single() else {
         warn!("No track found at startup. Cars were not spawned.");
         return;
@@ -61,27 +64,24 @@ fn setup_game(
 
     let num_envs = trainer_config.num_envs;
     info!(
-        "Track ready. Spawning {} cars at ({:.1}, {:.1}) rot {:.2}.",
+        "Track ready. Spawning {} cars (car 0 at ({:.1}, {:.1}) rot {:.2}, others random).",
         num_envs, track.spawn_position.x, track.spawn_position.y, track.spawn_rotation
     );
 
-    // Compute perpendicular direction to spawn heading for lateral offsets
-    let heading = track.spawn_rotation;
-    let perp = Vec2::new(-heading.sin(), heading.cos());
-
     for i in 0..num_envs {
-        // Distribute cars evenly across the lateral spread
-        let t = if num_envs <= 1 {
-            0.0
+        let spawn_config = if i == 0 {
+            // Car 0: canonical track spawn position
+            SpawnConfig {
+                position: track.spawn_position,
+                rotation: track.spawn_rotation,
+            }
         } else {
-            (i as f32 / (num_envs - 1) as f32) * 2.0 - 1.0 // range [-1, 1]
-        };
-        let lateral_offset = t * trainer_config.spawn_lateral_spread * 0.5;
-        let offset_position = track.spawn_position + perp * lateral_offset;
-
-        let spawn_config = SpawnConfig {
-            position: offset_position,
-            rotation: track.spawn_rotation,
+            // Ghost cars: random position along the centreline
+            let s = spawn_rng.0.random::<f32>() * track.centerline.total_length();
+            let position = track.centerline.point_at_s(s);
+            let tangent = track.centerline.tangent_at_s(s);
+            let rotation = tangent.y.atan2(tangent.x);
+            SpawnConfig { position, rotation }
         };
 
         // First car gets full alpha (acts as default best until ranking kicks in)

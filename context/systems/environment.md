@@ -32,6 +32,7 @@
 - Multiple car entities spawned by `setup_game` in `GamePlugin` after the track is ready.
 - `TrainerConfig` controls the number of cars (default 3), lateral spawn spread, and alpha values.
 - Cars are spawned with deterministic lateral offsets perpendicular to the track heading at the spawn point.
+- **Random spawn positions:** Car 0 always spawns at the canonical track start position. Cars 1–N (ghost cars) spawn at random positions along the centreline, facing the tangent direction. On each episode reset, ghost cars receive a new random position via the `SpawnRng` resource. Car 0 always resets to its fixed start position.
 - Each car entity carries:
   - `Sprite` (unique colour from 25-colour palette, 12×6 world units),
   - `Transform`,
@@ -74,22 +75,21 @@
 - `episode_loop_system` runs after progress update in `SimSet::Measurement`.
 - Iterates all car entities, processing each car's episode independently via per-car `EpisodeState` and `EpisodeMovingAverages` components.
 - Per-tick processing (for each car):
-  1. Computes progress-gain reward: `(fraction - previous_best) * progress_reward_scale` (140.0).
-  2. Computes heading-speed penalty: `-heading_speed_penalty_scale * |heading_error|/π * speed/speed_norm_max`.
-  3. Adds fixed time penalty: -0.005 per tick.
-  4. Checks terminal conditions in priority: crash → lap complete → timeout.
-  5. Applies terminal rewards: crash penalty (-5.0) or lap bonus (100.0).
-  6. On terminal: finalises episode state, pushes to moving averages, resets car to spawn, re-syncs progress.
+  1. Computes per-tick forward progress delta: `(fraction - previous_tick_fraction).max(0)`.
+  2. Computes speed-weighted progress reward: `progress_delta * (speed / speed_reward_reference) * progress_reward_scale`. Reference speed: 200.0, scale: 100.0. Zero reward when stationary or going backward.
+  3. Adds flat time penalty: -0.005 per tick. No heading-speed component.
+  4. Checks terminal conditions in priority: crash → timeout (no lap detection — finish line has been removed).
+  5. Applies terminal reward: crash penalty (-5.0).
+  6. On terminal: finalises episode state, pushes to moving averages, resets car. Ghost cars (env_id ≠ 0) get a new random spawn position along the centreline; car 0 always resets to the canonical start.
 
 ### Reward Composition
 
 | Term | Value | When |
 |------|-------|------|
-| Progress gain | `+gain × 140.0` | Every tick where episode-best progress increases |
+| Speed-weighted progress | `+delta × (speed/200) × 100` | Every tick with forward progress |
 | Time penalty | `-0.005` | Every tick |
-| Heading-speed penalty | `-0.02 × |heading_error|/π × speed/900` | Every tick |
 | Crash penalty | `-5.0` | One-off on crash |
-| Lap bonus | `+100.0` | One-off on lap completion |
+| Lap bonus | `+100.0` | One-off on lap completion (legacy — planned for removal) |
 
 ### Episode Termination
 
@@ -101,6 +101,7 @@
 
 - Lap detection is **progress-wrap based**, not finish-line-crossing based.
 - Reset returns each car to its own `SpawnConfig` position/rotation (not the canonical track spawn) and re-syncs `TrackProgress`.
+- **Planned change:** Lap detection is scheduled for removal. The finish-line concept will be replaced by a distance-from-spawn paradigm where progress measures cumulative arc-length driven from the spawn point, with no special finish position.
 
 ## Key Interfaces / Data Flow
 
@@ -148,12 +149,19 @@ Physics mutates car → Progress recomputed → Episode records reward and check
 - Lap detection may move from wrap heuristics to explicit finish-line crossing.
 - **ECS-level regression tests** are the most obvious missing verification layer.
 - A brake action channel may eventually be added as a separate action-space change.
+- **Finish-line removal and distance-from-spawn paradigm:** The current lap-complete detection and lap bonus will be removed. Progress will be measured as cumulative forward arc-length from spawn, not absolute track position. This removes the gaming incentive for cars spawning near the wrap point and makes progress metrics honest across random spawn positions.
+- **Analytics rework required:** The analytics pipeline currently reports absolute track position as progress. With random spawns, this inflates ghost car metrics. Analytics needs to track distance-driven-from-spawn and report car 0 separately as the honest benchmark.
+- **Turning speed may be a physics bottleneck:** At rotation_speed=4.0 rad/s and 60 Hz, maximum heading change is 3.8°/tick. At high speeds (>300 u/s), this may be insufficient for tight corners. Investigation needed before adding more reward complexity.
 
 ## Durable Notes / Discarded Approaches
 
 - Reset ownership is centralised in `episode.rs`. Earlier split reset behaviour between collision and episode handling was a bad fit because it obscured terminal reward truth.
 - `TrackProgress` is shared widely but remains **environment truth, not observation truth**. Preserving that separation is important as the learning stack evolves.
 - The `CAR_WIDTH` × `CAR_HEIGHT` (12×6) collision rectangle is intentionally tight — it detects edge-level road departure rather than centre-only checking.
+- **Centreline proximity reward was removed** after the policy learned to farm it by sitting still near the centreline, earning steady reward without driving. The speed-weighted progress reward makes a separate centreline term redundant — you can't earn progress reward without following the track.
+- **Episode-end progress bonus was removed** because it added critic instability without meaningfully improving learning. The cumulative speed-weighted progress reward already rewards longer, faster runs.
+- **Heading-speed penalty was removed** because it's redundant with speed-weighted progress — a misaligned car makes less forward progress per tick, so the penalty is implicit.
+- **Crash penalty was reduced from -10 to -5** because harsh crash penalties discouraged the aggressive driving that produces learning. Dying is how cars learn; the crash penalty is a tiebreaker, not a deterrent.
 
 ## Obsolete / No Longer Relevant
 

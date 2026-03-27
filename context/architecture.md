@@ -38,8 +38,8 @@ NeuroDrive/
 │   │       └── mod.rs                   # Tile semantics for track construction (straights, curves, spawn)
 │   ├── game/
 │   │   ├── mod.rs
-│   │   ├── plugin.rs                    # GamePlugin: SimSet chain config, camera + multi-car spawn (TrainerConfig.num_envs cars with lateral offsets)
-│   │   ├── car.rs                       # Car component (velocity, dynamics params), spawn_car(); EnvInstanceId, SpawnConfig, CarColour components
+│   │   ├── plugin.rs                    # GamePlugin: SimSet chain config, camera + multi-car spawn (car 0 at canonical start, ghost cars at random centreline positions)
+│   │   ├── car.rs                       # Car component (velocity, dynamics params), spawn_car(); EnvInstanceId, SpawnConfig, SpawnRng, CarColour components
 │   │   ├── physics.rs                   # car_physics_system + pure step_car_dynamics() helper
 │   │   ├── collision.rs                 # Corner-based off-road detection → Collided marker component (all cars)
 │   │   ├── progress.rs                  # TrackProgress component, centreline projection each tick
@@ -60,8 +60,8 @@ NeuroDrive/
 │   │   │   └── update.rs               # PreparedUpdate, ppo_process_chunk/ppo_finish_epoch, PPO clipped surrogate
 │   │   ├── common/
 │   │   │   ├── mod.rs
-│   │   │   ├── mlp.rs                   # Handwritten Linear layer, ReLU, Glorot init, forward/backward
-│   │   │   ├── math.rs                  # Gaussian sampling, log-prob, tanh correction utilities
+│   │   │   ├── mlp.rs                   # Handwritten Linear, Tanh, Relu (legacy), orthogonal + Glorot init, forward/backward
+│   │   │   ├── math.rs                  # Gaussian sampling, log-prob, tanh correction, orthogonal init utilities
 │   │   │   └── optim.rs                # Adam optimiser with per-layer state
 │   │   ├── ranking.rs                   # TrainerLiveRanking resource, car colour-based visual roles, best-car highlighting
 │   │   └── biological/                  # Empty placeholder for future local-plasticity brain
@@ -238,13 +238,13 @@ SimSet::Measurement
 - The codebase is **not** environment-only. PPO, analytics, and the debug HUD are live and substantial subsystems. Documentation treating them as roadmap-only is obsolete.
 - **Singleton-car assumptions have been removed** from `game`, `agent`, and `brain`. `ActionState`, `EpisodeState`, and `EpisodeMovingAverages` are now per-car **Components** (not Resources). `CollisionEvent` has been replaced by a `Collided` marker component. All fixed-tick systems iterate over multiple cars.
 - The runtime is a **multi-car vectorised trainer**:
-  - `TrainerConfig` controls car count (default 3). Cars are spawned with lateral offsets, each assigned a unique colour from a 25-colour palette.
+  - `TrainerConfig` controls car count (default 3). Car 0 always spawns at the canonical track start. Cars 1–N spawn at random positions along the centreline (re-randomised on each episode reset), each assigned a unique colour from a 25-colour palette.
   - Per-car components: `EnvInstanceId`, `SpawnConfig`, `CarColour`, `ActionState`, `EpisodeState`, `EpisodeMovingAverages`.
   - One shared `TrainerRolloutBuffer` collects transitions from all cars with `env_id` tagging and old log-probs for PPO ratio computation; GAE is computed per-env (no cross-env value leakage).
   - A `TrainerLiveRanking` resource tracks best/worst car with hysteresis; `ranking.rs` assigns visual highlight roles.
   - A live leaderboard panel (top-right, F3-toggled) shows per-car performance with colour swatches.
-- The brain uses **PPO** (upgraded from A2C): clipped surrogate objective (ε=0.2), 4 epochs per update. Updates are **amortised across ticks** via `PreparedUpdate` and `ppo_epoch_system` — GAE is computed once, then 128 samples are processed per tick to avoid frame stutter. Blocking flush on exit handles residual data.
-- **Analytics and HUD systems use temporary shims** (target first car) pending a full analytics overhaul to support multi-car reporting.
+- The brain uses **PPO** (upgraded from A2C): clipped surrogate objective (ε=0.2), 4 epochs per update. The network uses **tanh activations** (switched from ReLU to eliminate dead-neuron capacity loss), **orthogonal weight initialisation** (√2 hidden, 0.01× policy head, 1.0× value head), and **per-minibatch advantage normalisation** with sample shuffling. Updates are **amortised across ticks** via `PreparedUpdate` and `ppo_epoch_system` — GAE is computed once, then 128 samples are processed per tick to avoid frame stutter. Blocking flush on exit handles residual data.
+- **Analytics requires a rework** to support random spawn positions — current progress metrics assume all cars start at 0% and report absolute track position rather than distance driven from spawn. A planned finish-line removal and distance-from-spawn paradigm shift will require coordinated changes across the episode system, analytics models, and markdown export.
 - The brain layer now owns **ranking logic** (`src/brain/ranking.rs`) in addition to PPO. A seeded `StdRng` lives in `A2cBrain` for deterministic policy sampling.
 - The **debug HUD** has been redesigned: compact 440px panel with blue accent palette, 72% opacity, condensed text lines (no wrapping), PPO-specific metrics (clip %, KL divergence), six-column quarter table, no legend. Leaderboard panel matches the updated colour scheme.
 - The project is in a **transitional architecture state**:
@@ -252,4 +252,4 @@ SimSet::Measurement
   - The implemented learning path is a handwritten PPO baseline used to validate the environment and observation contract (Milestone 1). Cars are confirmed to learn — drifting corners observed.
 - **`src/brain/biological/`** and **`src/analytics/sessions/`** are empty placeholder directories. They should not be treated as implemented subsystems.
 - `README.md` is directionally accurate but its Milestone 1 checklist understates implementation reality — PPO, debug HUD, and analytics export are all live.
-- The highest current documentation pressure is around **validation and experiment discipline**: the brain lacks persistence, evaluation mode, headless training, and multi-car analytics integration.
+- The highest current documentation pressure is around the **reward and episode paradigm shift**: removing the finish-line concept, switching to distance-from-spawn progress, and reworking analytics to report honestly with random spawn positions.

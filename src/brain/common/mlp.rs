@@ -21,6 +21,16 @@ impl Linear {
         }
     }
 
+    pub fn new_orthogonal(in_dim: usize, out_dim: usize, scale: f32, rng: &mut impl Rng) -> Self {
+        Self {
+            weights: crate::brain::common::math::orthogonal_init(out_dim, in_dim, scale, rng),
+            biases: zeros(out_dim),
+            grad_weights: vec![vec![0.0; in_dim]; out_dim],
+            grad_biases: zeros(out_dim),
+            input_cache: None,
+        }
+    }
+
     pub fn forward(&mut self, input: &[f32]) -> Vec<f32> {
         self.input_cache = Some(input.to_vec());
         let mut output = vec![0.0; self.biases.len()];
@@ -113,6 +123,32 @@ impl Relu {
             .iter()
             .zip(grad_output.iter())
             .map(|(&x, &g)| if x > 0.0 { g } else { 0.0 })
+            .collect()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Tanh {
+    pub output_cache: Option<Vec<f32>>,
+}
+
+impl Tanh {
+    pub fn new() -> Self {
+        Self { output_cache: None }
+    }
+
+    pub fn forward(&mut self, input: &[f32]) -> Vec<f32> {
+        let output: Vec<f32> = input.iter().map(|&x| x.tanh()).collect();
+        self.output_cache = Some(output.clone());
+        output
+    }
+
+    pub fn backward(&mut self, grad_output: &[f32]) -> Vec<f32> {
+        let output = self.output_cache.as_ref().unwrap();
+        output
+            .iter()
+            .zip(grad_output.iter())
+            .map(|(&o, &g)| g * (1.0 - o * o))
             .collect()
     }
 }

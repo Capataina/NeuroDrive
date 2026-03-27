@@ -124,7 +124,7 @@ pub fn episode_tracker_system(
                         layer_name: layer.layer_name.clone(),
                         weight_l2_norm: layer.weight_l2_norm,
                         gradient_l2_norm: layer.gradient_l2_norm,
-                        dead_relu_fraction: layer.dead_relu_fraction,
+                        saturated_fraction: layer.saturated_fraction,
                     })
                     .collect(),
             });

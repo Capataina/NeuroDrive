@@ -82,8 +82,8 @@ impl TrainerRolloutBuffer {
 
     /// Computes GAE per-env to avoid cross-env value leakage in the interleaved
     /// buffer. Each env's transitions are grouped and GAE is computed within
-    /// that group independently. Advantages are normalised globally across all
-    /// envs in the batch.
+    /// that group independently. Advantages are returned un-normalised;
+    /// normalisation happens per-minibatch in the update loop.
     pub fn compute_gae_per_env(
         &self,
         bootstrap_values: &HashMap<u32, f32>,
@@ -120,18 +120,6 @@ impl TrainerRolloutBuffer {
 
                 advantages[t] = gae;
                 returns[t] = gae + self.values[t];
-            }
-        }
-
-        // Normalise advantages globally across all envs
-        if n > 0 {
-            let mean = advantages.iter().sum::<f32>() / n as f32;
-            let variance =
-                advantages.iter().map(|a| (a - mean).powi(2)).sum::<f32>() / n as f32;
-            let std = (variance + 1e-8).sqrt();
-
-            for a in &mut advantages {
-                *a = (*a - mean) / std;
             }
         }
 
@@ -177,14 +165,6 @@ mod tests {
             flat_adv[t] = gae;
             flat_ret[t] = gae + values[t];
         }
-        // Normalise
-        let mean = flat_adv.iter().sum::<f32>() / 4.0;
-        let var = flat_adv.iter().map(|a| (a - mean).powi(2)).sum::<f32>() / 4.0;
-        let std = (var + 1e-8).sqrt();
-        for a in &mut flat_adv {
-            *a = (*a - mean) / std;
-        }
-
         for i in 0..4 {
             assert!((adv_per_env[i] - flat_adv[i]).abs() < 1e-5, "adv mismatch at {i}");
             assert!((ret_per_env[i] - flat_ret[i]).abs() < 1e-5, "ret mismatch at {i}");
@@ -246,9 +226,7 @@ mod tests {
             "env0 t0 ret: {env0_ret_0} expected ~{expected_env0_ret_0}"
         );
 
-        // Advantages should be normalised globally but computed per-env
+        // Advantages are un-normalised (per-chunk normalisation happens in update loop)
         assert!(adv.len() == 4);
-        let adv_sum: f32 = adv.iter().sum();
-        assert!(adv_sum.abs() < 0.1, "advantages should be roughly zero-mean: sum={adv_sum}");
     }
 }
