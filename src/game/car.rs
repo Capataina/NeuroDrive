@@ -4,6 +4,7 @@ use rand::SeedableRng;
 
 use crate::agent::action::ActionState;
 use crate::agent::observation::{ObservationVector, SensorReadings};
+use crate::brain::types::PolicyOutput;
 use crate::game::episode::{EpisodeMovingAverages, EpisodeState};
 use crate::game::progress::TrackProgress;
 
@@ -65,7 +66,7 @@ impl Default for Car {
     fn default() -> Self {
         Self {
             velocity: Vec2::ZERO,
-            rotation_speed: 4.0,
+            rotation_speed: 8.0,
             thrust: 750.0,
             drag: 0.985,
         }
@@ -121,7 +122,9 @@ pub fn car_colour_for_env(env_id: u32) -> CarColour {
 }
 
 /// Spawns a car entity with all per-car components.
-pub fn spawn_car(commands: &mut Commands, env_id: u32, spawn_config: SpawnConfig, alpha: f32) {
+/// `spawn_s` is the arc-length position on the centreline where this car starts,
+/// used to seed distance tracking so the first-tick delta is correct.
+pub fn spawn_car(commands: &mut Commands, env_id: u32, spawn_config: SpawnConfig, alpha: f32, spawn_s: f32) {
     let colour = car_colour_for_env(env_id);
     info!(
         "Spawn car env#{} at ({:.1}, {:.1}) rot {:.2}.",
@@ -129,6 +132,10 @@ pub fn spawn_car(commands: &mut Commands, env_id: u32, spawn_config: SpawnConfig
     );
     let mut sensor_readings = SensorReadings::default();
     sensor_readings.previous_heading = spawn_config.rotation;
+
+    let mut episode_state = EpisodeState::default();
+    episode_state.previous_s = spawn_s;
+    episode_state.spawn_s = spawn_s;
 
     commands.spawn((
         Sprite {
@@ -143,7 +150,8 @@ pub fn spawn_car(commands: &mut Commands, env_id: u32, spawn_config: SpawnConfig
         colour,
         spawn_config,
         ActionState::default(),
-        EpisodeState::default(),
+        PolicyOutput::default(),
+        episode_state,
         EpisodeMovingAverages::default(),
         TrackProgress::default(),
         sensor_readings,

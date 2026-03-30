@@ -47,6 +47,7 @@ impl Plugin for GamePlugin {
 }
 
 /// Initial game setup: camera and multi-car spawn.
+/// All cars spawn at random centreline positions — no privileged car 0.
 fn setup_game(
     mut commands: Commands,
     track_query: Query<&Track>,
@@ -56,7 +57,6 @@ fn setup_game(
     // Spawn 2D camera
     commands.spawn(Camera2d::default());
 
-    // Spawn training cars: car 0 at canonical position, others at random centreline positions
     let Ok(track) = track_query.single() else {
         warn!("No track found at startup. Cars were not spawned.");
         return;
@@ -64,33 +64,24 @@ fn setup_game(
 
     let num_envs = trainer_config.num_envs;
     info!(
-        "Track ready. Spawning {} cars (car 0 at ({:.1}, {:.1}) rot {:.2}, others random).",
-        num_envs, track.spawn_position.x, track.spawn_position.y, track.spawn_rotation
+        "Track ready. Spawning {} cars at random centreline positions.",
+        num_envs
     );
 
     for i in 0..num_envs {
-        let spawn_config = if i == 0 {
-            // Car 0: canonical track spawn position
-            SpawnConfig {
-                position: track.spawn_position,
-                rotation: track.spawn_rotation,
-            }
-        } else {
-            // Ghost cars: random position along the centreline
-            let s = spawn_rng.0.random::<f32>() * track.centerline.total_length();
-            let position = track.centerline.point_at_s(s);
-            let tangent = track.centerline.tangent_at_s(s);
-            let rotation = tangent.y.atan2(tangent.x);
-            SpawnConfig { position, rotation }
-        };
+        let s = spawn_rng.0.random::<f32>() * track.centerline.total_length();
+        let position = track.centerline.point_at_s(s);
+        let tangent = track.centerline.tangent_at_s(s);
+        let rotation = tangent.y.atan2(tangent.x);
+        let spawn_config = SpawnConfig { position, rotation };
 
-        // First car gets full alpha (acts as default best until ranking kicks in)
+        // First car gets full alpha as default best until ranking kicks in.
         let alpha = if i == 0 {
             trainer_config.best_car_alpha
         } else {
             trainer_config.default_car_alpha
         };
 
-        spawn_car(&mut commands, i as u32, spawn_config, alpha);
+        spawn_car(&mut commands, i as u32, spawn_config, alpha, s);
     }
 }

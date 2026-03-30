@@ -55,6 +55,8 @@ pub fn car_physics_system(
 }
 
 /// Pure deterministic car step used by runtime physics and replay tests.
+///
+/// Throttle is `[0, 1]`: 0 = coast (drag decelerates naturally), 1 = full thrust.
 pub fn step_car_dynamics(
     state: &mut CarKinematicState,
     steering: f32,
@@ -64,10 +66,9 @@ pub fn step_car_dynamics(
 ) {
     state.heading += -steering.clamp(-1.0, 1.0) * params.rotation_speed * dt;
 
-    if throttle > 0.0 {
-        let forward = Vec2::new(state.heading.cos(), state.heading.sin());
-        state.velocity += forward * (params.thrust * throttle.clamp(0.0, 1.0)) * dt;
-    }
+    let throttle = throttle.clamp(0.0, 1.0);
+    let forward = Vec2::new(state.heading.cos(), state.heading.sin());
+    state.velocity += forward * (params.thrust * throttle) * dt;
 
     state.velocity *= params.drag;
     state.position += state.velocity * dt;

@@ -64,7 +64,6 @@ fn spawn_track(
     info!("Centreline length: {:.0}px.", centerline.total_length());
 
     render_tile_grid(&mut commands, &grid, &mut meshes, &mut materials);
-    render_finish_line(&mut commands, &grid);
 
     commands.spawn(Track {
         grid,
@@ -166,27 +165,3 @@ fn build_tiles() -> Vec<Vec<TilePart>> {
     ]
 }
 
-/// Renders the start/finish line as a white vertical stripe.
-///
-/// Placed at the western boundary of column 3 — the first `StraightH` tile
-/// after the `CornerNW`. The `SpawnPoint` occupies column 4, giving exactly
-/// one full tile (100 px) of clear road between the line and the spawn point,
-/// so the car never overlaps the finish line on spawn or collision reset.
-fn render_finish_line(commands: &mut Commands, grid: &TrackGrid) {
-    let finish_col = 4usize;
-    let finish_row = 1usize;
-    let tile_center = grid.cell_center(finish_row, finish_col);
-
-    // Western edge of col 3 = eastern edge of col 2 (the NW corner).
-    let x = tile_center.x - grid.tile_size * 0.5;
-    let y = tile_center.y;
-
-    commands.spawn((
-        Sprite {
-            color: Color::srgb(1.0, 1.0, 1.0),
-            custom_size: Some(Vec2::new(5.0, grid.tile_size)),
-            ..default()
-        },
-        Transform::from_xyz(x, y, 2.0),
-    ));
-}

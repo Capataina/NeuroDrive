@@ -14,7 +14,6 @@ use crate::maps::track::Track;
 pub enum EpisodeEndReason {
     Crash,
     Timeout,
-    LapComplete,
 }
 
 /// Core episode loop configuration.
@@ -22,22 +21,19 @@ pub enum EpisodeEndReason {
 pub struct EpisodeConfig {
     /// Timeout duration in seconds.
     pub timeout_s: f32,
-    /// Progress threshold that arms lap-wrap detection.
-    pub lap_arm_fraction: f32,
-    /// Prior-to-wrap threshold used for lap completion.
-    pub lap_wrap_from_fraction: f32,
-    /// Post-wrap threshold used for lap completion.
-    pub lap_wrap_to_fraction: f32,
-    /// Reward scaling for positive gain in episode-best progress per tick.
-    pub progress_reward_scale: f32,
+    /// Velocity projection reward: `dot(velocity, tangent) / speed_reference × scale`.
+    pub velocity_reward_scale: f32,
+    /// Reference speed for velocity projection normalisation.
+    pub speed_reward_reference: f32,
+    /// Centreline proximity reward coefficient.
+    /// Reward per tick: `coef × (1 - (|lateral_offset| / lateral_max)²)`.
+    pub centreline_reward_coef: f32,
+    /// Maximum lateral offset for centreline reward (reward reaches 0 at this distance).
+    pub centreline_reward_max_distance: f32,
     /// Small per-tick time penalty to discourage stalling.
     pub time_penalty_per_tick: f32,
-    /// Reference speed at which the speed multiplier equals 1.0.
-    pub speed_reward_reference: f32,
     /// Crash penalty applied once on crash episode end.
     pub crash_penalty: f32,
-    /// Lap-complete bonus applied once on lap episode end.
-    pub lap_bonus: f32,
     /// Number of episodes used for moving averages.
     pub moving_average_window: usize,
 }
@@ -46,14 +42,12 @@ impl Default for EpisodeConfig {
     fn default() -> Self {
         Self {
             timeout_s: 30.0,
-            lap_arm_fraction: 0.25,
-            lap_wrap_from_fraction: 0.85,
-            lap_wrap_to_fraction: 0.15,
-            progress_reward_scale: 100.0,
-            time_penalty_per_tick: -0.005,
+            velocity_reward_scale: 1.0,
             speed_reward_reference: 200.0,
-            crash_penalty: -5.0,
-            lap_bonus: 100.0,
+            centreline_reward_coef: 0.3,
+            centreline_reward_max_distance: 50.0,
+            time_penalty_per_tick: -0.005,
+            crash_penalty: 0.0,
             moving_average_window: 20,
         }
     }
@@ -64,8 +58,12 @@ impl Default for EpisodeConfig {
 pub struct EpisodeState {
     pub current_episode: u32,
     pub ticks_in_episode: u32,
-    pub previous_progress_fraction: f32,
-    pub lap_armed: bool,
+    /// Arc-length position of the car on the previous tick (for delta computation).
+    pub previous_s: f32,
+    /// Cumulative forward arc-length driven from spawn this episode.
+    pub distance_driven: f32,
+    /// Arc-length position where this episode's spawn occurred.
+    pub spawn_s: f32,
     pub current_return: f32,
     pub current_tick_reward: f32,
     pub current_tick_progress_reward: f32,
@@ -79,11 +77,13 @@ pub struct EpisodeState {
     pub current_tick_heading_error: f32,
     pub current_tick_forward: Vec2,
     pub current_tick_tangent: Vec2,
+    pub current_tick_velocity_projection: f32,
+    pub current_tick_centreline_reward: f32,
     pub current_progress_reward_sum: f32,
     pub current_time_penalty_sum: f32,
     pub current_terminal_reward_sum: f32,
     pub current_crash_penalty_sum: f32,
-    pub current_lap_bonus_sum: f32,
+    /// Best distance_driven / track_length achieved this episode.
     pub current_best_progress_fraction: f32,
     pub current_crashes: u32,
     pub last_end_reason: Option<EpisodeEndReason>,
@@ -93,8 +93,8 @@ pub struct EpisodeState {
     pub last_episode_time_penalty_sum: f32,
     pub last_episode_terminal_reward_sum: f32,
     pub last_episode_crash_penalty_sum: f32,
-    pub last_episode_lap_bonus_sum: f32,
     pub last_episode_best_progress_fraction: f32,
+    pub last_episode_distance_driven: f32,
     pub last_episode_crashes: u32,
     pub last_episode_ticks: u32,
     pub last_episode_crash_position: Option<Vec2>,
@@ -105,8 +105,9 @@ impl Default for EpisodeState {
         Self {
             current_episode: 1,
             ticks_in_episode: 0,
-            previous_progress_fraction: 0.0,
-            lap_armed: false,
+            previous_s: 0.0,
+            distance_driven: 0.0,
+            spawn_s: 0.0,
             current_return: 0.0,
             current_tick_reward: 0.0,
             current_tick_progress_reward: 0.0,
@@ -120,11 +121,12 @@ impl Default for EpisodeState {
             current_tick_heading_error: 0.0,
             current_tick_forward: Vec2::X,
             current_tick_tangent: Vec2::X,
+            current_tick_velocity_projection: 0.0,
+            current_tick_centreline_reward: 0.0,
             current_progress_reward_sum: 0.0,
             current_time_penalty_sum: 0.0,
             current_terminal_reward_sum: 0.0,
             current_crash_penalty_sum: 0.0,
-            current_lap_bonus_sum: 0.0,
             current_best_progress_fraction: 0.0,
             current_crashes: 0,
             last_end_reason: None,
@@ -134,8 +136,8 @@ impl Default for EpisodeState {
             last_episode_time_penalty_sum: 0.0,
             last_episode_terminal_reward_sum: 0.0,
             last_episode_crash_penalty_sum: 0.0,
-            last_episode_lap_bonus_sum: 0.0,
             last_episode_best_progress_fraction: 0.0,
+            last_episode_distance_driven: 0.0,
             last_episode_crashes: 0,
             last_episode_ticks: 0,
             last_episode_crash_position: None,
@@ -169,6 +171,9 @@ impl Default for EpisodeMovingAverages {
 
 /// Handles per-tick reward accumulation and episode boundaries for all cars.
 /// Each car runs its own independent episode lifecycle.
+///
+/// Progress is measured as cumulative forward arc-length from spawn.
+/// Episode ends on crash or timeout only — no finish line, no lap detection.
 pub fn episode_loop_system(
     time: Res<Time<bevy::time::Fixed>>,
     config: Res<EpisodeConfig>,
@@ -188,8 +193,9 @@ pub fn episode_loop_system(
     let Ok(track) = track_query.single() else {
         return;
     };
+    let total_length = track.centerline.total_length();
 
-    for (mut transform, mut car, mut progress, mut episode_state, mut moving_avg, mut spawn_config, env_id, crashed) in
+    for (mut transform, mut car, mut progress, mut episode_state, mut moving_avg, mut spawn_config, _env_id, crashed) in
         car_query.iter_mut()
     {
         let forward = (transform.rotation * Vec3::X)
@@ -202,20 +208,35 @@ pub fn episode_loop_system(
         episode_state.current_tick_terminal_reward = 0.0;
         episode_state.current_tick_end_reason = None;
         episode_state.ticks_in_episode = episode_state.ticks_in_episode.saturating_add(1);
-        let previous_best_progress = episode_state.current_best_progress_fraction;
-        let progress_gain = (progress.fraction - previous_best_progress).max(0.0);
+
+        // Compute forward arc-length delta with wrap handling (for distance tracking).
+        let mut raw_delta = progress.s - episode_state.previous_s;
+        let half_length = total_length * 0.5;
+        if raw_delta < -half_length {
+            raw_delta += total_length; // wrapped forward past the seam
+        }
+        if raw_delta > half_length {
+            raw_delta -= total_length; // wrapped backward past the seam
+        }
+        let forward_delta = raw_delta.max(0.0);
+        episode_state.distance_driven += forward_delta;
+
+        let progress_fraction = episode_state.distance_driven / total_length;
         episode_state.current_best_progress_fraction =
-            previous_best_progress.max(progress.fraction);
-        let speed = car.velocity.length();
-        let speed_multiplier = speed / config.speed_reward_reference;
-        let progress_reward = progress_gain * speed_multiplier * config.progress_reward_scale;
+            episode_state.current_best_progress_fraction.max(progress_fraction);
+
+        // Velocity projection reward: how much speed is aligned with the track.
+        let v_along_track = car.velocity.dot(progress.tangent);
+        let progress_reward = (v_along_track / config.speed_reward_reference)
+            * config.velocity_reward_scale;
+
+        // Centreline proximity reward: gentle bonus for staying near the racing line.
+        let d_norm = (progress.distance / config.centreline_reward_max_distance).min(1.0);
+        let centreline_reward = config.centreline_reward_coef * (1.0 - d_norm * d_norm);
+
         let heading_error = signed_angle_between(forward, progress.tangent);
         let time_penalty = config.time_penalty_per_tick;
         let mut terminal_reward = 0.0;
-
-        if progress.fraction >= config.lap_arm_fraction {
-            episode_state.lap_armed = true;
-        }
 
         let mut crash_position = None;
         if crashed {
@@ -226,41 +247,32 @@ pub fn episode_loop_system(
 
         let timed_out =
             (episode_state.ticks_in_episode as f32) * time.delta_secs() >= config.timeout_s;
-        let lap_complete = episode_state.lap_armed
-            && episode_state.previous_progress_fraction >= config.lap_wrap_from_fraction
-            && progress.fraction <= config.lap_wrap_to_fraction;
 
-        if lap_complete {
-            terminal_reward += config.lap_bonus;
-        }
-        let tick_reward = progress_reward + time_penalty + terminal_reward;
+        let tick_reward = progress_reward + centreline_reward + time_penalty + terminal_reward;
 
         episode_state.current_tick_reward = tick_reward;
-        episode_state.current_tick_progress_reward = progress_reward;
+        episode_state.current_tick_progress_reward = progress_reward + centreline_reward;
         episode_state.current_tick_time_penalty = time_penalty;
         episode_state.current_tick_terminal_reward = terminal_reward;
-        episode_state.current_tick_progress_fraction = progress.fraction;
+        episode_state.current_tick_progress_fraction = progress_fraction;
         episode_state.current_tick_progress_s = progress.s;
         episode_state.current_tick_centerline_distance = progress.distance;
         episode_state.current_tick_speed = car.velocity.length();
         episode_state.current_tick_heading_error = heading_error;
         episode_state.current_tick_forward = forward;
         episode_state.current_tick_tangent = progress.tangent;
+        episode_state.current_tick_velocity_projection = v_along_track;
+        episode_state.current_tick_centreline_reward = centreline_reward;
         episode_state.current_progress_reward_sum += progress_reward;
         episode_state.current_time_penalty_sum += time_penalty;
         episode_state.current_terminal_reward_sum += terminal_reward;
         if crashed {
             episode_state.current_crash_penalty_sum += config.crash_penalty;
         }
-        if lap_complete {
-            episode_state.current_lap_bonus_sum += config.lap_bonus;
-        }
         episode_state.current_return += tick_reward;
 
         let end_reason = if crashed {
             Some(EpisodeEndReason::Crash)
-        } else if lap_complete {
-            Some(EpisodeEndReason::LapComplete)
         } else if timed_out {
             Some(EpisodeEndReason::Timeout)
         } else {
@@ -276,19 +288,21 @@ pub fn episode_loop_system(
                 reason,
                 crash_position,
             );
-            // Ghost cars get a new random spawn position each episode.
-            if env_id.0 != 0 {
-                let s = spawn_rng.0.random::<f32>() * track.centerline.total_length();
-                let position = track.centerline.point_at_s(s);
-                let tangent = track.centerline.tangent_at_s(s);
-                let rotation = tangent.y.atan2(tangent.x);
-                spawn_config.position = position;
-                spawn_config.rotation = rotation;
-            }
+            // All cars get a new random spawn position each episode.
+            let s = spawn_rng.0.random::<f32>() * total_length;
+            let position = track.centerline.point_at_s(s);
+            let tangent = track.centerline.tangent_at_s(s);
+            let rotation = tangent.y.atan2(tangent.x);
+            spawn_config.position = position;
+            spawn_config.rotation = rotation;
+
             reset_car_to_spawn(&mut transform, &mut car, &spawn_config);
             sync_progress_to_transform(track, &transform, &mut progress);
+            // Seed distance tracking for the new episode.
+            episode_state.previous_s = progress.s;
+            episode_state.spawn_s = progress.s;
         } else {
-            episode_state.previous_progress_fraction = progress.fraction;
+            episode_state.previous_s = progress.s;
         }
     }
 }
@@ -324,9 +338,9 @@ fn finalize_episode(
     episode_state.last_episode_time_penalty_sum = episode_state.current_time_penalty_sum;
     episode_state.last_episode_terminal_reward_sum = episode_state.current_terminal_reward_sum;
     episode_state.last_episode_crash_penalty_sum = episode_state.current_crash_penalty_sum;
-    episode_state.last_episode_lap_bonus_sum = episode_state.current_lap_bonus_sum;
     episode_state.last_episode_best_progress_fraction =
         episode_state.current_best_progress_fraction;
+    episode_state.last_episode_distance_driven = episode_state.distance_driven;
     episode_state.last_episode_crashes = episode_state.current_crashes;
     episode_state.last_episode_ticks = episode_state.ticks_in_episode;
     episode_state.last_episode_crash_position = crash_position;
@@ -352,14 +366,12 @@ fn finalize_episode(
 
     episode_state.current_episode = episode_state.current_episode.saturating_add(1);
     episode_state.ticks_in_episode = 0;
-    episode_state.previous_progress_fraction = 0.0;
-    episode_state.lap_armed = false;
+    episode_state.distance_driven = 0.0;
     episode_state.current_return = 0.0;
     episode_state.current_progress_reward_sum = 0.0;
     episode_state.current_time_penalty_sum = 0.0;
     episode_state.current_terminal_reward_sum = 0.0;
     episode_state.current_crash_penalty_sum = 0.0;
-    episode_state.current_lap_bonus_sum = 0.0;
     episode_state.current_best_progress_fraction = 0.0;
     episode_state.current_crashes = 0;
 }

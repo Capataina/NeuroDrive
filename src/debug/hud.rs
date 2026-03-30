@@ -14,7 +14,6 @@ use crate::debug::overlays::DebugOverlayState;
 use crate::game::car::{Car, EnvInstanceId};
 use crate::game::collision::Collided;
 use crate::game::episode::{EpisodeConfig, EpisodeEndReason, EpisodeMovingAverages, EpisodeState};
-use crate::game::progress::TrackProgress;
 
 const HUD_QUARTER_COUNT: usize = 4;
 const FIXED_TICK_SECONDS: f32 = 1.0 / 60.0;
@@ -63,7 +62,6 @@ struct CompletedHudEpisode {
 struct QuarterSummary {
     count: usize,
     crash_count: usize,
-    lap_count: usize,
     timeout_count: usize,
     mean_progress_pct: f32,
     mean_return: f32,
@@ -252,7 +250,7 @@ pub(crate) fn spawn_driving_hud_system(mut commands: Commands) {
                         ("Prog", QuarterColumn::Progress),
                         ("Life", QuarterColumn::Life),
                         ("Rwd", QuarterColumn::Return),
-                        ("C/L/T", QuarterColumn::Ends),
+                        ("C/T", QuarterColumn::Ends),
                     ];
 
                     table
@@ -329,18 +327,18 @@ pub(crate) fn spawn_driving_hud_system(mut commands: Commands) {
         });
 }
 
-/// Tracks best progress and death count across ALL cars.
+/// Tracks best distance-driven progress and death count across ALL cars.
 pub(crate) fn update_driving_hud_stats_system(
     mut hud_stats: ResMut<DrivingHudStats>,
-    car_query: Query<(&EnvInstanceId, &TrackProgress, &EpisodeState, Has<Collided>), With<Car>>,
+    car_query: Query<(&EnvInstanceId, &EpisodeState, Has<Collided>), With<Car>>,
 ) {
-    for (_env_id, progress, episode_state, collided) in car_query.iter() {
+    for (_env_id, episode_state, collided) in car_query.iter() {
         if collided {
             hud_stats.deaths = hud_stats.deaths.saturating_add(1);
         }
 
-        if progress.fraction > hud_stats.best_progress_fraction {
-            hud_stats.best_progress_fraction = progress.fraction;
+        if episode_state.current_best_progress_fraction > hud_stats.best_progress_fraction {
+            hud_stats.best_progress_fraction = episode_state.current_best_progress_fraction;
             hud_stats.best_progress_episode = episode_state.current_episode;
         }
     }
@@ -402,7 +400,6 @@ pub(crate) fn update_driving_hud_text_system(
     car_query: Query<
         (
             &EnvInstanceId,
-            &TrackProgress,
             &SensorReadings,
             &EpisodeState,
             &EpisodeMovingAverages,
@@ -419,17 +416,17 @@ pub(crate) fn update_driving_hud_text_system(
 
     // Select the best car from the ranking, falling back to any car.
     let best_env_id = ranking.as_ref().and_then(|r| r.best_env_id);
-    let Some((_, progress, sensors, episode_state, moving_avg)) = (match best_env_id {
+    let Some((_, sensors, episode_state, moving_avg)) = (match best_env_id {
         Some(target_id) => car_query
             .iter()
-            .find(|(env_id, _, _, _, _)| env_id.0 == target_id)
+            .find(|(env_id, _, _, _)| env_id.0 == target_id)
             .or_else(|| car_query.iter().next()),
         None => car_query.iter().next(),
     }) else {
         return;
     };
 
-    let progress_pct = (progress.fraction * 100.0).clamp(0.0, 100.0);
+    let progress_pct = (episode_state.current_tick_progress_fraction * 100.0).clamp(0.0, 100.0);
     let best_progress_pct = (hud_stats.best_progress_fraction * 100.0).clamp(0.0, 100.0);
     let life_best_progress_pct =
         (episode_state.current_best_progress_fraction * 100.0).clamp(0.0, 100.0);
@@ -439,7 +436,6 @@ pub(crate) fn update_driving_hud_text_system(
     let last_reason = match episode_state.last_end_reason {
         Some(EpisodeEndReason::Crash) => "Crash",
         Some(EpisodeEndReason::Timeout) => "Timeout",
-        Some(EpisodeEndReason::LapComplete) => "Lap",
         None => "N/A",
     };
     let recent_quarters = summarise_recent_history(&history);
@@ -447,7 +443,7 @@ pub(crate) fn update_driving_hud_text_system(
 
     let current_line = format!(
         "Prog {progress_pct:.1}%  Best {life_best_progress_pct:.1}%  Gap {gap:.1}  Head {heading_error_deg:.1}\u{00b0}  Off {offset:+.1}",
-        gap = progress.distance,
+        gap = episode_state.current_tick_centerline_distance,
         offset = sensors.signed_lateral_offset,
     );
     let run_line = format!(
@@ -512,7 +508,6 @@ fn summarise_recent_history(history: &DrivingHudHistory) -> [QuarterSummary; HUD
         for episode in slice {
             match episode.end_reason {
                 EpisodeEndReason::Crash => quarter.crash_count += 1,
-                EpisodeEndReason::LapComplete => quarter.lap_count += 1,
                 EpisodeEndReason::Timeout => quarter.timeout_count += 1,
             }
             quarter.mean_progress_pct += episode.best_progress_fraction * 100.0;
@@ -556,8 +551,8 @@ fn render_quarter_cell(
         QuarterColumn::Life => format!("{:.1}s", quarter.mean_life_seconds),
         QuarterColumn::Return => format!("{:+.1}", quarter.mean_return),
         QuarterColumn::Ends => format!(
-            "{}/{}/{}",
-            quarter.crash_count, quarter.lap_count, quarter.timeout_count
+            "{}/{}",
+            quarter.crash_count, quarter.timeout_count
         ),
     }
 }

@@ -66,7 +66,7 @@ impl Default for ActionSmoothing {
 
 /// Latches keyboard input into the fixed-tick `ActionState.desired`.
 ///
-/// In multi-car mode, keyboard controls `EnvInstanceId(0)` only.
+/// In multi-car mode, keyboard controls `EnvInstanceId(0)` as a stable target.
 pub fn keyboard_action_input_system(
     mode: Option<Res<crate::brain::types::AgentMode>>,
     keyboard: Res<ButtonInput<KeyCode>>,

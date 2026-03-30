@@ -1,23 +1,23 @@
 # Plan — PPO Optimisation and Improvement
 
-## Status — Partially Superseded
+## Status — Phases 0–1 Complete, Phase 2 Partially Complete
 
-Phases 0 and 1 of this plan have been **completed or superseded**:
+Phases 0 and 1 are fully complete. Phase 2 has key items done; remaining items are valid future work.
 
-| Item | Status |
-|------|--------|
-| Phase 0.1: ReLU → Tanh | **Done** |
-| Phase 0.2: Per-tick progress reward | **Done** (superseded by speed-weighted progress in reward-and-spawn-overhaul) |
-| Phase 1.1: Orthogonal init | **Done** |
-| Phase 1.2: Minibatch shuffle + per-minibatch adv norm | **Done** |
-| Phase 1.3: Centerline proximity reward | **Done then removed** (exploitable — see reward-and-spawn-overhaul) |
-| Phase 2.1: Running observation normalisation | Not started |
-| Phase 2.2: Linear LR annealing | Not started |
-| Phase 2.3: Adam ε → 1e-5 | **Done** |
-| Phase 2.4: Increase crash penalty | **Done then reverted** (reduced to -5, harsh penalties discourage learning) |
-| Phase 3: Scale and polish | Not started |
+| Item | Status | Notes |
+|------|--------|-------|
+| Phase 0.1: ReLU → Tanh | **Done** | |
+| Phase 0.2: Per-tick progress reward | **Done** | Superseded by velocity projection reward (`dot(velocity, tangent)`) in the reward-and-spawn-overhaul. |
+| Phase 1.1: Orthogonal init + output head scaling | **Done** | |
+| Phase 1.2: Minibatch shuffle + per-minibatch adv norm | **Done** | |
+| Phase 1.3: Centreline proximity reward | **Done — re-added** | Originally removed as exploitable, then re-added with `coef = 0.3` alongside velocity projection reward. |
+| Phase 2.1: Running observation normalisation | Not started | |
+| Phase 2.2: Linear LR annealing | Not started | |
+| Phase 2.3: Adam ε → 1e-5 | **Done** | |
+| Phase 2.4: Increase crash penalty | **Superseded** | Crash penalty now set to `0.0` — the velocity projection reward provides sufficient signal without penalising crashes. |
+| Phase 3: Scale and polish | Not started | |
 
-The reward structure has been fundamentally redesigned in `context/plans/reward-and-spawn-overhaul.md`. Remaining items from Phases 2–3 (observation normalisation, LR annealing, more envs) remain valid but should be evaluated in the context of the new reward paradigm.
+The reward structure has been fundamentally redesigned in `context/plans/reward-and-spawn-overhaul.md`. The finish-line removal and analytics overhaul are both complete. Remaining Phase 2–3 items (observation normalisation, LR annealing, more envs, value clipping) remain valid future work under the new reward paradigm.
 
 ---
 

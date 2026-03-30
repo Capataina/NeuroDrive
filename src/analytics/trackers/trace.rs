@@ -7,7 +7,7 @@ use crate::agent::action::ActionState;
 use crate::agent::observation::{ObservationConfig, SensorReadings};
 use crate::analytics::metrics::turns::compute_trace_metrics;
 use crate::analytics::models::{EpisodeTrace, TickTraceRecord};
-use crate::brain::types::AgentMode;
+use crate::brain::types::{AgentMode, PolicyOutput};
 use crate::game::car::{Car, EnvInstanceId};
 use crate::game::episode::{EpisodeEndReason, EpisodeState};
 use crate::maps::track::Track;
@@ -49,7 +49,6 @@ impl EpisodeTraceAccumulator {
         self.last_completed_trace = Some(EpisodeTrace {
             episode_id,
             end_reason: format!("{:?}", end_reason),
-            lap_completed: end_reason == EpisodeEndReason::LapComplete,
             best_progress,
             ticks: self.ticks.clone(),
             metrics,
@@ -90,13 +89,13 @@ pub fn capture_episode_tick_trace_system(
     mode: Res<AgentMode>,
     observation_config: Res<ObservationConfig>,
     car_query: Query<
-        (&EnvInstanceId, &EpisodeState, &ActionState, &SensorReadings),
+        (&EnvInstanceId, &EpisodeState, &ActionState, &SensorReadings, &Transform, &PolicyOutput),
         With<Car>,
     >,
     track_query: Query<&Track>,
     mut accumulators: ResMut<PerCarTraceAccumulators>,
 ) {
-    for (env_id, episode_state, action_state, sensors) in car_query.iter() {
+    for (env_id, episode_state, action_state, sensors, transform, policy_output) in car_query.iter() {
         let done = episode_state.current_tick_end_reason.is_some();
         let target_episode_id = if done {
             episode_state.current_episode.saturating_sub(1)
@@ -123,26 +122,46 @@ pub fn capture_episode_tick_trace_system(
                 )
             };
 
-        // Value prediction: use None for now. Getting env_id-specific values
-        // from the shared rollout buffer is complex and will be addressed later.
         let value_prediction = if *mode == AgentMode::Ai {
-            None
+            Some(policy_output.value_prediction)
         } else {
             None
         };
+
+        let is_ai = *mode == AgentMode::Ai;
 
         let tick_index = accumulator.ticks.len() as u32 + 1;
         accumulator.ticks.push(TickTraceRecord {
             env_id: env_id.0,
             tick_index,
+            position_x: transform.translation.x,
+            position_y: transform.translation.y,
             progress_fraction: episode_state.current_tick_progress_fraction,
             progress_s: episode_state.current_tick_progress_s,
             centerline_distance: episode_state.current_tick_centerline_distance,
             signed_lateral_offset: sensors.signed_lateral_offset,
             speed: episode_state.current_tick_speed,
+            v_forward: sensors.v_forward,
+            v_lateral: sensors.v_lateral,
+            speed_delta: sensors.speed_delta,
+            drift_angle_deg: {
+                let spd = sensors.speed;
+                if spd > 1.0 {
+                    let vf = sensors.v_forward;
+                    let vl = sensors.v_lateral;
+                    vl.atan2(vf.abs().max(0.001)).abs().to_degrees()
+                } else {
+                    0.0
+                }
+            },
             heading_error: episode_state.current_tick_heading_error,
+            min_ray_distance: sensors.ray_distances.iter().copied().fold(f32::MAX, f32::min),
+            velocity_projection: episode_state.current_tick_velocity_projection,
+            centreline_reward: episode_state.current_tick_centreline_reward,
             steering: action_state.applied.steering,
             throttle: action_state.applied.throttle,
+            previous_steering: sensors.previous_steering,
+            previous_throttle: sensors.previous_throttle,
             reward: episode_state.current_tick_reward,
             progress_reward: episode_state.current_tick_progress_reward,
             time_penalty: episode_state.current_tick_time_penalty,
@@ -156,6 +175,10 @@ pub fn capture_episode_tick_trace_system(
             lookahead_heading_deltas,
             lookahead_curvatures,
             value_prediction,
+            policy_steering_mean: if is_ai { Some(policy_output.steering_mean) } else { None },
+            policy_steering_std: if is_ai { Some(policy_output.steering_std) } else { None },
+            policy_throttle_mean: if is_ai { Some(policy_output.throttle_mean) } else { None },
+            policy_throttle_std: if is_ai { Some(policy_output.throttle_std) } else { None },
         });
     }
 }

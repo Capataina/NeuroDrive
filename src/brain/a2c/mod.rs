@@ -15,7 +15,7 @@ use crate::agent::action::{
     ActionState, CarAction, action_smoothing_system, keyboard_action_input_system,
 };
 use crate::agent::observation::{OBSERVATION_DIM, ObservationVector};
-use crate::brain::types::AgentMode;
+use crate::brain::types::{AgentMode, PolicyOutput};
 use crate::game::car::{Car, EnvInstanceId};
 use crate::game::episode::EpisodeState;
 
@@ -128,7 +128,7 @@ impl Plugin for A2cPlugin {
 /// all transitions to the TrainerRolloutBuffer with env_id tagging.
 pub fn a2c_act_all_cars_system(
     mode: Res<AgentMode>,
-    mut car_query: Query<(&EnvInstanceId, &ObservationVector, &mut ActionState), With<Car>>,
+    mut car_query: Query<(&EnvInstanceId, &ObservationVector, &mut ActionState, &mut PolicyOutput), With<Car>>,
     mut brain: ResMut<A2cBrain>,
     mut buffer: ResMut<TrainerRolloutBuffer>,
 ) {
@@ -136,8 +136,15 @@ pub fn a2c_act_all_cars_system(
         return;
     }
 
-    for (env_id, obs, mut action_state) in car_query.iter_mut() {
+    for (env_id, obs, mut action_state, mut policy_output) in car_query.iter_mut() {
         let (action_dist, value) = brain.model.forward(&obs.values);
+
+        // Expose brain internals for analytics.
+        policy_output.value_prediction = value;
+        policy_output.steering_mean = action_dist.mean[0];
+        policy_output.steering_std = action_dist.std[0];
+        policy_output.throttle_mean = action_dist.mean[1];
+        policy_output.throttle_std = action_dist.std[1];
 
         let mut actions = [0.0f32; 2];
         let mut latent_actions = [0.0f32; 2];
@@ -151,10 +158,11 @@ pub fn a2c_act_all_cars_system(
             latent_actions[i] = latent;
 
             let squashed = latent.tanh();
-            actions[i] = if i == 0 {
-                squashed
-            } else {
+            actions[i] = if i == 1 {
+                // Throttle: map tanh [-1,1] to [0,1]
                 0.5 * (squashed + 1.0)
+            } else {
+                squashed
             };
         }
 

@@ -77,11 +77,12 @@ pub fn build_report_insights(
             best_episode.end_reason
         ));
     }
-    if episodes.iter().all(|episode| !episode.lap_completed) {
-        insights.performance.push(
-            "No laps completed yet; current learning remains local rather than task-complete."
-                .to_string(),
-        );
+    if let (Some(first), Some(last)) = (episodes.first(), episodes.last()) {
+        if last.distance_driven > first.distance_driven * 1.5 {
+            insights.performance.push(
+                "Distance driven per episode is increasing significantly.".to_string(),
+            );
+        }
     }
 
     if let (Some(first), Some(last)) = (input_chunks.first(), input_chunks.last()) {

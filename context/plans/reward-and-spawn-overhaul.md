@@ -1,19 +1,19 @@
 # Plan — Reward Simplification and Random Spawn Overhaul
 
-## Status — Group A+B Implemented
+## Status — Groups A+B Implemented, Reward Evolved
 
-| Item | Status |
-|------|--------|
-| A.1: Reward simplification (speed-weighted progress) | **Done** |
-| A.2: Random spawn positions | **Done** |
-| A.3: Adam ε → 1e-5 | **Done** |
-| B.1: Minibatch shuffling + per-minibatch adv norm | **Done** |
-| B.2: Orthogonal init + output head scaling | **Done** |
-| C.1: Increase car count (3 → 8) | Not started |
-| C.2: Running observation normalisation | Not started |
-| C.3: Linear LR annealing | Not started |
+| Item | Status | Notes |
+|------|--------|-------|
+| A.1: Reward simplification | **Done — evolved** | Final form is velocity projection (`dot(velocity, tangent) / reference × scale`), not the originally planned speed-weighted progress. Centreline proximity reward re-added (`coef = 0.3`). Crash penalty reduced to `0.0`. |
+| A.2: Random spawn positions | **Done — all cars** | All cars (including car 0) get a fresh random spawn each episode, not just ghost cars as originally planned. |
+| A.3: Adam ε → 1e-5 | **Done** | |
+| B.1: Minibatch shuffling + per-minibatch adv norm | **Done** | |
+| B.2: Orthogonal init + output head scaling | **Done** | |
+| C.1: Increase car count (3 → 8) | Not started | |
+| C.2: Running observation normalisation | Not started | |
+| C.3: Linear LR annealing | Not started | |
 
-Cars are confirmed learning — turning left and right when needed, reaching 100% track position (though this metric is inflated by random spawns). The next priority is the finish-line removal (see `context/plans/finish-line-removal.md`) and analytics rework to report distance-from-spawn honestly.
+The finish-line removal (`context/plans/finish-line-removal.md`) and full analytics overhaul (`context/plans/analytics-expansion.md`) are both complete. Progress is now tracked as cumulative forward arc-length from spawn. Group C items remain valid future work.
 
 ---
 

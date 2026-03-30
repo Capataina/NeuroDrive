@@ -67,4 +67,4 @@ The cleaner model: every metre of track is equally valuable. Progress = how far 
 
 ## Status
 
-Planned. Not yet implemented. Created to preserve the design discussion from the current session.
+**Implemented** — completed 2026-03-27. The finish line, lap detection, and lap bonus have been fully removed. Episodes end on crash or timeout only. Progress is tracked as cumulative forward arc-length from spawn (`distance_driven`), with wrap-aware delta computation. All cars receive a fresh random spawn position each episode. This file is retained as historical context for the design rationale.

@@ -2,6 +2,7 @@ use std::f32::consts::PI;
 
 use bevy::prelude::*;
 
+use crate::agent::action::ActionState;
 use crate::game::car::Car;
 use crate::game::progress::TrackProgress;
 use crate::maps::grid::TrackGrid;
@@ -10,12 +11,14 @@ use crate::maps::track::Track;
 /// Number of ray sensors in the observation model.
 pub const NUM_RAYS: usize = 11;
 /// Number of lookahead samples taken from the centreline.
-pub const NUM_LOOKAHEAD_SAMPLES: usize = 4;
+pub const NUM_LOOKAHEAD_SAMPLES: usize = 12;
 /// Number of scalar lookahead features per sample.
 pub const LOOKAHEAD_FEATURES_PER_SAMPLE: usize = 2;
 /// Total observation dimension consumed by controllers.
+/// Layout: [rays(11), v_forward, v_lateral, lateral_offset, heading_error,
+///          angular_velocity, speed_delta, lookahead(12×2), prev_steering, prev_throttle]
 pub const OBSERVATION_DIM: usize =
-    NUM_RAYS + 4 + NUM_LOOKAHEAD_SAMPLES * LOOKAHEAD_FEATURES_PER_SAMPLE;
+    NUM_RAYS + 6 + NUM_LOOKAHEAD_SAMPLES * LOOKAHEAD_FEATURES_PER_SAMPLE + 2;
 
 /// Raycast sensor readings and derived kinematics for one car.
 #[derive(Component, Clone, Debug)]
@@ -28,6 +31,14 @@ pub struct SensorReadings {
     pub ray_directions: [Vec2; NUM_RAYS],
     /// Current scalar speed in world units / second.
     pub speed: f32,
+    /// Velocity component along the car's facing direction (positive = forward).
+    pub v_forward: f32,
+    /// Velocity component perpendicular to facing direction (positive = sliding left).
+    pub v_lateral: f32,
+    /// Speed change since last tick (positive = accelerating, negative = decelerating).
+    pub speed_delta: f32,
+    /// Previous tick's speed, used for speed_delta computation.
+    pub previous_speed: f32,
     /// Signed lateral offset from the centreline in world units.
     ///
     /// Positive means the car is left of the centreline relative to the
@@ -43,6 +54,10 @@ pub struct SensorReadings {
     pub lookahead_heading_deltas: [f32; NUM_LOOKAHEAD_SAMPLES],
     /// Approximate curvature (radians/world-unit) at lookahead distances.
     pub lookahead_curvatures: [f32; NUM_LOOKAHEAD_SAMPLES],
+    /// Previous tick's applied steering, fed back as observation.
+    pub previous_steering: f32,
+    /// Previous tick's applied throttle, fed back as observation.
+    pub previous_throttle: f32,
 }
 
 impl Default for SensorReadings {
@@ -52,12 +67,18 @@ impl Default for SensorReadings {
             ray_hits: [Vec2::ZERO; NUM_RAYS],
             ray_directions: [Vec2::X; NUM_RAYS],
             speed: 0.0,
+            v_forward: 0.0,
+            v_lateral: 0.0,
+            speed_delta: 0.0,
+            previous_speed: 0.0,
             signed_lateral_offset: 0.0,
             heading_error: 0.0,
             angular_velocity: 0.0,
             previous_heading: 0.0,
             lookahead_heading_deltas: [0.0; NUM_LOOKAHEAD_SAMPLES],
             lookahead_curvatures: [0.0; NUM_LOOKAHEAD_SAMPLES],
+            previous_steering: 0.0,
+            previous_throttle: 0.0,
         }
     }
 }
@@ -95,10 +116,12 @@ pub struct ObservationConfig {
     pub angular_velocity_norm_max: f32,
     /// Relative ray angles around the car forward vector, in radians.
     pub ray_angles: [f32; NUM_RAYS],
-    /// Centreline lookahead distances in world units.
+    /// Centreline lookahead distances in world units (near → far).
     pub lookahead_distances: [f32; NUM_LOOKAHEAD_SAMPLES],
     /// Curvature normalisation scale in radians / world-unit.
     pub curvature_norm_max: f32,
+    /// Speed-delta normalisation scale in world units / second / tick.
+    pub speed_delta_norm_max: f32,
 }
 
 impl Default for ObservationConfig {
@@ -122,8 +145,13 @@ impl Default for ObservationConfig {
                 90f32.to_radians(),
                 150f32.to_radians(),
             ],
-            lookahead_distances: [50.0, 100.0, 175.0, 260.0],
+            lookahead_distances: [
+                30.0, 60.0, 95.0, 135.0,    // near-field: immediate steering
+                180.0, 230.0, 285.0, 345.0,  // mid-field: turn detection
+                415.0, 490.0, 570.0, 650.0,  // far-field: anticipation at speed
+            ],
             curvature_norm_max: 0.05,
+            speed_delta_norm_max: 50.0,
         }
     }
 }
@@ -133,26 +161,37 @@ pub fn update_sensor_readings_system(
     time: Res<Time<bevy::time::Fixed>>,
     config: Res<ObservationConfig>,
     track_query: Query<&Track>,
-    mut car_query: Query<(&Transform, &Car, &TrackProgress, &mut SensorReadings)>,
+    mut car_query: Query<(&Transform, &Car, &TrackProgress, &ActionState, &mut SensorReadings)>,
 ) {
     let Ok(track) = track_query.single() else {
         return;
     };
     let dt = time.delta_secs().max(1e-6);
 
-    for (transform, car, progress, mut sensors) in &mut car_query {
+    for (transform, car, progress, action_state, mut sensors) in &mut car_query {
         let position = transform.translation.truncate();
         let forward = (transform.rotation * Vec3::X)
             .truncate()
             .normalize_or_zero();
+        let left = Vec2::new(-forward.y, forward.x);
         let heading = forward.y.atan2(forward.x);
 
-        sensors.speed = car.velocity.length();
+        let current_speed = car.velocity.length();
+        sensors.speed = current_speed;
+        sensors.v_forward = car.velocity.dot(forward);
+        sensors.v_lateral = car.velocity.dot(left);
+        sensors.speed_delta = current_speed - sensors.previous_speed;
+        sensors.previous_speed = current_speed;
+
         sensors.signed_lateral_offset =
             signed_lateral_offset(position, progress.closest_point, progress.tangent);
         sensors.heading_error = signed_angle_between(forward, progress.tangent);
         sensors.angular_velocity = wrap_angle(heading - sensors.previous_heading) / dt;
         sensors.previous_heading = heading;
+
+        // Feed back the applied action so it's available as "previous action" next tick.
+        sensors.previous_steering = action_state.applied.steering;
+        sensors.previous_throttle = action_state.applied.throttle;
 
         for (index, relative_angle) in config.ray_angles.iter().enumerate() {
             let world_angle = heading + *relative_angle;
@@ -183,6 +222,10 @@ pub fn update_sensor_readings_system(
 }
 
 /// Converts sensor readings into a stable, normalised observation vector.
+///
+/// Layout (43 dimensions):
+/// [rays(11), v_forward, v_lateral, lateral_offset, heading_error,
+///  angular_velocity, speed_delta, lookahead(12×2), prev_steering, prev_throttle]
 pub fn build_observation_vector_system(
     config: Res<ObservationConfig>,
     mut query: Query<(&SensorReadings, &mut ObservationVector)>,
@@ -190,18 +233,39 @@ pub fn build_observation_vector_system(
     for (sensors, mut observation) in &mut query {
         let mut values = [0.0; OBSERVATION_DIM];
 
+        // Rays [0..11]
         for (index, distance) in sensors.ray_distances.iter().enumerate() {
             values[index] = (*distance / config.ray_max_range).clamp(0.0, 1.0);
         }
 
-        values[NUM_RAYS] = (sensors.speed / config.speed_norm_max).clamp(0.0, 1.0);
-        values[NUM_RAYS + 1] =
-            (sensors.signed_lateral_offset / config.lateral_offset_norm_max).clamp(-1.0, 1.0);
-        values[NUM_RAYS + 2] = (sensors.heading_error / PI).clamp(-1.0, 1.0);
-        values[NUM_RAYS + 3] =
-            (sensors.angular_velocity / config.angular_velocity_norm_max).clamp(-1.0, 1.0);
+        let mut cursor = NUM_RAYS;
 
-        let mut cursor = NUM_RAYS + 4;
+        // Velocity components [11..12]
+        values[cursor] = (sensors.v_forward / config.speed_norm_max).clamp(-1.0, 1.0);
+        cursor += 1;
+        values[cursor] = (sensors.v_lateral / config.speed_norm_max).clamp(-1.0, 1.0);
+        cursor += 1;
+
+        // Lateral offset [13]
+        values[cursor] =
+            (sensors.signed_lateral_offset / config.lateral_offset_norm_max).clamp(-1.0, 1.0);
+        cursor += 1;
+
+        // Heading error [14]
+        values[cursor] = (sensors.heading_error / PI).clamp(-1.0, 1.0);
+        cursor += 1;
+
+        // Angular velocity [15]
+        values[cursor] =
+            (sensors.angular_velocity / config.angular_velocity_norm_max).clamp(-1.0, 1.0);
+        cursor += 1;
+
+        // Speed delta [16]
+        values[cursor] =
+            (sensors.speed_delta / config.speed_delta_norm_max).clamp(-1.0, 1.0);
+        cursor += 1;
+
+        // Lookahead features [17..24]
         for i in 0..NUM_LOOKAHEAD_SAMPLES {
             values[cursor] = (sensors.lookahead_heading_deltas[i] / PI).clamp(-1.0, 1.0);
             cursor += 1;
@@ -209,6 +273,11 @@ pub fn build_observation_vector_system(
                 (sensors.lookahead_curvatures[i] / config.curvature_norm_max).clamp(-1.0, 1.0);
             cursor += 1;
         }
+
+        // Previous actions [25..26] — already in [-1, 1], no normalisation needed.
+        values[cursor] = sensors.previous_steering;
+        cursor += 1;
+        values[cursor] = sensors.previous_throttle;
 
         observation.values = values;
     }

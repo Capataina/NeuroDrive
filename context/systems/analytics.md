@@ -53,31 +53,52 @@ Last:
 Each `TickTraceRecord` captures:
 - `env_id` — which car produced this tick
 - progress (fraction, arc-length), centreline distance, signed lateral offset
+- `position_x`, `position_y` — world-space car position
+- `v_forward`, `v_lateral` — velocity decomposition along car axes
+- `speed_delta` — frame-to-frame speed change
+- `drift_angle_deg` — angle between velocity vector and car forward
 - speed, heading error
 - applied steering and throttle
-- reward decomposition (total, progress, time penalty, terminal)
+- `min_ray_distance` — closest ray hit (proximity to walls)
+- reward decomposition (total, `velocity_projection`, `centreline_reward`, time penalty, terminal)
+- `policy_steering_mean`, `policy_steering_std`, `policy_throttle_mean`, `policy_throttle_std` — from PolicyOutput component
+- `previous_steering`, `previous_throttle` — previous tick's applied actions
 - done flag and reason
 - sector index (track divided into 20 sectors)
 - all ray distances, lookahead heading deltas, lookahead curvatures
-- critic value prediction (currently None — pending per-car value lookup from shared buffer)
+- critic value prediction (from PolicyOutput component)
 
 ### Per-Episode Record
 
 `EpisodeRecord` combines:
 - `env_id` — which car completed this episode
 - episode identity and summary (id, progress, return, ticks, crashes, end reason)
-- reward decomposition sums (progress, time penalty, terminal, crash, lap bonus — centreline and progress bonus columns removed)
+- reward decomposition sums (progress, time penalty, terminal, crash — `lap_bonus_sum` and `lap_completed` removed)
 - action statistics (steering/throttle mean and std)
+- **Speed metrics:** speed mean, max, std across the episode
+- **Action behaviour:** braking fraction, acceleration fraction, coast fraction, steering jitter, throttle jitter
+- **Crash forensics:** crash type classification, velocity at crash
+- **Value function stats:** mean value prediction, value at start, value at crash
+- **Exploration metrics:** steering std mean, throttle std mean
 - turn-execution diagnostics (turn-in latency, throttle release latency, steering adequacy, understeer rate)
 - input-level summaries (mean centreline distance, heading error, ray distances)
 - heuristic failure mode classification
+
+### Crash Classification
+
+Terminal episodes are classified into crash types based on the final tick's state:
+- **Slide** — high drift angle at impact
+- **HeadOn** — low drift angle, high forward velocity
+- **Overshoot** — missed turn, ran wide
+- **Spin** — high angular velocity at impact
+- **Stall** — very low velocity at crash (possibly stuck against a wall)
 
 ### Metrics Modules
 
 | Module | Derives |
 |--------|---------|
 | `stats.rs` | Basic statistical utilities (mean, std, percentile) |
-| `chunking.rs` | Temporal chunked trend analysis (10 chunks by default) |
+| `chunking.rs` | Temporal chunked trend analysis (10 chunks by default). `ChunkMetrics` expanded with ~15 new trend fields covering speed stats, action behaviour fractions, crash type breakdowns, value function means, and exploration metrics |
 | `timeseries.rs` | Episode/update time-series extraction, rolling mean, plateau detection |
 | `diagnostics.rs` | Automated diagnostic flags (7 checks: entropy collapse, clip fraction, KL spike, plateau, action collapse, crash rate spike, value drift) |
 | `consistency.rs` | Per-sector behavioural consistency (speed/steering/throttle/centreline variance), overall consistency score |
@@ -108,17 +129,20 @@ The compact JSON is typically kilobytes; the full trace JSON can be tens of mega
 
 ### Markdown Report Structure
 
-The report is organised around **diagnostic questions**, not metric modules:
+The report is organised around **diagnostic questions** across 10 sections, each with auto-generated takeaway sentences:
 
 | Section | Answers |
 |---------|---------|
 | 1. Run Summary | Metadata, learning phase, diagnostic flags |
-| 2. Is the Policy Learning? | Progress/reward/crash sparklines, 10-chunk trend table |
-| 3. Has It Found a Route? | Consistency score, speed profile bar chart, highest-variance sectors |
-| 4. Per-Car Performance | Per-car comparison table, best vs worst contrast |
-| 5. Where Does It Fail? | Crash heatmap by sector, failure modes, corner vs straight analysis |
-| 6. Training Health | PPO sparklines (entropy, clip%, KL, EV), latest update, layer health, reward decomposition |
-| 7. Trajectory Snapshots | Best, latest, latest crash episodes |
+| 2. Learning Progress | Progress/reward/crash sparklines, 10-chunk trend table |
+| 3. Action Behaviour | Braking/acceleration/coast fractions, steering and throttle jitter, action distribution evolution |
+| 4. Speed & Momentum | Speed statistics, v_forward/v_lateral trends, speed_delta patterns, drift angle analysis |
+| 5. Crash Forensics | Crash type breakdown (Slide/HeadOn/Overshoot/Spin/Stall), velocity at crash, crash heatmap by sector |
+| 6. What Does the Car Think | Value function evolution, value at start vs crash, explained variance, policy mean/std trends |
+| 7. Track Coverage | Consistency score, per-sector speed/steering profiles, highest-variance sectors |
+| 8. Driving Quality | Per-car comparison table, best vs worst contrast, turn-execution diagnostics |
+| 9. Training Health | PPO sparklines (entropy, clip%, KL, EV), latest update, layer health, reward decomposition |
+| 10. Trajectory Snapshots | Best, latest, latest crash episodes |
 
 ASCII visuals include Unicode sparklines (▁▂▃▄▅▆▇█), horizontal bar charts (█░), and single-row heatmaps.
 
@@ -127,8 +151,9 @@ ASCII visuals include Unicode sparklines (▁▂▃▄▅▆▇█), horizontal 
 | Interface | Source | Analytics use |
 |-----------|--------|--------------|
 | `ActionState.applied` | agent | Per-car action summaries and trace capture |
-| `EpisodeState` | game | Reward decomposition, terminal reason, episode summaries |
-| `SensorReadings` | agent | Trace capture and input-oriented metrics |
+| `EpisodeState` | game | Reward decomposition, terminal reason, episode summaries (distance_driven, spawn_s, previous_s) |
+| `SensorReadings` | agent | Trace capture: v_forward, v_lateral, speed_delta, previous actions, ray data |
+| `PolicyOutput` | brain | Per-car value prediction, policy means/stds for trace and episode capture |
 | `A2cTrainingStats` | brain | PPO update records (including clip_fraction, approx_kl) |
 | `ObservationConfig` and `Track` | agent/maps | Lookahead snapshot reconstruction in traces |
 | `TrainerConfig` | game | Car count for RunMetadata |
@@ -147,34 +172,33 @@ ASCII visuals include Unicode sparklines (▁▂▃▄▅▆▇█), horizontal 
 - **Exit-triggered only** — abrupt termination (kill signal, panic) loses the entire run.
 - No dedicated validation that every finished episode is recorded exactly once across all terminal paths.
 - The heuristic failure-mode classification is useful for triage but is **not ground truth**.
-- The value prediction in trace capture currently returns `None` for all cars — per-car value lookup from the shared trainer buffer is pending.
 - Some older metric modules (`inputs`, `insights`, `critic`) are not wired into the current markdown report and produce dead-code warnings. They remain valid API for future re-integration.
-- **Progress metrics are misleading with random spawns.** Ghost cars spawn at random positions along the track, so their "progress" (absolute track position) doesn't reflect distance actually driven. A car spawning at 90% and driving 10% to complete a lap shows 100% progress. The analytics pipeline needs a rework to track distance-from-spawn rather than absolute position. Car 0 (always at canonical start) remains the honest benchmark until this is fixed.
 
 ## Partial / In Progress
 
-- The value prediction field in `TickTraceRecord` currently returns `None` for all cars — per-car lookup from the shared trainer buffer is pending.
 - The older metric modules (`inputs`, `insights`, `critic`) remain as valid API but are not wired into the current markdown report. They can be re-integrated as diagnostic depth increases.
 
 ## Planned / Missing / Likely Changes
 
 - **Crash-safe checkpointing or periodic export** would materially improve experiment robustness.
 - **Comparison tooling** across multiple exported runs does not exist.
-- **Per-car value predictions** in trace capture need a per-car lookup from the shared buffer rather than reading the last value.
-- If a brake channel or new observation features are added, trace and metrics schemas will need coordinated extension.
+- If new observation features are added, trace and metrics schemas will need coordinated extension.
 - Re-integrating the older metric modules (critic diagnostics by region, input learning trends) into the markdown report would deepen the diagnostic capability.
-- **Distance-from-spawn progress rework** is the most urgent analytics change. This requires: (a) tracking cumulative forward arc-length from each car's spawn point, (b) reporting distance-driven rather than absolute track position, (c) separating car 0 reporting from ghost car reporting, (d) removing lap-complete as a metric once the finish line is removed.
-- **Reward decomposition columns simplified** — centreline reward, progress bonus, and heading-speed penalty have been removed from the reward system. The markdown report and chunking metrics have been updated accordingly.
 
 ## Durable Notes / Discarded Approaches
 
 - Keeping raw trackers, derived metrics, and exporters **separate** is a good structural choice — it reduces coupling and makes new diagnostics easier to add.
 - Analytics should stay **downstream of runtime truth**. It is a consumer and summariser, not the source of reward, episode, or environment facts.
 - The two-tier JSON approach (compact always, full trace opt-in) was chosen over auto-deleting JSON because the compact data enables re-analysis of old runs without the size cost of per-tick traces.
-- The markdown report was deliberately restructured around diagnostic questions ("is the policy learning?", "has it found a route?") rather than metric modules, because the primary consumers are a human watching training and an agent reading reports remotely.
+- The markdown report was deliberately restructured around diagnostic questions rather than metric modules, because the primary consumers are a human watching training and an agent reading reports remotely.
+- **Reward decomposition columns simplified** — centreline reward and progress bonus columns were removed from the earlier reward model. The current model captures velocity_projection and centreline_reward as separate decomposition terms.
 
 ## Obsolete / No Longer Relevant
 
 - Any reference to **first-car shims** in analytics capture is obsolete — all systems now iterate all cars with `env_id` tagging.
 - The old single-file JSON export (full EpisodeTracker serialised as one blob) has been replaced by the two-tier model.
-- The old markdown report structure (organised by metric module with dense tables) has been replaced by the 7-section diagnostic structure.
+- The old markdown report structure (organised by metric module with dense tables) has been replaced by the 10-section diagnostic structure.
+- Any reference to `lap_bonus_sum` or `lap_completed` in EpisodeRecord or EpisodeTrace is obsolete — these fields have been removed.
+- Any reference to 7 sections in the markdown report is obsolete — it now has 10 sections.
+- Any reference to progress metrics being "misleading with random spawns" is obsolete — progress is now cumulative forward arc-length from spawn (distance_driven), which is honest across all spawn positions.
+- Any reference to value prediction being `None` for all cars is obsolete — PolicyOutput component now provides per-car value predictions directly.

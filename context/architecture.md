@@ -13,9 +13,15 @@
   - a fixed 60 Hz simulation timestep,
   - a single hard-coded track,
   - a **multi-car vectorised trainer** (configurable car count via `TrainerConfig`, default 3) with per-car components and one shared rollout buffer,
+  - all cars spawning at **random centreline positions** (re-randomised each reset, no privileged car),
+  - throttle axis `[0, 1]` (coast to full thrust, no braking — drag is the sole deceleration mechanism),
+  - a **velocity-projection reward** (dot of velocity onto centreline tangent) plus centreline proximity reward,
+  - **43-dimensional observations** (rays, kinematics with v_forward/v_lateral split, speed_delta, 12-point lookahead with heading deltas + curvatures spanning 30–650 units, previous actions),
   - a live handwritten **PPO** brain (upgraded from A2C — clipped surrogate objective, multi-epoch updates amortised across ticks),
-  - a per-tick analytics capture pipeline with JSON and Markdown export,
+  - a **PolicyOutput** component per car exposing value prediction and policy distribution parameters,
+  - a comprehensive analytics pipeline: 16 tick-level fields, 25 episode-level aggregates, crash classification, 10-section Markdown report with auto-generated takeaways,
   - a debug HUD, world-space overlay layer, and live leaderboard panel.
+- Episodes end on **crash or 30-second timeout only** — there is no finish line or lap concept.
 - The project intent in `README.md` is biologically inspired local plasticity. The current implementation reality is still at **baseline validation** — proving the environment and observation contract are learnable before transitioning to biological learning rules.
 - `cargo check` and `cargo test` both pass in the current workspace state.
 
@@ -30,31 +36,31 @@ NeuroDrive/
 │   │   └── sets.rs                      # SimSet enum: Input → Physics → Collision → Measurement ordering contract
 │   ├── maps/
 │   │   ├── mod.rs
-│   │   ├── monaco.rs                    # Hard-coded Sepang-inspired track tile assembly → MonacoPlugin
-│   │   ├── track.rs                     # Track component: grid, spawn pose, centreline
+│   │   ├── monaco.rs                    # Hard-coded Sepang-inspired track tile assembly → MonacoPlugin (no finish line sprite)
+│   │   ├── track.rs                     # Track component: grid, centreline (no fixed spawn pose)
 │   │   ├── grid.rs                      # TrackGrid: driveable-area occupancy queries, tile rendering
 │   │   ├── centerline.rs               # TrackCenterline: closed-loop polyline, arc-length projection, tangent queries
 │   │   └── parts/
 │   │       └── mod.rs                   # Tile semantics for track construction (straights, curves, spawn)
 │   ├── game/
 │   │   ├── mod.rs
-│   │   ├── plugin.rs                    # GamePlugin: SimSet chain config, camera + multi-car spawn (car 0 at canonical start, ghost cars at random centreline positions)
-│   │   ├── car.rs                       # Car component (velocity, dynamics params), spawn_car(); EnvInstanceId, SpawnConfig, SpawnRng, CarColour components
-│   │   ├── physics.rs                   # car_physics_system + pure step_car_dynamics() helper
+│   │   ├── plugin.rs                    # GamePlugin: SimSet chain config, camera + multi-car spawn (all cars at random centreline positions)
+│   │   ├── car.rs                       # Car component (velocity, dynamics params), spawn_car(); EnvInstanceId, SpawnRng, CarColour components
+│   │   ├── physics.rs                   # car_physics_system + pure step_car_dynamics() helper (rotation_speed=8.0, throttle [0,1])
 │   │   ├── collision.rs                 # Corner-based off-road detection → Collided marker component (all cars)
-│   │   ├── progress.rs                  # TrackProgress component, centreline projection each tick
-│   │   └── episode.rs                   # EpisodeState (Component), rewards, terminal conditions, resets, EpisodeMovingAverages (Component)
+│   │   ├── progress.rs                  # TrackProgress component, cumulative forward arc-length from spawn with wrap handling
+│   │   └── episode.rs                   # EpisodeState (Component), velocity-projection + centreline rewards, crash/timeout terminal, resets, EpisodeMovingAverages (Component)
 │   ├── agent/
 │   │   ├── mod.rs
 │   │   ├── plugin.rs                    # AgentPlugin: action + observation scheduling in SimSet
 │   │   ├── action.rs                    # CarAction, ActionState (Component, desired/applied), smoothing, keyboard input
-│   │   └── observation.rs               # SensorReadings, ObservationVector (dim 23), ray + centreline features
+│   │   └── observation.rs               # SensorReadings (v_forward, v_lateral, speed_delta, previous_steering, previous_throttle), ObservationVector (dim 27), ray + centreline features
 │   ├── brain/
 │   │   ├── mod.rs
 │   │   ├── plugin.rs                    # BrainPlugin: AgentMode toggle (F4), A2C buffer reset on switch
 │   │   ├── types.rs                     # AgentMode enum, Brain trait
 │   │   ├── a2c/
-│   │   │   ├── mod.rs                   # A2cBrain, A2cPlugin, PpoUpdateState, act/collect/epoch/flush systems
+│   │   │   ├── mod.rs                   # A2cBrain, A2cPlugin, PpoUpdateState, PolicyOutput component, act/collect/epoch/flush systems
 │   │   │   ├── model.rs                 # ActorCritic: 2×64 MLP with separate actor + critic stacks
 │   │   │   ├── buffer.rs               # TrainerRolloutBuffer: env_id-tagged transitions + old_log_probs, per-env GAE
 │   │   │   └── update.rs               # PreparedUpdate, ppo_process_chunk/ppo_finish_epoch, PPO clipped surrogate
@@ -68,11 +74,11 @@ NeuroDrive/
 │   ├── analytics/
 │   │   ├── mod.rs
 │   │   ├── plugin.rs                    # AnalyticsPlugin: tracker + config init, capture scheduling, two-tier on-exit export
-│   │   ├── models.rs                    # EpisodeTracker, EpisodeRecord (env_id-tagged), TickTraceRecord, A2cUpdateRecord, AnalyticsConfig, RunMetadata, CompactRunExport
+│   │   ├── models.rs                    # EpisodeTracker, EpisodeRecord (env_id-tagged, 25 episode-level aggregates), TickTraceRecord (16 tick-level fields), CrashKind (Slide/HeadOn/Overshoot/Spin/Stall), A2cUpdateRecord, AnalyticsConfig, RunMetadata, CompactRunExport
 │   │   ├── trackers/
 │   │   │   ├── mod.rs
 │   │   │   ├── action.rs               # PerCarActionAccumulators: per-car steering/throttle accumulation and snapshot (all cars)
-│   │   │   ├── trace.rs                # PerCarTraceAccumulators: per-car per-tick trajectory capture and episode snapshot (all cars)
+│   │   │   ├── trace.rs                # PerCarTraceAccumulators: per-car per-tick trajectory capture (position, velocity decomposition, drift angle, min ray, velocity projection, centreline reward, policy confidence) and episode snapshot (all cars)
 │   │   │   └── episode.rs              # Folds all cars' completed episodes + traces + PPO snapshots into EpisodeTracker
 │   │   ├── metrics/
 │   │   │   ├── mod.rs
@@ -92,7 +98,7 @@ NeuroDrive/
 │   │   ├── exporters/
 │   │   │   ├── mod.rs
 │   │   │   ├── json.rs                 # Two-tier JSON export: compact (always) + full trace (opt-in)
-│   │   │   └── markdown.rs             # Diagnostic-oriented Markdown report with 7 sections, sparklines, heatmaps
+│   │   │   └── markdown.rs             # Diagnostic-oriented Markdown report with 10 sections, sparklines, heatmaps, crash classification, auto-generated takeaways
 │   │   └── sessions/                    # Empty placeholder for future session management
 │   └── debug/
 │       ├── mod.rs
@@ -112,11 +118,11 @@ NeuroDrive/
 | Subsystem | Owns | Main neighbours | Key source root |
 |-----------|------|-----------------|-----------------|
 | **sim** | Named fixed-tick ordering sets shared across all runtime plugins | all fixed-update subsystems | `src/sim/sets.rs` |
-| **maps** | Track topology, tile semantics, centreline derivation, spawn pose, visual track geometry | game, agent, debug | `src/maps/` |
-| **game** | Car entity lifecycle, physics, collision truth, progress measurement, reward shaping, episode boundaries | maps, agent, analytics, debug, brain | `src/game/` |
-| **agent** | Stable action boundary (CarAction ↔ ActionState) and policy observation contract (ObservationVector) | game, maps, brain, debug | `src/agent/` |
-| **brain** | Controller mode switching (F4), the PPO baseline implementation (clipped surrogate, amortised epochs), trainer live ranking, and car visual roles | agent, game, analytics | `src/brain/` |
-| **analytics** | Multi-car episode/update capture (env_id-tagged), 13 derived metric modules, two-tier JSON export (compact + opt-in full trace), diagnostic Markdown report with ASCII visuals | game, agent, brain | `src/analytics/` |
+| **maps** | Track topology, tile semantics, centreline derivation, visual track geometry (no finish line, no fixed spawn pose) | game, agent, debug | `src/maps/` |
+| **game** | Car entity lifecycle (random spawn, braking physics), collision truth, cumulative progress measurement, velocity-projection + centreline reward shaping, crash/timeout episode boundaries | maps, agent, analytics, debug, brain | `src/game/` |
+| **agent** | Stable action boundary (CarAction ↔ ActionState, throttle [0,1]) and policy observation contract (ObservationVector, 43 dims) | game, maps, brain, debug | `src/agent/` |
+| **brain** | Controller mode switching (F4), the PPO baseline implementation (clipped surrogate, amortised epochs), PolicyOutput per-car component, trainer live ranking, and car visual roles | agent, game, analytics | `src/brain/` |
+| **analytics** | Multi-car episode/update capture (env_id-tagged), 13 derived metric modules, crash classification (Slide/HeadOn/Overshoot/Spin/Stall), two-tier JSON export (compact + opt-in full trace), 10-section diagnostic Markdown report with ASCII visuals and auto-generated takeaways | game, agent, brain | `src/analytics/` |
 | **debug** | Live world-space overlays, runtime HUD panel, live leaderboard panel, and recent-run assessment | game, agent, brain, maps | `src/debug/` |
 
 ## Dependency Direction
@@ -180,7 +186,7 @@ DefaultPlugins → MonacoPlugin → AgentPlugin → BrainPlugin → AnalyticsPlu
 ```text
 SimSet::Input
 ├── keyboard_action_input_system          (agent — mode-gated, writes ActionState.desired)
-├── a2c_act_all_cars_system               (brain — mode-gated, writes ActionState.desired for all cars, appends to rollout buffer with env_id + old log-prob)
+├── a2c_act_all_cars_system               (brain — mode-gated, writes ActionState.desired for all cars, writes PolicyOutput component, appends to rollout buffer with env_id + old log-prob)
 └── action_smoothing_system               (agent — copies or smooths desired → applied)
 
 SimSet::Physics
@@ -192,7 +198,7 @@ SimSet::Collision
 
 SimSet::Measurement
 ├── update_track_progress_system          (game — centreline projection for progress)
-├── episode_loop_system                   (game — reward, terminal check, reset, moving averages — iterates all cars)
+├── episode_loop_system                   (game — velocity-projection + centreline reward, crash/timeout terminal check, random-spawn reset, moving averages — iterates all cars)
 ├── update_sensor_readings_system         (agent — raycasts, kinematics, lookahead — after episode for post-reset state)
 ├── build_observation_vector_system       (agent — normalises sensors into ObservationVector)
 ├── capture_episode_tick_trace_system     (analytics — per-tick trace record)
@@ -228,7 +234,7 @@ SimSet::Measurement
 
 ### Key Data Flow Contracts
 
-- The environment contract is **fixed-tick and order-sensitive**. PPO action selection must happen before smoothing, reward collection must happen after episode truth is computed, and analytics trace capture sits between observation rebuild and PPO reward collection.
+- The environment contract is **fixed-tick and order-sensitive**. PPO action selection (which also writes `PolicyOutput`) must happen before smoothing, reward collection must happen after episode truth is computed, and analytics trace capture (which reads `PolicyOutput` for policy confidence metrics) sits between observation rebuild and PPO reward collection.
 - The PPO update is **amortised across ticks** via `PreparedUpdate` and `ppo_epoch_system`. GAE is computed once at prepare time; samples are processed in 128-sample chunks across subsequent ticks. New transitions collect into a fresh buffer during the update.
 - The `agent` boundary is stable: observations go from environment to controller, and actions go from controller to physics through `ActionState`.
 - The analytics path is **append-only** during runtime and flushes only on app exit.
@@ -238,18 +244,23 @@ SimSet::Measurement
 - The codebase is **not** environment-only. PPO, analytics, and the debug HUD are live and substantial subsystems. Documentation treating them as roadmap-only is obsolete.
 - **Singleton-car assumptions have been removed** from `game`, `agent`, and `brain`. `ActionState`, `EpisodeState`, and `EpisodeMovingAverages` are now per-car **Components** (not Resources). `CollisionEvent` has been replaced by a `Collided` marker component. All fixed-tick systems iterate over multiple cars.
 - The runtime is a **multi-car vectorised trainer**:
-  - `TrainerConfig` controls car count (default 3). Car 0 always spawns at the canonical track start. Cars 1–N spawn at random positions along the centreline (re-randomised on each episode reset), each assigned a unique colour from a 25-colour palette.
-  - Per-car components: `EnvInstanceId`, `SpawnConfig`, `CarColour`, `ActionState`, `EpisodeState`, `EpisodeMovingAverages`.
+  - `TrainerConfig` controls car count (default 3). All cars spawn at **random centreline positions** (re-randomised on each episode reset), each assigned a unique colour from a 25-colour palette. There is no privileged car 0 or fixed spawn position.
+  - Per-car components: `EnvInstanceId`, `CarColour`, `ActionState`, `EpisodeState`, `EpisodeMovingAverages`, `PolicyOutput`.
   - One shared `TrainerRolloutBuffer` collects transitions from all cars with `env_id` tagging and old log-probs for PPO ratio computation; GAE is computed per-env (no cross-env value leakage).
   - A `TrainerLiveRanking` resource tracks best/worst car with hysteresis; `ranking.rs` assigns visual highlight roles.
   - A live leaderboard panel (top-right, F3-toggled) shows per-car performance with colour swatches.
-- The brain uses **PPO** (upgraded from A2C): clipped surrogate objective (ε=0.2), 4 epochs per update. The network uses **tanh activations** (switched from ReLU to eliminate dead-neuron capacity loss), **orthogonal weight initialisation** (√2 hidden, 0.01× policy head, 1.0× value head), and **per-minibatch advantage normalisation** with sample shuffling. Updates are **amortised across ticks** via `PreparedUpdate` and `ppo_epoch_system` — GAE is computed once, then 128 samples are processed per tick to avoid frame stutter. Blocking flush on exit handles residual data.
-- **Analytics requires a rework** to support random spawn positions — current progress metrics assume all cars start at 0% and report absolute track position rather than distance driven from spawn. A planned finish-line removal and distance-from-spawn paradigm shift will require coordinated changes across the episode system, analytics models, and markdown export.
+- **Episode semantics**: there is no finish line or lap concept. Progress is **cumulative forward arc-length from spawn** with wrap handling. Episodes end on **crash or 30-second timeout** only. `EpisodeEndReason` has `Crash` and `Timeout` variants (no `LapComplete`).
+- **Physics**: `rotation_speed` is 8.0 rad/s. The throttle axis is `[0, 1]` — 0 coasts (drag decelerates naturally), 1 is full thrust. Braking was tried and reverted because the policy converged to "mostly brake" as a safe local optimum.
+- **Reward**: per-tick velocity projection reward — `dot(velocity, tangent) / speed_reference × velocity_reward_scale` — plus a centreline proximity reward (`centreline_reward_coef`, `centreline_reward_max_distance`). Crash penalty is 0.0. `EpisodeConfig` carries `velocity_reward_scale`, `centreline_reward_coef`, `centreline_reward_max_distance` (not `progress_reward_scale`).
+- **Observations** (43 dimensions): rays (11), v_forward + v_lateral, speed_delta, centreline offset/heading/curvature, 12-point lookahead (heading deltas + curvatures, 30–650 units, dense near / sparse far), previous_steering, previous_throttle.
+- The brain uses **PPO** (upgraded from A2C): clipped surrogate objective (ε=0.2), 4 epochs per update. The network uses **tanh activations** (switched from ReLU to eliminate dead-neuron capacity loss), **orthogonal weight initialisation** (√2 hidden, 0.01× policy head, 1.0× value head), and **per-minibatch advantage normalisation** with sample shuffling. Steering uses full `[-1, 1]` tanh output; throttle uses `0.5×(tanh+1)` remapping to `[0, 1]`. Updates are **amortised across ticks** via `PreparedUpdate` and `ppo_epoch_system` — GAE is computed once, then 128 samples are processed per tick to avoid frame stutter. Blocking flush on exit handles residual data.
+- **PolicyOutput** component: written by `a2c_act_all_cars_system` each tick, exposes `value_prediction`, `steering_mean`/`steering_std`, `throttle_mean`/`throttle_std`. Read by the analytics trace capture system for policy confidence metrics.
+- **Analytics** has been comprehensively expanded: 16 tick-level trace fields (position, velocity decomposition, drift angle, min ray, velocity projection, centreline reward, policy confidence), 25 episode-level aggregates, a **crash classification system** (`CrashKind`: Slide, HeadOn, Overshoot, Spin, Stall), and a 10-section Markdown report with auto-generated takeaways.
 - The brain layer now owns **ranking logic** (`src/brain/ranking.rs`) in addition to PPO. A seeded `StdRng` lives in `A2cBrain` for deterministic policy sampling.
 - The **debug HUD** has been redesigned: compact 440px panel with blue accent palette, 72% opacity, condensed text lines (no wrapping), PPO-specific metrics (clip %, KL divergence), six-column quarter table, no legend. Leaderboard panel matches the updated colour scheme.
 - The project is in a **transitional architecture state**:
   - The repository intent targets brain-inspired local plasticity (Milestones 2–9).
   - The implemented learning path is a handwritten PPO baseline used to validate the environment and observation contract (Milestone 1). Cars are confirmed to learn — drifting corners observed.
 - **`src/brain/biological/`** and **`src/analytics/sessions/`** are empty placeholder directories. They should not be treated as implemented subsystems.
-- `README.md` is directionally accurate but its Milestone 1 checklist understates implementation reality — PPO, debug HUD, and analytics export are all live.
-- The highest current documentation pressure is around the **reward and episode paradigm shift**: removing the finish-line concept, switching to distance-from-spawn progress, and reworking analytics to report honestly with random spawn positions.
+- `README.md` is directionally accurate but its Milestone 1 checklist understates implementation reality — PPO, debug HUD, analytics export, braking, velocity-projection reward, expanded observations, and crash classification are all live.
+- The finish-line removal, random-spawn paradigm, velocity-projection reward, expanded observations, braking, and analytics overhaul have all been **implemented**. The system is now in a coherent post-paradigm-shift state.
