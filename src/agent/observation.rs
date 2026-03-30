@@ -7,6 +7,7 @@ use crate::game::car::Car;
 use crate::game::progress::TrackProgress;
 use crate::maps::grid::TrackGrid;
 use crate::maps::track::Track;
+use crate::sim::{signed_angle_between, wrap_angle};
 
 /// Number of ray sensors in the observation model.
 pub const NUM_RAYS: usize = 11;
@@ -331,16 +332,6 @@ fn refine_boundary_distance(
     inside
 }
 
-fn wrap_angle(mut angle: f32) -> f32 {
-    while angle > PI {
-        angle -= 2.0 * PI;
-    }
-    while angle < -PI {
-        angle += 2.0 * PI;
-    }
-    angle
-}
-
 fn signed_lateral_offset(position: Vec2, closest_point: Vec2, tangent: Vec2) -> f32 {
     let tangent_n = tangent.normalize_or_zero();
     if tangent_n == Vec2::ZERO {
@@ -349,15 +340,6 @@ fn signed_lateral_offset(position: Vec2, closest_point: Vec2, tangent: Vec2) -> 
 
     let left_normal = Vec2::new(-tangent_n.y, tangent_n.x);
     (position - closest_point).dot(left_normal)
-}
-
-fn signed_angle_between(from: Vec2, to: Vec2) -> f32 {
-    let from_n = from.normalize_or_zero();
-    let to_n = to.normalize_or_zero();
-    if from_n == Vec2::ZERO || to_n == Vec2::ZERO {
-        return 0.0;
-    }
-    wrap_angle(to_n.to_angle() - from_n.to_angle())
 }
 
 #[cfg(test)]

@@ -165,18 +165,18 @@ pub struct EpisodeTraceMetrics {
     pub failure_mode: Option<String>,
 }
 
-/// Exported analytics snapshot for one layer after a completed A2C update.
+/// Exported analytics snapshot for one layer after a completed PPO update.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct A2cLayerRecord {
+pub struct PpoLayerRecord {
     pub layer_name: String,
     pub weight_l2_norm: f32,
     pub gradient_l2_norm: f32,
     pub saturated_fraction: Option<f32>,
 }
 
-/// Exported analytics snapshot for one completed A2C update.
+/// Exported analytics snapshot for one completed PPO update.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct A2cUpdateRecord {
+pub struct PpoUpdateRecord {
     pub update_index: u64,
     pub batch_size: usize,
     pub policy_loss: f32,
@@ -190,14 +190,14 @@ pub struct A2cUpdateRecord {
     pub clamped_action_fraction: f32,
     pub clip_fraction: f32,
     pub approx_kl: f32,
-    pub layer_health: Vec<A2cLayerRecord>,
+    pub layer_health: Vec<PpoLayerRecord>,
 }
 
 /// Exported run-level analytics data.
 #[derive(Resource, Default, Debug, Serialize, Deserialize)]
 pub struct EpisodeTracker {
     pub episodes: Vec<EpisodeRecord>,
-    pub a2c_updates: Vec<A2cUpdateRecord>,
+    pub ppo_updates: Vec<PpoUpdateRecord>,
     pub episode_traces: Vec<EpisodeTrace>,
     #[serde(skip)]
     pub last_recorded_update: u64,
@@ -240,5 +240,5 @@ pub struct RunMetadata {
 pub struct CompactRunExport {
     pub metadata: RunMetadata,
     pub episodes: Vec<EpisodeRecord>,
-    pub ppo_updates: Vec<A2cUpdateRecord>,
+    pub ppo_updates: Vec<PpoUpdateRecord>,
 }

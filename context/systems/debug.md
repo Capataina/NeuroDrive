@@ -8,26 +8,31 @@
 
 ## Boundaries / Ownership
 
-| Owner | Owns | Does not own |
-|-------|------|-------------|
-| `src/debug/overlays.rs` | World-space gizmo overlays, `DebugOverlayState`, F1/F2/F3 toggle systems | Environment geometry production |
-| `src/debug/hud.rs` | `DrivingHudStats`, `DrivingHudHistory`, quarter summaries, assessment logic, Bevy UI panel | Reward computation, episode truth |
-| `src/debug/leaderboard.rs` | Live leaderboard panel with colour-coded per-car ranking, `LeaderboardRoot` | Ranking computation (owned by `brain/ranking.rs`) |
-| `src/debug/plugin.rs` | Debug resource setup and scheduling | SimSet definitions |
+
+| Owner                      | Owns                                                                                       | Does not own                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------- |
+| `src/debug/overlays.rs`    | World-space gizmo overlays, `DebugOverlayState`, F1/F2/F3 toggle systems                   | Environment geometry production                   |
+| `src/debug/hud.rs`         | `DrivingHudStats`, `DrivingHudHistory`, quarter summaries, assessment logic, Bevy UI panel | Reward computation, episode truth                 |
+| `src/debug/leaderboard.rs` | Live leaderboard panel with colour-coded per-car ranking, `LeaderboardRoot`                | Ranking computation (owned by `brain/ranking.rs`) |
+| `src/debug/plugin.rs`      | Debug resource setup and scheduling                                                        | SimSet definitions                                |
+
 
 ## Current Implemented Reality
 
 ### Toggle Controls
 
-| Key | Controls | Default |
-|-----|----------|---------|
-| **F1** | Geometry overlay (centreline, tangent, forward, velocity, lookahead) | On |
-| **F2** | Sensor overlay (ray segments and hit points) | Off |
-| **F3** | Telemetry HUD panel | On |
+
+| Key    | Controls                                                             | Default |
+| ------ | -------------------------------------------------------------------- | ------- |
+| **F1** | Geometry overlay (centreline, tangent, forward, velocity, lookahead) | Off     |
+| **F2** | Sensor overlay (ray segments and hit points)                         | Off     |
+| **F3** | Telemetry HUD panel                                                  | Off     |
+
 
 ### Geometry Overlay (F1)
 
 Draws via Bevy gizmos in world space:
+
 - Centreline polyline
 - Current closest-point projection marker
 - Tangent arrow at projection point
@@ -84,19 +89,21 @@ A live leaderboard panel in the top-right corner, toggled with F3 alongside the 
 
 ## Key Interfaces / Data Flow
 
-| Interface | Source | Debug use |
-|-----------|--------|----------|
-| `Track` and `TrackProgress` | maps/game | Geometry overlay and progress display |
-| `SensorReadings` | agent | Sensor overlay and current HUD values |
+
+| Interface                                  | Source                    | Debug use                                                  |
+| ------------------------------------------ | ------------------------- | ---------------------------------------------------------- |
+| `Track` and `TrackProgress`                | maps/game                 | Geometry overlay and progress display                      |
+| `SensorReadings`                           | agent                     | Sensor overlay and current HUD values                      |
 | `EpisodeState` and `EpisodeMovingAverages` | game (per-car Components) | Run status, current reward, quarter summaries, leaderboard |
-| `Collided` marker | game | Death counting in HUD stats |
-| `A2cTrainingStats` | brain | Live learning-health line in HUD |
-| `TrainerLiveRanking` | brain/ranking | Leaderboard ordering and best-car identification |
-| `CarColour` | game/car | Leaderboard swatch colours |
+| `Collided` marker                          | game                      | Death counting in HUD stats                                |
+| `PpoTrainingStats`                         | brain                     | Live learning-health line in HUD                           |
+| `TrainerLiveRanking`                       | brain/ranking             | Leaderboard ordering and best-car identification           |
+| `CarColour`                                | game/car                  | Leaderboard swatch colours                                 |
+
 
 ## Implemented Outputs / Artifacts
 
-- **Runtime resources:** `DebugOverlayState`, `DrivingHudStats`, `DrivingHudHistory`, `DrivingHudEpisodeAccumulator`
+- **Runtime resources:** `DebugOverlayState`, `DrivingHudStats`, `DrivingHudHistory`
 - **Runtime UI entities:** `DrivingHudRoot`, fixed-column quarter summary grid, `LeaderboardRoot` with per-car rows
 - **World-space overlays:** via Bevy gizmos
 - **Tests:** HUD assessment unit test covering the "recent quarter is cleaner" improvement heuristic
@@ -126,3 +133,4 @@ A live leaderboard panel in the top-right corner, toggled with F3 alongside the 
 ## Obsolete / No Longer Relevant
 
 - Any note describing F3 as future-facing is obsolete — it already controls a substantial diagnostics panel.
+

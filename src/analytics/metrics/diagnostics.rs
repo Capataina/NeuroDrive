@@ -34,7 +34,7 @@ pub fn compute_diagnostic_flags(tracker: &EpisodeTracker) -> Vec<DiagnosticFlag>
 
 /// Entropy below 0.1 on the most recent update suggests exploration collapse.
 fn check_entropy_collapse(tracker: &EpisodeTracker, flags: &mut Vec<DiagnosticFlag>) {
-    if let Some(latest) = tracker.a2c_updates.last() {
+    if let Some(latest) = tracker.ppo_updates.last() {
         if latest.policy_entropy < 0.1 {
             flags.push(DiagnosticFlag {
                 message: "Entropy below 0.1 — exploration may have collapsed".into(),
@@ -46,7 +46,7 @@ fn check_entropy_collapse(tracker: &EpisodeTracker, flags: &mut Vec<DiagnosticFl
 
 /// Three or more consecutive recent updates with clip_fraction > 0.40.
 fn check_clip_fraction_high(tracker: &EpisodeTracker, flags: &mut Vec<DiagnosticFlag>) {
-    let consecutive = count_consecutive_from_end(&tracker.a2c_updates, |u| u.clip_fraction > 0.40);
+    let consecutive = count_consecutive_from_end(&tracker.ppo_updates, |u| u.clip_fraction > 0.40);
     if consecutive >= 3 {
         flags.push(DiagnosticFlag {
             message: format!(
@@ -61,7 +61,7 @@ fn check_clip_fraction_high(tracker: &EpisodeTracker, flags: &mut Vec<Diagnostic
 /// Any update with approx_kl > 0.03.
 fn check_kl_spike(tracker: &EpisodeTracker, flags: &mut Vec<DiagnosticFlag>) {
     let max_kl = tracker
-        .a2c_updates
+        .ppo_updates
         .iter()
         .map(|u| u.approx_kl)
         .fold(f32::NEG_INFINITY, f32::max);
@@ -93,7 +93,7 @@ fn check_progress_plateau(tracker: &EpisodeTracker, flags: &mut Vec<DiagnosticFl
 
 /// Action distribution collapse when steering or throttle std is near zero.
 fn check_action_collapse(tracker: &EpisodeTracker, flags: &mut Vec<DiagnosticFlag>) {
-    if let Some(latest) = tracker.a2c_updates.last() {
+    if let Some(latest) = tracker.ppo_updates.last() {
         if latest.steering_std < 0.05 || latest.throttle_std < 0.05 {
             flags.push(DiagnosticFlag {
                 message: format!(
@@ -137,7 +137,7 @@ fn check_crash_rate_spike(tracker: &EpisodeTracker, flags: &mut Vec<DiagnosticFl
 /// Explained variance negative for 3+ consecutive recent updates.
 fn check_value_function_drift(tracker: &EpisodeTracker, flags: &mut Vec<DiagnosticFlag>) {
     let consecutive =
-        count_consecutive_from_end(&tracker.a2c_updates, |u| u.explained_variance < 0.0);
+        count_consecutive_from_end(&tracker.ppo_updates, |u| u.explained_variance < 0.0);
     if consecutive >= 3 {
         flags.push(DiagnosticFlag {
             message: format!(
@@ -158,12 +158,12 @@ fn count_consecutive_from_end<T>(slice: &[T], predicate: impl Fn(&T) -> bool) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analytics::models::{A2cUpdateRecord, EpisodeTracker};
+    use crate::analytics::models::{PpoUpdateRecord, EpisodeTracker};
 
-    /// Helper: builds a minimal A2C update with sensible defaults that should
+    /// Helper: builds a minimal PPO update with sensible defaults that should
     /// not trigger any diagnostic flags on its own.
-    fn healthy_update() -> A2cUpdateRecord {
-        A2cUpdateRecord {
+    fn healthy_update() -> PpoUpdateRecord {
+        PpoUpdateRecord {
             update_index: 0,
             batch_size: 64,
             policy_loss: -0.01,
@@ -188,7 +188,7 @@ mod tests {
 
         let tracker = EpisodeTracker {
             episodes: Vec::new(),
-            a2c_updates: vec![update],
+            ppo_updates: vec![update],
             episode_traces: Vec::new(),
             last_recorded_update: 0,
         };
@@ -205,7 +205,7 @@ mod tests {
     fn healthy_tracker_produces_no_warnings() {
         let tracker = EpisodeTracker {
             episodes: Vec::new(),
-            a2c_updates: vec![healthy_update()],
+            ppo_updates: vec![healthy_update()],
             episode_traces: Vec::new(),
             last_recorded_update: 0,
         };

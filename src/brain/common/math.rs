@@ -1,18 +1,5 @@
 use rand::Rng;
-use rand::RngExt;
 use rand_distr::{Distribution, Normal};
-
-/// Initializes a weight matrix with Glorot (Xavier) uniform distribution.
-pub fn glorot_uniform(rows: usize, cols: usize, rng: &mut impl Rng) -> Vec<Vec<f32>> {
-    let limit = (6.0 / (rows as f32 + cols as f32)).sqrt();
-    let mut weights = vec![vec![0.0; cols]; rows];
-    for r in 0..rows {
-        for c in 0..cols {
-            weights[r][c] = rng.random_range(-limit..limit);
-        }
-    }
-    weights
-}
 
 /// Initializes a vector with zeros.
 pub fn zeros(size: usize) -> Vec<f32> {

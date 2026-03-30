@@ -1,12 +1,12 @@
 use bevy::prelude::*;
 
 use crate::analytics::models::{
-    A2cLayerRecord, A2cUpdateRecord, EpisodeRecord, EpisodeTrace, EpisodeTracker,
+    PpoLayerRecord, PpoUpdateRecord, EpisodeRecord, EpisodeTrace, EpisodeTracker,
     TickTraceRecord,
 };
 use crate::analytics::trackers::action::PerCarActionAccumulators;
 use crate::analytics::trackers::trace::PerCarTraceAccumulators;
-use crate::brain::a2c::A2cTrainingStats;
+use crate::brain::ppo::PpoTrainingStats;
 use crate::game::car::{Car, EnvInstanceId};
 use crate::game::episode::EpisodeState;
 
@@ -177,10 +177,10 @@ struct TraceAggregates {
 }
 
 /// Folds completed episodes from all cars into EpisodeTracker, tagged with env_id.
-/// Also records A2C/PPO update snapshots from the shared training stats resource.
+/// Also records PPO update snapshots from the shared training stats resource.
 pub fn episode_tracker_system(
     car_query: Query<(&EnvInstanceId, &EpisodeState), With<Car>>,
-    a2c_stats: Option<Res<A2cTrainingStats>>,
+    ppo_stats: Option<Res<PpoTrainingStats>>,
     mut action_accumulators: ResMut<PerCarActionAccumulators>,
     mut trace_accumulators: ResMut<PerCarTraceAccumulators>,
     mut tracker: ResMut<EpisodeTracker>,
@@ -317,28 +317,28 @@ pub fn episode_tracker_system(
         });
     }
 
-    // A2C/PPO update recording — reads from a global resource, not per-car.
-    if let Some(a2c_stats) = a2c_stats {
-        if a2c_stats.last_completed_update > tracker.last_recorded_update {
-            tracker.last_recorded_update = a2c_stats.last_completed_update;
-            tracker.a2c_updates.push(A2cUpdateRecord {
-                update_index: a2c_stats.last_completed_update,
-                batch_size: a2c_stats.batch_size,
-                policy_loss: a2c_stats.policy_loss,
-                value_loss: a2c_stats.value_loss,
-                policy_entropy: a2c_stats.policy_entropy,
-                explained_variance: a2c_stats.explained_variance,
-                steering_mean: a2c_stats.steering_mean,
-                steering_std: a2c_stats.steering_std,
-                throttle_mean: a2c_stats.throttle_mean,
-                throttle_std: a2c_stats.throttle_std,
-                clamped_action_fraction: a2c_stats.clamped_action_fraction,
-                clip_fraction: a2c_stats.clip_fraction,
-                approx_kl: a2c_stats.approx_kl,
-                layer_health: a2c_stats
+    // PPO update recording — reads from a global resource, not per-car.
+    if let Some(ppo_stats) = ppo_stats {
+        if ppo_stats.last_completed_update > tracker.last_recorded_update {
+            tracker.last_recorded_update = ppo_stats.last_completed_update;
+            tracker.ppo_updates.push(PpoUpdateRecord {
+                update_index: ppo_stats.last_completed_update,
+                batch_size: ppo_stats.batch_size,
+                policy_loss: ppo_stats.policy_loss,
+                value_loss: ppo_stats.value_loss,
+                policy_entropy: ppo_stats.policy_entropy,
+                explained_variance: ppo_stats.explained_variance,
+                steering_mean: ppo_stats.steering_mean,
+                steering_std: ppo_stats.steering_std,
+                throttle_mean: ppo_stats.throttle_mean,
+                throttle_std: ppo_stats.throttle_std,
+                clamped_action_fraction: ppo_stats.clamped_action_fraction,
+                clip_fraction: ppo_stats.clip_fraction,
+                approx_kl: ppo_stats.approx_kl,
+                layer_health: ppo_stats
                     .layer_health
                     .iter()
-                    .map(|layer| A2cLayerRecord {
+                    .map(|layer| PpoLayerRecord {
                         layer_name: layer.layer_name.clone(),
                         weight_l2_norm: layer.weight_l2_norm,
                         gradient_l2_norm: layer.gradient_l2_norm,

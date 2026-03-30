@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::f32::consts::PI;
 
 use bevy::prelude::*;
 use rand::RngExt;
@@ -8,6 +7,7 @@ use crate::game::car::{Car, EnvInstanceId, SpawnConfig, SpawnRng};
 use crate::game::collision::Collided;
 use crate::game::progress::TrackProgress;
 use crate::maps::track::Track;
+use crate::sim::signed_angle_between;
 
 /// Why an episode ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -390,21 +390,3 @@ fn mean(values: &VecDeque<f32>) -> f32 {
     values.iter().sum::<f32>() / values.len() as f32
 }
 
-fn wrap_angle(mut angle: f32) -> f32 {
-    while angle > PI {
-        angle -= 2.0 * PI;
-    }
-    while angle < -PI {
-        angle += 2.0 * PI;
-    }
-    angle
-}
-
-fn signed_angle_between(from: Vec2, to: Vec2) -> f32 {
-    let from_n = from.normalize_or_zero();
-    let to_n = to.normalize_or_zero();
-    if from_n == Vec2::ZERO || to_n == Vec2::ZERO {
-        return 0.0;
-    }
-    wrap_angle(to_n.to_angle() - from_n.to_angle())
-}

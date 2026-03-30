@@ -1,9 +1,6 @@
 pub mod chunking;
 pub mod consistency;
-pub mod critic;
 pub mod diagnostics;
-pub mod inputs;
-pub mod insights;
 pub mod phases;
 pub mod sectors;
 pub mod sparkline;

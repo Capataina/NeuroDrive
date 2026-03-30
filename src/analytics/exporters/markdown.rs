@@ -15,13 +15,12 @@ use crate::analytics::metrics::timeseries::{
     extract_episode_series, extract_update_series, rolling_mean,
 };
 use crate::analytics::metrics::trajectory::select_trajectory_snapshots;
-use crate::analytics::metrics::turns::summarize_failure_modes;
 use crate::analytics::models::{EpisodeRecord, EpisodeTracker, NUM_PROGRESS_SECTORS};
 
 const SPARKLINE_WIDTH: usize = 40;
 const BAR_WIDTH: usize = 20;
 
-pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str) {
+pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str, context_header: &str) {
     if tracker.episodes.is_empty() {
         return;
     }
@@ -42,7 +41,6 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str) {
     let sector_rows = compute_sector_diagnostics(&tracker.episode_traces);
     let consistency_profiles = compute_sector_consistency(tracker, 50);
     let consistency_score = overall_consistency_score(&consistency_profiles);
-    let _failure_modes = summarize_failure_modes(&tracker.episodes);
     let trajectory_rows = select_trajectory_snapshots(&tracker.episode_traces);
 
     let progress_pct: Vec<f32> = ep_series.progress.iter().map(|p| p * 100.0).collect();
@@ -74,6 +72,12 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str) {
     // 1. Run Summary
     // ════════════════════════════════════════════════════════════════════
     md.push_str("# NeuroDrive Analytics Report\n\n");
+
+    if !context_header.is_empty() {
+        md.push_str(context_header);
+        md.push('\n');
+    }
+
     md.push_str("## 1. Run Summary\n\n");
 
     let total_distance: f32 = tracker.episodes.iter().map(|e| e.distance_driven).sum();
@@ -89,7 +93,7 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str) {
     car_set.sort_unstable();
     car_set.dedup();
     md.push_str(&format!("| Cars | {} |\n", car_set.len()));
-    md.push_str(&format!("| PPO updates | {} |\n", tracker.a2c_updates.len()));
+    md.push_str(&format!("| PPO updates | {} |\n", tracker.ppo_updates.len()));
     md.push_str(&format!("| Learning phase | **{}** |\n", phase));
     md.push_str(&format!("| Total distance driven | {:.0} units |\n", total_distance));
     md.push_str(&format!("| Mean episode duration | {:.1}s |\n", mean_life));
@@ -277,7 +281,8 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str) {
             md.push_str("| Chunk | Crashes | Avg Crash Speed | Slide % | Overshoot % | Head-on % |\n");
             md.push_str("|------:|--------:|----------------:|--------:|------------:|----------:|\n");
             for c in &chunks {
-                let chunk_crashes = ((c.crash_rate * (c.end_episode - c.start_episode + 1) as f32) as u32).max(0);
+                let episode_span = c.end_episode.saturating_sub(c.start_episode) + 1;
+                let chunk_crashes = (c.crash_rate * episode_span as f32) as u32;
                 md.push_str(&format!(
                     "| {} | ~{} | {:.0} | {:.0}% | {:.0}% | {:.0}% |\n",
                     c.chunk_index + 1, chunk_crashes, c.avg_crash_speed,
@@ -458,7 +463,7 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str) {
         md.push_str(&format!("**Explained Var:** `{}`\n\n", sparkline(&upd_series.explained_variance, SPARKLINE_WIDTH)));
     }
 
-    if let Some(latest) = tracker.a2c_updates.last() {
+    if let Some(latest) = tracker.ppo_updates.last() {
         md.push_str("**Latest update:**\n\n");
         md.push_str("| Metric | Value |\n");
         md.push_str("|--------|-------|\n");
@@ -527,31 +532,6 @@ fn trend_word(smoothed: &[f32]) -> &'static str {
     let early = mean(&smoothed[..10.min(n)].to_vec());
     let delta = recent - early;
     if delta > 3.0 { "rising" } else if delta < -3.0 { "falling" } else { "flat" }
-}
-
-struct CarStats {
-    env_id: u32,
-    count: usize,
-    avg_progress: f32,
-    avg_reward: f32,
-    crash_rate: f32,
-}
-
-fn per_car_stats(episodes: &[EpisodeRecord]) -> Vec<CarStats> {
-    let mut map: HashMap<u32, (usize, f32, f32, usize)> = HashMap::new();
-    for ep in episodes {
-        let entry = map.entry(ep.env_id).or_insert((0, 0.0, 0.0, 0));
-        entry.0 += 1;
-        entry.1 += ep.progress;
-        entry.2 += ep.reward;
-        if ep.end_reason.contains("Crash") { entry.3 += 1; }
-    }
-    let mut stats: Vec<CarStats> = map.into_iter().map(|(env_id, (count, progress_sum, reward_sum, crashes))| {
-        let c = count as f32;
-        CarStats { env_id, count, avg_progress: progress_sum / c, avg_reward: reward_sum / c, crash_rate: crashes as f32 / c }
-    }).collect();
-    stats.sort_by_key(|s| s.env_id);
-    stats
 }
 
 fn crash_counts_by_sector(episodes: &[EpisodeRecord]) -> Vec<usize> {

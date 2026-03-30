@@ -153,17 +153,6 @@ impl TrackGrid {
         true
     }
 
-    /// Locates the `SpawnPoint` tile and returns `(world_centre, heading_radians)`.
-    ///
-    /// `SpawnPoint` shares `StraightH` connectivity so the car faces east
-    /// (0.0 radians; +X direction in Bevy world space).
-    ///
-    /// Returns `None` if no `SpawnPoint` tile exists.
-    pub fn find_spawn(&self) -> Option<(Vec2, f32)> {
-        let (row, col) = self.find_spawn_cell()?;
-        Some((self.cell_center(row, col), 0.0))
-    }
-
     /// Locates the `SpawnPoint` tile and returns its `(row, col)` coordinates.
     ///
     /// Returns `None` if no `SpawnPoint` tile exists.

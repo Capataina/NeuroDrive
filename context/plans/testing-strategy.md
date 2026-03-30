@@ -60,7 +60,7 @@ The reward logic is the most frequently changed code and the most consequential 
 
 ### 3. Unit Tests — PPO Update Math
 
-**Location:** `src/brain/a2c/update.rs`
+**Location:** `src/brain/ppo/update.rs`
 
 The PPO math is subtle and easy to break. These tests verify the core gradient computation.
 
@@ -80,7 +80,7 @@ The PPO math is subtle and easy to break. These tests verify the core gradient c
 
 ### 4. Unit Tests — GAE Computation
 
-**Location:** `src/brain/a2c/buffer.rs`
+**Location:** `src/brain/ppo/buffer.rs`
 
 Already has 2 tests. Extend with:
 

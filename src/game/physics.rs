@@ -90,8 +90,8 @@ mod tests {
         let steps = 1200;
         let seed = 0xDEADBEEFCAFEBABEu64;
         let params = CarDynamicsParams {
-            rotation_speed: 4.0,
-            thrust: 1500.0,
+            rotation_speed: 8.0,
+            thrust: 750.0,
             drag: 0.985,
         };
 

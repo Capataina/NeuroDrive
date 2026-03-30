@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
-use crate::brain::a2c::A2cBrain;
-use crate::brain::a2c::buffer::TrainerRolloutBuffer;
+use crate::brain::ppo::PpoBrain;
+use crate::brain::ppo::buffer::TrainerRolloutBuffer;
 use crate::brain::ranking::{
     TrainerLiveRanking, update_car_visual_roles_system, update_trainer_ranking_system,
 };
@@ -15,7 +15,7 @@ impl Plugin for BrainPlugin {
             .init_resource::<TrainerLiveRanking>();
 
         // Add specific brain plugins
-        app.add_plugins(crate::brain::a2c::A2cPlugin);
+        app.add_plugins(crate::brain::ppo::PpoPlugin);
 
         app.add_systems(
             Update,
@@ -31,7 +31,7 @@ impl Plugin for BrainPlugin {
 fn toggle_agent_mode_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut mode: ResMut<AgentMode>,
-    mut a2c_brain: Option<ResMut<A2cBrain>>,
+    mut ppo_brain: Option<ResMut<PpoBrain>>,
     mut buffer: Option<ResMut<TrainerRolloutBuffer>>,
 ) {
     if keyboard.just_pressed(KeyCode::F4) {
@@ -46,7 +46,7 @@ fn toggle_agent_mode_system(
             }
         };
 
-        if let Some(ref mut brain) = a2c_brain {
+        if let Some(ref mut brain) = ppo_brain {
             brain.step_counter = 0;
         }
         if let Some(ref mut buf) = buffer {

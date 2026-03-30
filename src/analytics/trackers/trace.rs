@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::f32::consts::PI;
 
 use bevy::prelude::*;
 
@@ -11,6 +10,7 @@ use crate::brain::types::{AgentMode, PolicyOutput};
 use crate::game::car::{Car, EnvInstanceId};
 use crate::game::episode::{EpisodeEndReason, EpisodeState};
 use crate::maps::track::Track;
+use crate::sim::signed_angle_between;
 
 /// Running per-tick trace for the active episode.
 #[derive(Debug)]
@@ -248,21 +248,3 @@ fn progress_to_sector(progress_fraction: f32) -> u32 {
     idx.min(crate::analytics::models::NUM_PROGRESS_SECTORS.saturating_sub(1)) as u32
 }
 
-fn signed_angle_between(from: Vec2, to: Vec2) -> f32 {
-    let from_n = from.normalize_or_zero();
-    let to_n = to.normalize_or_zero();
-    if from_n == Vec2::ZERO || to_n == Vec2::ZERO {
-        return 0.0;
-    }
-    wrap_angle(to_n.to_angle() - from_n.to_angle())
-}
-
-fn wrap_angle(mut angle: f32) -> f32 {
-    while angle > PI {
-        angle -= 2.0 * PI;
-    }
-    while angle < -PI {
-        angle += 2.0 * PI;
-    }
-    angle
-}

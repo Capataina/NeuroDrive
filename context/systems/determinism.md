@@ -28,8 +28,8 @@
 | Controller boundary | **Strong** | `CarAction`/`ActionState` insulates physics from controller implementation |
 | Centreline projection | **Strong** | Purely geometric, no RNG |
 | Observation production | **Strong** | Grid raycasts and math are deterministic given car state and track |
-| A2C action sampling | **Improved** | Uses a seeded `StdRng` stored in `A2cBrain` — deterministic given the same seed |
-| A2C model initialisation | **Weak** | Uses `rand::rng()` once at startup for init, then seeds a `StdRng` for runtime — init seed not yet user-controllable |
+| PPO action sampling | **Improved** | Uses a seeded `StdRng` stored in `PpoBrain` — deterministic given the same seed |
+| PPO model initialisation | **Weak** | Uses `rand::rng()` once at startup for init, then seeds a `StdRng` for runtime — init seed not yet user-controllable |
 | Analytics export filenames | **Weak** | Timestamp-based, naturally non-deterministic (acceptable) |
 | Full ECS replay | **Missing** | No end-to-end action/observation/reward replay harness |
 
@@ -39,11 +39,11 @@ Given the same compiled binary and identical fixed-tick action streams, the envi
 
 ### What Is Not Reproducible
 
-The A2C path has **improved** determinism but is not fully controlled:
+The PPO path has **improved** determinism but is not fully controlled:
 1. **Model initialisation** — weights still depend on thread-local RNG state at startup (not user-seeded).
-2. **Action sampling** — now uses a seeded `StdRng` stored in `A2cBrain`, derived from the init RNG. Given the same init state, all subsequent policy sampling is deterministic.
+2. **Action sampling** — now uses a seeded `StdRng` stored in `PpoBrain`, derived from the init RNG. Given the same init state, all subsequent policy sampling is deterministic.
 
-Two runs of the same binary will still produce different A2C behaviour because the init seed is not user-controllable, but within a run, the policy sampling is now reproducible from the seeded state.
+Two runs of the same binary will still produce different PPO behaviour because the init seed is not user-controllable, but within a run, the policy sampling is now reproducible from the seeded state.
 
 ## Key Interfaces / Data Flow
 
@@ -53,14 +53,14 @@ The ordering contract is the most critical determinism surface:
 Input (actions chosen)
   → Physics (state mutated)
     → Collision (off-road detected)
-      → Measurement (progress, rewards, observations, analytics, A2C reward)
+      → Measurement (progress, rewards, observations, analytics, PPO reward)
 ```
 
 Any violation of this ordering could produce:
 - rewards computed from pre-physics state,
 - observations reflecting pre-reset crash state,
 - analytics capturing stale data,
-- A2C collecting misaligned reward/observation pairs.
+- PPO collecting misaligned reward/observation pairs.
 
 ## Implemented Outputs / Artifacts
 
@@ -69,14 +69,14 @@ Any violation of this ordering could produce:
 
 ## Known Issues / Active Risks
 
-- Determinism largely stops at the environment core. The **A2C path is not meaningfully reproducible** because RNG is not centralised.
+- Determinism largely stops at the environment core. The **PPO path is not meaningfully reproducible** because RNG is not centralised.
 - There is **no ECS-level replay** or action log that would let the full runtime be re-run and compared.
 - Analytics filenames depend on wall-clock time (fine for storage, not deterministic).
 
 ## Partial / In Progress
 
 - More subsystems now depend on deterministic ordering than originally intended:
-  - A2C rollout alignment
+  - PPO rollout alignment
   - Analytics trace capture timing
   - Reset/observation ordering
   - HUD episode summaries

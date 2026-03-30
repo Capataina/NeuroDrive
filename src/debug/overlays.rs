@@ -20,9 +20,9 @@ pub struct DebugOverlayState {
 impl Default for DebugOverlayState {
     fn default() -> Self {
         Self {
-            geometry: true,
+            geometry: false,
             sensors: false,
-            telemetry: true,
+            telemetry: false,
         }
     }
 }

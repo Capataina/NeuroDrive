@@ -1,11 +1,16 @@
+use std::path::Path;
+
 use bevy::app::AppExit;
 use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 
-use crate::agent::observation::build_observation_vector_system;
+use crate::agent::observation::{ObservationConfig, build_observation_vector_system};
+use crate::analytics::exporters::cleanup::enforce_retention;
+use crate::analytics::exporters::context::RunContext;
 use crate::analytics::exporters::json::{export_compact_json, export_full_json};
 use crate::analytics::exporters::markdown::export_to_markdown;
 use crate::analytics::models::{AnalyticsConfig, EpisodeTracker, RunMetadata};
+use crate::game::episode::EpisodeConfig;
 use crate::analytics::trackers::action::{
     PerCarActionAccumulators, capture_episode_action_stats_system,
     snapshot_completed_episode_action_stats_system,
@@ -15,8 +20,8 @@ use crate::analytics::trackers::trace::{
     PerCarTraceAccumulators, capture_episode_tick_trace_system,
     snapshot_completed_episode_trace_system,
 };
-use crate::brain::a2c::a2c_collect_rewards_all_cars_system;
-use crate::brain::a2c::A2cBrain;
+use crate::brain::ppo::ppo_collect_rewards_all_cars_system;
+use crate::brain::ppo::PpoBrain;
 use crate::game::car::TrainerConfig;
 use crate::game::episode::episode_loop_system;
 use crate::sim::sets::SimSet;
@@ -38,7 +43,7 @@ impl Plugin for AnalyticsPlugin {
                 capture_episode_tick_trace_system
                     .after(build_observation_vector_system)
                     .after(episode_loop_system)
-                    .before(a2c_collect_rewards_all_cars_system)
+                    .before(ppo_collect_rewards_all_cars_system)
                     .in_set(SimSet::Measurement),
             )
             .add_systems(
@@ -63,20 +68,22 @@ fn on_exit_system(
     tracker: Res<EpisodeTracker>,
     config: Res<AnalyticsConfig>,
     trainer_config: Res<TrainerConfig>,
-    brain: Res<A2cBrain>,
+    episode_config: Res<EpisodeConfig>,
+    obs_config: Res<ObservationConfig>,
+    brain: Res<PpoBrain>,
 ) {
     for exit_event in exit_events.read() {
         info!("Game exit event detected: {:?}", exit_event);
 
-        if tracker.episodes.is_empty() && tracker.a2c_updates.is_empty() {
+        if tracker.episodes.is_empty() && tracker.ppo_updates.is_empty() {
             info!("No analytics data to export.");
             return;
         }
 
         info!(
-            "Starting analytics export for {} episodes and {} A2C updates...",
+            "Starting analytics export for {} episodes and {} PPO updates...",
             tracker.episodes.len(),
-            tracker.a2c_updates.len()
+            tracker.ppo_updates.len()
         );
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -95,22 +102,41 @@ fn on_exit_system(
             samples_per_tick: brain.samples_per_tick,
         };
 
+        // Capture run context for the markdown header.
+        let run_context = RunContext::capture(
+            &trainer_config,
+            &episode_config,
+            &obs_config,
+            &brain,
+            tracker.episodes.len(),
+            tracker.ppo_updates.len(),
+        );
+        let context_header = run_context.to_markdown_header();
+
         // Always write compact JSON (no traces).
-        let compact_path = format!("reports/run_{}.json", timestamp);
+        let json_dir = Path::new("reports/json/analytics");
+        let compact_path = format!("reports/json/analytics/run_{}.json", timestamp);
         info!("Exporting compact JSON to: {}", compact_path);
         export_compact_json(&tracker, &metadata, &compact_path);
 
         // Opt-in: write full trace JSON when configured.
         if config.full_trace_export {
-            let traces_path = format!("reports/run_{}_traces.json", timestamp);
+            let traces_path = format!("reports/json/analytics/run_{}_traces.json", timestamp);
             info!("Exporting full trace JSON to: {}", traces_path);
             export_full_json(&tracker, &traces_path);
         }
 
+        // Enforce retention on JSON directory.
+        enforce_retention(json_dir, 3);
+
         // Always write the markdown report from full in-memory data.
-        let md_path = format!("reports/run_{}.md", timestamp);
+        let analytics_dir = Path::new("reports/analytics");
+        let md_path = format!("reports/analytics/run_{}.md", timestamp);
         info!("Exporting Markdown to: {}", md_path);
-        export_to_markdown(&tracker, &md_path);
+        export_to_markdown(&tracker, &md_path, &context_header);
+
+        // Enforce retention on analytics markdown directory.
+        enforce_retention(analytics_dir, 5);
 
         info!("Analytics successfully exported.");
     }

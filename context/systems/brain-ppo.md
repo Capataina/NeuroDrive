@@ -11,11 +11,10 @@
 | Owner | Owns | Does not own |
 |-------|------|-------------|
 | `src/brain/plugin.rs` | `BrainPlugin`, `AgentMode` toggle (F4), registers `TrainerLiveRanking`, wires ranking and visual-role systems, rollout-buffer reset on mode switch | Policy implementation details |
-| `src/brain/types.rs` | `AgentMode` enum (`Keyboard` / `Ai`), `Brain` trait (**dead code** — unused, tagged for Stage 5 removal) | Observation or reward production |
-| `src/brain/a2c/` | `A2cBrain` (model + hyperparams + seeded RNG, **no buffer**), `TrainerRolloutBuffer` (separate resource with env_id tagging + old log-probs), `PpoUpdateState` (staged update resource), `A2cPlugin`, vectorised act/collect/epoch/flush systems, per-env GAE, `ActorCritic` model, PPO clipped update logic, training stats, `PolicyOutput` component | Environment truth, observation construction |
+| `src/brain/types.rs` | `AgentMode` enum (`Keyboard` / `Ai`), `PolicyOutput` component | Observation or reward production |
+| `src/brain/ppo/` | `PpoBrain` (model + hyperparams + seeded RNG, **no buffer**), `TrainerRolloutBuffer` (separate resource with env_id tagging + old log-probs), `PpoUpdateState` (staged update resource), `PpoPlugin`, vectorised act/collect/epoch/flush systems, per-env GAE, `ActorCritic` model (asymmetric: actor 2×64, critic 2×128), `BatchScratch` pre-allocation, PPO clipped update logic, `PpoTrainingStats`, `PpoLayerHealth` | Environment truth, observation construction |
 | `src/brain/ranking.rs` | `TrainerLiveRanking` resource, ranking computation, `update_car_visual_roles_system` (best-car highlighting via alpha + z-order), `CarColour`-aware sprite updates | Policy, observation, reward |
-| `src/brain/common/` | Reusable handwritten ML primitives: `Linear`, `Tanh`, `Relu` (legacy), `AdamOptimizer`, Gaussian math, orthogonal init | Algorithm-specific logic |
-| `src/brain/biological/` | **Empty placeholder** for future local-plasticity brain | Nothing yet |
+| `src/brain/common/` | Reusable handwritten ML primitives: `Linear` (flat `Vec<f32>` weight storage, batched forward/backward), `Tanh` (with saturation tracking), `AdamOptimizer` (AdamW-style with decoupled weight decay, precomputed bias correction, ε=1e-5), Gaussian math, orthogonal init | Algorithm-specific logic |
 
 ## Current Implemented Reality
 
@@ -28,22 +27,33 @@
 ### Model Architecture
 
 ```text
-Actor:                              Critic:
-obs (43) → Linear(43,64) → Tanh    obs (43) → Linear(43,64) → Tanh
-         → Linear(64,64) → Tanh             → Linear(64,64) → Tanh
-         → Linear(64,2)  → mean             → Linear(64,1)  → value
+Actor:                                Critic:
+obs (43) → Linear(43,64)  → Tanh     obs (43) → Linear(43,128) → Tanh
+         → Linear(64,64)  → Tanh              → Linear(128,128) → Tanh
+         → Linear(64,2)   → mean              → Linear(128,1)   → value
          + learnable log_std (2)
 ```
 
+- **Asymmetric actor-critic** — the critic uses 2×128 hidden layers (double the actor's 2×64) to provide sufficient capacity for value prediction. The actor is kept smaller because it converges faster and doesn't need the extra capacity.
 - Separate actor and critic stacks (no shared backbone).
 - Orthogonal initialisation: √2 scale for hidden layers, 0.01× for actor mean output (near-zero initial policy), 1.0× for critic value output.
-- `log_std` initialised to `[0.0, 0.0]` (initial σ = 1.0).
-- Actor LR: 3e-4, Critic LR: 5e-4 (both Adam).
+- `log_std` initialised to `[0.0, 0.0]` (initial σ = 1.0). **Floor clamped at -1.0** (minimum σ ≈ 0.37) to prevent throttle exploration collapse.
+- Actor LR: 3e-4 (standard Adam, weight decay 0.0). Critic LR: 5e-4 (**AdamW with weight decay λ=3e-4**) to prevent unbounded weight growth that drives tanh saturation.
 - Activation: Tanh throughout (switched from ReLU — eliminates dead-neuron capacity loss that was starving the actor at 34–57% dead neurons).
+- The model exposes three forward paths: `forward_actor` (action selection only, skips critic — saves ~50% forward cost), `forward_critic` (bootstrap values only), and `forward` (full actor + critic pass for training).
+
+### Performance Optimisations
+
+- **Flat `Vec<f32>` weight storage** — `Linear.weights` is a single contiguous vector in row-major order (`weights[i * in_dim + j]`), enabling cache-friendly traversal and LLVM auto-vectorisation. Previously used `Vec<Vec<f32>>`.
+- **Pre-allocated scratch buffers** — `BatchScratch` allocates all intermediate buffers once at construction (sized for max batch of 512). Reused for every batched forward/backward pass, eliminating per-chunk allocation.
+- **Batched forward/backward passes** — `forward_batch` and `backward_batch` process entire training chunks as matrix operations rather than sample-by-sample loops.
+- **Iterator-based inner loops** — dot products and gradient accumulation use iterator chains for LLVM optimisation.
+- **Swap instead of clone for frozen buffer** — `PreparedUpdate` takes ownership of buffer data via swap rather than cloning.
+- **Adam precomputed bias correction** — `1/(1-β^t)` computed once per step rather than per-parameter.
 
 ### PolicyOutput Component
 
-- `PolicyOutput` is a **per-car Component** written by `a2c_act_all_cars_system` each tick.
+- `PolicyOutput` is a **per-car Component** written by `ppo_act_all_cars_system` each tick.
 - Contains: `value_prediction`, `steering_mean`, `steering_std`, `throttle_mean`, `throttle_std`.
 - Exposes brain internals for analytics capture without requiring analytics to call model forward passes.
 
@@ -52,14 +62,14 @@ obs (43) → Linear(43,64) → Tanh    obs (43) → Linear(43,64) → Tanh
 - The policy samples Gaussian latent actions from `N(mean, exp(log_std))`.
 - Applies `tanh` squashing: steering uses tanh directly to `[-1, 1]`; throttle uses `0.5*(tanh+1)` to map to `[0, 1]`.
 - Safety clamping applied after squashing; clamp-hit flags tracked per step.
-- RNG is a **seeded `StdRng`** stored in `A2cBrain` — deterministic within a session. Initialised from `rand::rng()` at brain construction, then reused for all sampling.
+- RNG is a **seeded `StdRng`** stored in `PpoBrain` — deterministic within a session. Initialised from `rand::rng()` at brain construction, then reused for all sampling.
 - All cars receive actions from the shared policy each tick (not just one car).
 
 ### Rollout Collection
 
-- `a2c_act_all_cars_system` runs in `SimSet::Input` after keyboard input and before action smoothing. Iterates **all** cars, calls `model.forward()` for each, samples stochastic actions via the seeded RNG, writes per-car `ActionState` and `PolicyOutput`, computes old log-prob (sum of squashed-Gaussian log-probs across action dimensions), and pushes transitions tagged with `env_id` and `old_log_prob` to `TrainerRolloutBuffer`.
-- `a2c_collect_rewards_all_cars_system` runs in `SimSet::Measurement` after episode truth and observation rebuild. Pushes per-car reward and done flag for all cars. When the buffer reaches the horizon and no update is in progress, calls `ppo_prepare_update` to compute per-env GAE, freeze the buffer into a `PreparedUpdate`, and clear the live buffer.
-- `ppo_epoch_system` runs in `SimSet::Measurement` after the collect system. Processes a chunk of `samples_per_tick` (default 128) samples from the `PreparedUpdate` per tick. When an epoch's samples are exhausted, calls `ppo_finish_epoch` (clip gradients, step optimiser). Advances to the next epoch or clears the update state when all epochs are done.
+- `ppo_act_all_cars_system` runs in `SimSet::Input` after keyboard input and before action smoothing. Iterates **all** cars, calls `model.forward_actor()` for each (skipping critic for action selection), samples stochastic actions via the seeded RNG, writes per-car `ActionState` and `PolicyOutput`, computes old log-prob (sum of squashed-Gaussian log-probs across action dimensions), and pushes transitions tagged with `env_id` and `old_log_prob` to `TrainerRolloutBuffer`.
+- `ppo_collect_rewards_all_cars_system` runs in `SimSet::Measurement` after episode truth and observation rebuild. Pushes per-car reward and done flag for all cars. When the buffer reaches the horizon and no update is in progress, calls `ppo_prepare_update` to compute per-env GAE, freeze the buffer into a `PreparedUpdate` (via swap, not clone), and clear the live buffer.
+- `ppo_epoch_system` runs in `SimSet::Measurement` after the collect system. Processes a chunk of `samples_per_tick` (default 64) samples from the `PreparedUpdate` per tick using batched forward/backward passes. When an epoch's samples are exhausted, calls `ppo_finish_epoch` (clip gradients, step optimiser). Advances to the next epoch or clears the update state when all epochs are done.
 - `TrainerRolloutBuffer` stores: `states`, `actions`, `latent_actions`, `safety_clamp_hits`, `old_log_probs`, `rewards`, `values`, `dones`, `env_ids`.
 - GAE is computed **per-env** to prevent cross-env value leakage. Transitions are grouped by `env_id`; GAE runs within each group independently. Advantages are normalised **per-minibatch** (per-chunk) rather than globally. Sample indices are shuffled at the start of each epoch via Fisher-Yates shuffle to ensure diverse gradient updates.
 - Bootstrap values are computed per-env at prepare time: non-terminal envs get a fresh `model.forward()` value; terminal envs get 0.
@@ -75,10 +85,10 @@ obs (43) → Linear(43,64) → Tanh    obs (43) → Linear(43,64) → Tanh
 Update is **amortised across ticks** to avoid frame stutter:
 
 1. `ppo_prepare_update` computes per-env GAE, freezes buffer into `PreparedUpdate`, clears live buffer.
-2. `ppo_epoch_system` processes `samples_per_tick` (128) samples per tick, accumulating gradients into the model.
+2. `ppo_epoch_system` processes `samples_per_tick` (64) samples per tick via batched forward/backward passes, accumulating gradients into the model.
 3. When all samples in an epoch are done, `ppo_finish_epoch` clips gradients and steps the optimiser.
 4. After all `ppo_epochs` (4) complete, the `PreparedUpdate` is dropped and the update state cleared.
-5. On app exit, `a2c_flush_on_exit_system` finishes any in-progress epochs synchronously, then processes any remaining buffer data via `ppo_update_blocking`.
+5. On app exit, `ppo_flush_on_exit_system` finishes any in-progress epochs synchronously, then processes any remaining buffer data via `ppo_update_blocking`.
 
 Each epoch:
   1. Forwards each sample through the current policy to get new log-probs.
@@ -87,16 +97,16 @@ Each epoch:
   4. Gradient flows through ratio when unclipped; zero when clipped.
   5. Value loss is Huber on returns vs values (unchanged from A2C).
   6. Entropy bonus applied to log-std gradients regardless of clipping.
-  7. After all samples: clip gradients (actor: 0.5, critic: 0.5), step Adam, update log-std.
+  7. After all samples: clip gradients (actor: 0.5, critic: 0.5), step Adam (actor) / AdamW (critic with weight decay), update log-std (clamped to floor -1.0).
 
 ### Training Stats
 
-`A2cTrainingStats` records the most recent completed update (final epoch values):
+`PpoTrainingStats` records the most recent completed update (final epoch values):
 - `policy_loss`, `value_loss`, `policy_entropy`, `explained_variance`
 - `steering_mean/std`, `throttle_mean/std`, `clamped_action_fraction`
 - `clip_fraction` — fraction of samples where the PPO ratio was clipped (healthy: 10–30%)
 - `approx_kl` — approximate KL divergence between old and new policy (healthy: < 0.02)
-- Per-layer `A2cLayerHealth`: weight L2 norm, gradient L2 norm, tanh saturation fraction
+- Per-layer `PpoLayerHealth`: weight L2 norm, gradient L2 norm, tanh saturation fraction
 
 ### Trainer Ranking
 
@@ -117,50 +127,49 @@ Each epoch:
 | `min_update_steps` | 128 |
 | `ppo_epochs` | 4 |
 | `clip_epsilon` | 0.2 |
-| `samples_per_tick` | 128 |
+| `samples_per_tick` | 64 |
 | Actor hidden dim | 64 |
-| Critic hidden dim | 64 |
-| Actor LR | 3e-4 |
-| Critic LR | 5e-4 |
+| Critic hidden dim | 128 |
+| Actor LR | 3e-4 (Adam, weight decay 0.0) |
+| Critic LR | 5e-4 (AdamW, weight decay 3e-4) |
 | Actor grad clip | 0.5 |
 | Critic grad clip | 0.5 |
 | Entropy coefficient | 0.01 |
+| `log_std` floor | -1.0 (min σ ≈ 0.37) |
 
 ## Key Interfaces / Data Flow
 
 | Interface | Producer | Consumer | Notes |
 |-----------|----------|----------|-------|
-| `ObservationVector` | agent | A2C act path | Fixed-size model input (dim 43) |
-| `ActionState.desired` | A2C act system | smoothing → physics | Same control boundary as keyboard |
-| `PolicyOutput` | A2C act system | analytics capture | Per-car value prediction, policy means/stds |
-| `EpisodeState.current_tick_reward` | game | A2C reward collector | Authoritative per-step reward |
-| `EpisodeState.current_tick_end_reason` | game | A2C reward collector | Terminal-step truth |
-| `A2cTrainingStats` | A2C update path | debug HUD, analytics tracker | Snapshot of latest completed update |
+| `ObservationVector` | agent | PPO act path | Fixed-size model input (dim 43) |
+| `ActionState.desired` | PPO act system | smoothing → physics | Same control boundary as keyboard |
+| `PolicyOutput` | PPO act system | analytics capture | Per-car value prediction, policy means/stds |
+| `EpisodeState.current_tick_reward` | game | PPO reward collector | Authoritative per-step reward |
+| `EpisodeState.current_tick_end_reason` | game | PPO reward collector | Terminal-step truth |
+| `PpoTrainingStats` | PPO update path | debug HUD, analytics tracker | Snapshot of latest completed update |
 
 ```text
 Tick lifecycle (vectorised):
-  observation_t (all cars) → a2c_act_all_cars_system → per-car desired action + PolicyOutput + buffer push
+  observation_t (all cars) → ppo_act_all_cars_system → forward_actor per car → desired action + PolicyOutput + buffer push
   → smoothing → physics → environment step (all cars)
   → episode_loop_system computes reward_t and done_t (per car)
   → observation_t+1 rebuilt (post-reset if terminal, per car)
-  → a2c_collect_rewards_all_cars_system appends per-car reward_t, done_t
-  → optionally triggers a2c_update() with per-env bootstrap values
+  → ppo_collect_rewards_all_cars_system appends per-car reward_t, done_t
+  → optionally triggers ppo_prepare_update() with per-env bootstrap values (forward_critic)
 ```
 
 ## Implemented Outputs / Artifacts
 
-- **Runtime resources:** `AgentMode`, `A2cBrain` (no buffer), `A2cTrainingStats`, `TrainerRolloutBuffer`, `TrainerLiveRanking`
+- **Runtime resources:** `AgentMode`, `PpoBrain` (no buffer), `PpoTrainingStats`, `TrainerRolloutBuffer`, `TrainerLiveRanking`
 - **Runtime components (per car):** `PolicyOutput` (value_prediction, steering_mean/std, throttle_mean/std)
-- **Handwritten ML primitives:** `Linear` (forward + backward + Glorot/orthogonal init), `Tanh` (with saturation tracking), `Relu` (legacy, unused), `AdamOptimizer` (per-layer, ε=1e-5), `sample_normal`, `log_prob_normal`, `tanh_correction`, `orthogonal_init`
+- **Handwritten ML primitives:** `Linear` (flat weight storage, forward/backward + batched variants, orthogonal init), `Tanh` (with saturation tracking), `AdamOptimizer` (AdamW-style with decoupled weight decay, per-layer, ε=1e-5), `sample_normal`, `log_prob_normal`, `tanh_correction`, `orthogonal_init`
 - **Unit tests in `buffer.rs`:** single-env GAE regression test (verifies per-env GAE matches flat GAE for one env), multi-env GAE isolation test (verifies no cross-env value leakage in interleaved buffer).
 
 ## Known Issues / Active Risks
 
 - **No save/load path**, no evaluation mode, no headless training loop.
 - **No dedicated PPO integration tests**, no explicit behavioural success threshold, limited protection against silent training regressions beyond runtime stats (unit tests cover GAE only).
-- The `Brain` trait is **dead code** — unused by the vectorised path.
 - All rollout buffer alignment is checked by `debug_assert!` only — not active in release builds.
-- The module is still named `a2c/` and structs still use `A2c` prefixes (e.g., `A2cBrain`, `A2cPlugin`) despite now implementing PPO. A rename would be cosmetic churn with no functional benefit at this stage.
 
 ## Partial / In Progress
 
@@ -184,12 +193,19 @@ Tick lifecycle (vectorised):
 - PPO exists as a **baseline for learnability validation**, not the intended final learning architecture. Engineering investment should stay proportionate.
 - **ReLU was replaced by tanh** after observing 34–57% dead neuron rates across all hidden layers. The dead neurons starved the actor of capacity, preventing corner-learning. Tanh eliminates this problem entirely (0% saturation observed). This is consistent with the Andrychowicz et al. finding that tanh outperforms ReLU in on-policy continuous control.
 - External A2C/PPO research and a NeuroDrive-specific implementation ladder live in `context/references/a2c-for-neurodrive.md` — deep algorithm research belongs there rather than in this system file.
-- **PPO upgrade resolved the A2C policy oscillation problem.** The clipped surrogate objective prevents any single update from destabilising the policy. The amortised epoch processing (128 samples/tick) resolved frame stutter that appeared when all 4 epochs ran in a single tick.
+- **PPO upgrade resolved the A2C policy oscillation problem.** The clipped surrogate objective prevents any single update from destabilising the policy. The amortised epoch processing (64 samples/tick) resolved frame stutter that appeared when all 4 epochs ran in a single tick.
+- **Critic saturation problem:** with the symmetric 2×64 architecture, the critic's fc2 layer reached 40.6% tanh saturation and weight norms of 19.3, preventing accurate crash-value prediction. The fix was twofold: (1) asymmetric sizing — critic widened to 2×128 for more capacity, (2) AdamW with weight decay λ=3e-4 on the critic to bound weight growth.
+- **Log-std floor raised from -2.0 to -1.0** to prevent throttle exploration collapse (std was reaching 0.07, making it impossible to discover throttle modulation for cornering).
 - **Braking was tried and reverted.** The `[-1, 1]` throttle range with negative-as-brake caused the policy to converge to "mostly brake" (throttle mean -0.60) as a safe local optimum. Throttle was reverted to `[0, 1]` with `0.5*(tanh+1)` remapping restored. The log-prob code was never actually updated for braking (it still had the `[0,1]` affine correction), so the revert also fixed an inconsistency.
 
 ## Obsolete / No Longer Relevant
 
-- Any document treating A2C as a future-only milestone is obsolete — the code is present and participates in the live runtime path.
+- Any document treating A2C as a future-only milestone is obsolete — PPO is present and participates in the live runtime path.
+- Any reference to `a2c/` directory, `A2cBrain`, `A2cPlugin`, `A2cTrainingStats`, or `A2cLayerHealth` is obsolete — all renamed to `ppo/`, `PpoBrain`, `PpoPlugin`, `PpoTrainingStats`, `PpoLayerHealth`.
+- Any reference to the `Brain` trait, `Relu` struct, `glorot_uniform`, or `Linear::new` is obsolete — these were dead code and have been removed.
+- Any reference to `DrivingHudEpisodeAccumulator` is obsolete — removed as dead code.
+- Any reference to `biological/` or `sessions/` placeholder directories is obsolete — these empty directories have been removed.
+- Any reference to `samples_per_tick = 128` or symmetric 2×64 critic is obsolete — now 64 samples/tick and asymmetric 2×128 critic.
 - Any reference to observation dimension 23 or 27 is obsolete — the model now takes 43-dimensional input (12 lookahead samples × 2 features replaced the old 4 × 2).
 - Any reference to throttle using raw tanh directly to [-1,1] is obsolete — throttle uses `0.5*(tanh+1)` to [0,1].
 - Any reference to analytics/HUD using temporary first-car shims is obsolete — the full analytics overhaul is complete.

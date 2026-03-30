@@ -4,6 +4,8 @@ mod brain;
 mod debug;
 mod game;
 mod maps;
+#[cfg(feature = "profiling")]
+mod profiling;
 mod sim;
 
 use agent::AgentPlugin;
@@ -16,23 +18,28 @@ use game::GamePlugin;
 use maps::MonacoPlugin;
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "NeuroDrive".to_string(),
-                resolution: (1600, 900).into(),
-                ..default()
-            }),
+    let mut app = App::new();
+
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "NeuroDrive".to_string(),
+            resolution: (1600, 900).into(),
             ..default()
-        }))
-        // Fixed timestep: required for determinism, replay, and stable metrics.
-        .insert_resource(Time::<Fixed>::from_hz(60.0))
-        // Track must be spawned before game systems query it
-        .add_plugins(MonacoPlugin)
-        .add_plugins(AgentPlugin)
-        .add_plugins(BrainPlugin)
-        .add_plugins(AnalyticsPlugin)
-        .add_plugins(GamePlugin)
-        .add_plugins(DebugPlugin)
-        .run();
+        }),
+        ..default()
+    }))
+    // Fixed timestep: required for determinism, replay, and stable metrics.
+    .insert_resource(Time::<Fixed>::from_hz(60.0))
+    // Track must be spawned before game systems query it
+    .add_plugins(MonacoPlugin)
+    .add_plugins(AgentPlugin)
+    .add_plugins(BrainPlugin)
+    .add_plugins(AnalyticsPlugin)
+    .add_plugins(GamePlugin)
+    .add_plugins(DebugPlugin);
+
+    #[cfg(feature = "profiling")]
+    app.add_plugins(profiling::ProfilingPlugin);
+
+    app.run();
 }

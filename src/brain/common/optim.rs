@@ -5,30 +5,33 @@ pub struct AdamOptimizer {
     beta1: f32,
     beta2: f32,
     epsilon: f32,
+    /// Decoupled weight decay coefficient (AdamW-style). 0.0 = standard Adam.
+    weight_decay: f32,
     t: f32,
 
-    // State arrays mirroring weights and biases
-    m_weights: Vec<Vec<Vec<f32>>>, // [layer][out][in]
-    v_weights: Vec<Vec<Vec<f32>>>,
-    m_biases: Vec<Vec<f32>>, // [layer][out]
+    /// First moment (mean) for weights — one flat Vec per layer, mirroring Linear::weights.
+    m_weights: Vec<Vec<f32>>,
+    /// Second moment (variance) for weights.
+    v_weights: Vec<Vec<f32>>,
+    /// First moment for biases — one Vec per layer.
+    m_biases: Vec<Vec<f32>>,
+    /// Second moment for biases.
     v_biases: Vec<Vec<f32>>,
 }
 
 impl AdamOptimizer {
-    pub fn new(layers: &[&Linear], lr: f32) -> Self {
+    pub fn new(layers: &[&Linear], lr: f32, weight_decay: f32) -> Self {
         let mut m_weights = Vec::new();
         let mut v_weights = Vec::new();
         let mut m_biases = Vec::new();
         let mut v_biases = Vec::new();
 
         for l in layers {
-            let out_dim = l.weights.len();
-            let in_dim = if out_dim > 0 { l.weights[0].len() } else { 0 };
-
-            m_weights.push(vec![vec![0.0; in_dim]; out_dim]);
-            v_weights.push(vec![vec![0.0; in_dim]; out_dim]);
-            m_biases.push(vec![0.0; out_dim]);
-            v_biases.push(vec![0.0; out_dim]);
+            let weight_count = l.in_dim * l.out_dim;
+            m_weights.push(vec![0.0; weight_count]);
+            v_weights.push(vec![0.0; weight_count]);
+            m_biases.push(vec![0.0; l.out_dim]);
+            v_biases.push(vec![0.0; l.out_dim]);
         }
 
         Self {
@@ -36,6 +39,7 @@ impl AdamOptimizer {
             beta1: 0.9,
             beta2: 0.999,
             epsilon: 1e-5,
+            weight_decay,
             t: 0.0,
             m_weights,
             v_weights,
@@ -47,41 +51,39 @@ impl AdamOptimizer {
     pub fn step(&mut self, layers: &mut [&mut Linear]) {
         self.t += 1.0;
 
+        // Precompute bias correction factors once per step (not per weight).
+        let bc1 = 1.0 / (1.0 - self.beta1.powi(self.t as i32));
+        let bc2 = 1.0 / (1.0 - self.beta2.powi(self.t as i32));
+
         for (l_idx, layer) in layers.iter_mut().enumerate() {
-            let out_dim = layer.weights.len();
-            let in_dim = if out_dim > 0 {
-                layer.weights[0].len()
-            } else {
-                0
-            };
+            let weight_count = layer.in_dim * layer.out_dim;
 
-            for i in 0..out_dim {
-                // Bias update
-                let g_b = layer.grad_biases[i];
-                self.m_biases[l_idx][i] =
-                    self.beta1 * self.m_biases[l_idx][i] + (1.0 - self.beta1) * g_b;
-                self.v_biases[l_idx][i] =
-                    self.beta2 * self.v_biases[l_idx][i] + (1.0 - self.beta2) * g_b * g_b;
-
-                let m_hat_b = self.m_biases[l_idx][i] / (1.0 - self.beta1.powf(self.t));
-                let v_hat_b = self.v_biases[l_idx][i] / (1.0 - self.beta2.powf(self.t));
-
-                layer.biases[i] -= self.learning_rate * m_hat_b / (v_hat_b.sqrt() + self.epsilon);
-
-                // Weights update
-                for j in 0..in_dim {
-                    let g_w = layer.grad_weights[i][j];
-                    self.m_weights[l_idx][i][j] =
-                        self.beta1 * self.m_weights[l_idx][i][j] + (1.0 - self.beta1) * g_w;
-                    self.v_weights[l_idx][i][j] =
-                        self.beta2 * self.v_weights[l_idx][i][j] + (1.0 - self.beta2) * g_w * g_w;
-
-                    let m_hat_w = self.m_weights[l_idx][i][j] / (1.0 - self.beta1.powf(self.t));
-                    let v_hat_w = self.v_weights[l_idx][i][j] / (1.0 - self.beta2.powf(self.t));
-
-                    layer.weights[i][j] -=
-                        self.learning_rate * m_hat_w / (v_hat_w.sqrt() + self.epsilon);
+            // Weight update — flat contiguous iteration
+            let mw = &mut self.m_weights[l_idx];
+            let vw = &mut self.v_weights[l_idx];
+            for k in 0..weight_count {
+                let g = layer.grad_weights[k];
+                mw[k] = self.beta1 * mw[k] + (1.0 - self.beta1) * g;
+                vw[k] = self.beta2 * vw[k] + (1.0 - self.beta2) * g * g;
+                let m_hat = mw[k] * bc1;
+                let v_hat = vw[k] * bc2;
+                layer.weights[k] -= self.learning_rate * m_hat / (v_hat.sqrt() + self.epsilon);
+                // Decoupled weight decay (AdamW): applied after the Adam step
+                if self.weight_decay > 0.0 {
+                    layer.weights[k] -= self.learning_rate * self.weight_decay * layer.weights[k];
                 }
+            }
+
+            // Bias update (no weight decay on biases — standard practice)
+            let mb = &mut self.m_biases[l_idx];
+            let vb = &mut self.v_biases[l_idx];
+            for k in 0..layer.out_dim {
+                let g = layer.grad_biases[k];
+                mb[k] = self.beta1 * mb[k] + (1.0 - self.beta1) * g;
+                vb[k] = self.beta2 * vb[k] + (1.0 - self.beta2) * g * g;
+                let m_hat = mb[k] * bc1;
+                let v_hat = vb[k] * bc2;
+                layer.biases[k] -= self.learning_rate * m_hat / (v_hat.sqrt() + self.epsilon);
             }
         }
     }

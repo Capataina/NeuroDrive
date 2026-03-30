@@ -46,20 +46,13 @@ fn spawn_track(
         .find_spawn_cell()
         .expect("Track grid must contain exactly one SpawnPoint tile.");
 
-    let (spawn_pos, spawn_rot) = grid
-        .find_spawn()
-        .expect("Track grid must contain exactly one SpawnPoint tile.");
-
     let centerline = TrackCenterline::build_closed_loop(&grid, spawn_cell, GridDir::East)
         .expect("Track grid connectivity must form a single closed loop.");
 
     info!(
-        "Sepang track spawned. Grid {}×{}. Car spawn ({:.0},{:.0}) rot {:.2}.",
+        "Sepang track spawned. Grid {}×{}.",
         grid.cols(),
         grid.rows(),
-        spawn_pos.x,
-        spawn_pos.y,
-        spawn_rot
     );
     info!("Centreline length: {:.0}px.", centerline.total_length());
 
@@ -67,8 +60,6 @@ fn spawn_track(
 
     commands.spawn(Track {
         grid,
-        spawn_position: spawn_pos,
-        spawn_rotation: spawn_rot,
         centerline,
     });
 }

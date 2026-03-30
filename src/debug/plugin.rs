@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::debug::hud::{
-    DrivingHudEpisodeAccumulator, DrivingHudHistory, DrivingHudStats,
+    DrivingHudHistory, DrivingHudStats,
     capture_driving_hud_episode_metrics_system, spawn_driving_hud_system,
     update_driving_hud_stats_system, update_driving_hud_text_system,
     update_driving_hud_visibility_system,
@@ -21,7 +21,6 @@ impl Plugin for DebugPlugin {
         app.init_resource::<DebugOverlayState>()
             .init_resource::<DrivingHudStats>()
             .init_resource::<DrivingHudHistory>()
-            .init_resource::<DrivingHudEpisodeAccumulator>()
             .add_systems(Startup, (spawn_driving_hud_system, spawn_leaderboard_system))
             .add_systems(
                 FixedUpdate,

@@ -25,14 +25,13 @@
 - `TrackCenterline` is a closed polyline derived from tile connectivity, stored on the `Track` component. It supports:
   - arc-length projection (`project(pos) → s, fraction, closest_point, tangent, distance`),
   - tangent queries at arbitrary arc-length (`tangent_at_s(s)`).
-- `Track` component stores `grid`, `spawn_position`, `spawn_rotation`, and `centerline`.
+- `Track` component stores `grid` and `centerline`.
 - Finish line sprite has been removed from `monaco.rs`.
 
 ### Car
 
 - Multiple car entities spawned by `setup_game` in `GamePlugin` after the track is ready.
-- `TrainerConfig` controls the number of cars (default 3), lateral spawn spread, and alpha values.
-- Cars are spawned with deterministic lateral offsets perpendicular to the track heading at the spawn point.
+- `TrainerConfig` controls the number of cars (default 8) and alpha values.
 - **Random spawn positions:** All cars (including car 0) spawn at random positions along the centreline, facing the tangent direction. On each episode reset, every car receives a new random position via the `SpawnRng` resource. There is no special-case car 0 that always resets to a fixed start.
 - Each car entity carries:
   - `Sprite` (unique colour from 25-colour palette, 12×6 world units),
@@ -133,7 +132,7 @@ Physics mutates car → Progress recomputed → Episode records reward and check
 - **Environment regression coverage is thin:** no ECS-level tests for collision timing, reset correctness, or episode-summary edge cases.
 - The track layer assumes a **single closed loop** with no branching.
 - The environment runs in a **normal Bevy windowed loop only** — no headless or accelerated training mode exists.
-- `wrap_angle` and `signed_angle_between` are duplicated across `observation.rs` and `episode.rs`.
+- `wrap_angle` and `signed_angle_between` have been consolidated into `src/sim/mod.rs` as shared geometry utilities.
 
 ## Partial / In Progress
 

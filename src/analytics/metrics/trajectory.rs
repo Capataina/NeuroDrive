@@ -9,8 +9,6 @@ pub struct TrajectorySnapshotRow {
     pub ticks: usize,
     pub mean_speed: f32,
     pub peak_speed: f32,
-    pub mean_abs_heading_deg: f32,
-    pub max_abs_heading_deg: f32,
 }
 
 pub fn select_trajectory_snapshots(traces: &[EpisodeTrace]) -> Vec<TrajectorySnapshotRow> {
@@ -57,21 +55,6 @@ fn snapshot_row(selection: &'static str, trace: &EpisodeTrace) -> TrajectorySnap
         .iter()
         .map(|tick| tick.speed)
         .fold(0.0, f32::max);
-    let mean_abs_heading_deg = if ticks == 0 {
-        0.0
-    } else {
-        trace
-            .ticks
-            .iter()
-            .map(|tick| tick.heading_error.abs().to_degrees())
-            .sum::<f32>()
-            / ticks as f32
-    };
-    let max_abs_heading_deg = trace
-        .ticks
-        .iter()
-        .map(|tick| tick.heading_error.abs().to_degrees())
-        .fold(0.0, f32::max);
 
     TrajectorySnapshotRow {
         selection,
@@ -81,7 +64,5 @@ fn snapshot_row(selection: &'static str, trace: &EpisodeTrace) -> TrajectorySnap
         ticks,
         mean_speed,
         peak_speed,
-        mean_abs_heading_deg,
-        max_abs_heading_deg,
     }
 }

@@ -10,10 +10,10 @@
 
 | Owner | Owns | Does not own |
 |-------|------|-------------|
-| `src/analytics/models.rs` | Canonical analytics schemas: `EpisodeRecord` (env_id-tagged), `TickTraceRecord` (env_id-tagged), `EpisodeTrace`, `A2cUpdateRecord`, `EpisodeTracker`, `AnalyticsConfig`, `RunMetadata`, `CompactRunExport` | Environment truth, reward definitions |
+| `src/analytics/models.rs` | Canonical analytics schemas: `EpisodeRecord` (env_id-tagged), `TickTraceRecord` (env_id-tagged), `EpisodeTrace`, `PpoUpdateRecord`, `EpisodeTracker`, `AnalyticsConfig`, `RunMetadata`, `CompactRunExport` | Environment truth, reward definitions |
 | `src/analytics/trackers/` | Per-car fixed-tick accumulation and episode/update record finalisation | When episodes end (owned by game) |
 | `src/analytics/metrics/` | Derived diagnostics, trend synthesis, visual rendering helpers | Raw data capture (owned by trackers) |
-| `src/analytics/exporters/` | Two-tier JSON and diagnostic Markdown serialisation | Schema definitions (owned by models) |
+| `src/analytics/exporters/` | Two-tier JSON export (`reports/json/analytics/`), diagnostic Markdown (`reports/analytics/`), `RunContext` snapshot capture, retention-limited directory cleanup | Schema definitions (owned by models) |
 | `src/analytics/plugin.rs` | Scheduling, resource registration, and on-exit export orchestration | Runtime state mutation |
 
 ## Current Implemented Reality
@@ -104,14 +104,9 @@ Terminal episodes are classified into crash types based on the final tick's stat
 | `consistency.rs` | Per-sector behavioural consistency (speed/steering/throttle/centreline variance), overall consistency score |
 | `phases.rs` | Learning phase detection: Exploration → Discovery → Refinement → Plateau → Regression |
 | `sparkline.rs` | ASCII visual helpers: sparklines (▁▂▃▄▅▆▇█), horizontal bar charts, heatmap rows |
-| `inputs.rs` | Input-learning summaries (ray, offset, heading distributions) |
 | `turns.rs` | Turn-execution diagnostics (latency, adequacy, understeer, failure mode classification) |
-| `critic.rs` | Critic health diagnostics (value drift, explained variance by context) |
 | `sectors.rs` | Progress-sector breakdown summaries (20 sectors) |
 | `trajectory.rs` | Trajectory-level derived summaries and episode selection |
-| `insights.rs` | Narrative insight bullet generation |
-
-The new modules (`timeseries`, `diagnostics`, `consistency`, `phases`, `sparkline`) are the primary consumers in the overhauled markdown report. The older modules (`inputs`, `insights`, `critic`) remain valid public API but are not currently wired into the report — they can be re-integrated as diagnostic depth increases.
 
 ### Two-Tier Export
 
@@ -119,9 +114,9 @@ Export triggers on `AppExit` message from the `Last` schedule:
 
 | Output | Content | When |
 |--------|---------|------|
-| `reports/run_<ts>.json` | `CompactRunExport`: `RunMetadata` + all `EpisodeRecord`s + all `A2cUpdateRecord`s. No per-tick traces. | Always |
-| `reports/run_<ts>_traces.json` | Full `EpisodeTracker` including per-tick trace data | Only when `AnalyticsConfig.full_trace_export == true` |
-| `reports/run_<ts>.md` | Diagnostic Markdown report generated from full in-memory data | Always |
+| `reports/json/analytics/run_<ts>.json` | `CompactRunExport`: `RunMetadata` + all `EpisodeRecord`s + all `PpoUpdateRecord`s. No per-tick traces. | Always |
+| `reports/json/analytics/run_<ts>_traces.json` | Full `EpisodeTracker` including per-tick trace data | Only when `AnalyticsConfig.full_trace_export == true` |
+| `reports/analytics/run_<ts>.md` | Diagnostic Markdown report generated from full in-memory data, includes `RunContext` snapshot header | Always |
 
 `RunMetadata` captures: car count, track name, session timestamp, PPO hyperparameters (epochs, clip_epsilon, gamma, gae_lambda, max_steps, samples_per_tick).
 
@@ -154,16 +149,16 @@ ASCII visuals include Unicode sparklines (▁▂▃▄▅▆▇█), horizontal 
 | `EpisodeState` | game | Reward decomposition, terminal reason, episode summaries (distance_driven, spawn_s, previous_s) |
 | `SensorReadings` | agent | Trace capture: v_forward, v_lateral, speed_delta, previous actions, ray data |
 | `PolicyOutput` | brain | Per-car value prediction, policy means/stds for trace and episode capture |
-| `A2cTrainingStats` | brain | PPO update records (including clip_fraction, approx_kl) |
+| `PpoTrainingStats` | brain | PPO update records (including clip_fraction, approx_kl) |
 | `ObservationConfig` and `Track` | agent/maps | Lookahead snapshot reconstruction in traces |
 | `TrainerConfig` | game | Car count for RunMetadata |
-| `A2cBrain` | brain | PPO hyperparameters for RunMetadata |
+| `PpoBrain` | brain | PPO hyperparameters for RunMetadata |
 | `EnvInstanceId` | game | Per-car tagging in all capture systems |
 
 ## Implemented Outputs / Artifacts
 
 - **Runtime resources:** `EpisodeTracker`, `PerCarActionAccumulators`, `PerCarTraceAccumulators`, `AnalyticsConfig`
-- **Exported schemas:** `EpisodeRecord`, `EpisodeTrace`, `TickTraceRecord`, `A2cUpdateRecord`, `RunMetadata`, `CompactRunExport`
+- **Exported schemas:** `EpisodeRecord`, `EpisodeTrace`, `TickTraceRecord`, `PpoUpdateRecord`, `RunMetadata`, `CompactRunExport`
 - **Output files:** compact JSON (always), full trace JSON (opt-in), diagnostic Markdown (always)
 - **Unit tests:** 25 tests across timeseries, diagnostics, consistency, phases, sparkline, and turns modules
 
@@ -172,18 +167,18 @@ ASCII visuals include Unicode sparklines (▁▂▃▄▅▆▇█), horizontal 
 - **Exit-triggered only** — abrupt termination (kill signal, panic) loses the entire run.
 - No dedicated validation that every finished episode is recorded exactly once across all terminal paths.
 - The heuristic failure-mode classification is useful for triage but is **not ground truth**.
-- Some older metric modules (`inputs`, `insights`, `critic`) are not wired into the current markdown report and produce dead-code warnings. They remain valid API for future re-integration.
+- Export paths have reorganised: JSON to `reports/json/analytics/`, Markdown to `reports/analytics/`. Both directories enforce retention limits (auto-deletes oldest reports).
 
 ## Partial / In Progress
 
-- The older metric modules (`inputs`, `insights`, `critic`) remain as valid API but are not wired into the current markdown report. They can be re-integrated as diagnostic depth increases.
+- The analytics pipeline is comprehensive and stable. All metric modules are wired into the report.
 
 ## Planned / Missing / Likely Changes
 
 - **Crash-safe checkpointing or periodic export** would materially improve experiment robustness.
 - **Comparison tooling** across multiple exported runs does not exist.
 - If new observation features are added, trace and metrics schemas will need coordinated extension.
-- Re-integrating the older metric modules (critic diagnostics by region, input learning trends) into the markdown report would deepen the diagnostic capability.
+- Additional diagnostic depth (e.g. critic diagnostics by region, input learning trends) could be added as new metric modules.
 
 ## Durable Notes / Discarded Approaches
 

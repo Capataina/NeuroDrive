@@ -174,7 +174,7 @@ mod tests {
     fn tracker_with(episodes: Vec<EpisodeRecord>) -> EpisodeTracker {
         EpisodeTracker {
             episodes,
-            a2c_updates: Vec::new(),
+            ppo_updates: Vec::new(),
             episode_traces: Vec::new(),
             last_recorded_update: 0,
         }

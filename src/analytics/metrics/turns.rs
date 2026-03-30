@@ -1,5 +1,5 @@
-use crate::analytics::metrics::stats::{mean, percentile};
-use crate::analytics::models::{EpisodeRecord, EpisodeTraceMetrics, TickTraceRecord};
+use crate::analytics::metrics::stats::mean;
+use crate::analytics::models::{EpisodeTraceMetrics, TickTraceRecord};
 
 pub const CURVATURE_DEMAND_THRESHOLD: f32 = 0.015;
 const STEERING_ONSET_THRESHOLD: f32 = 0.18;
@@ -12,34 +12,6 @@ const LARGE_LINE_GAP_THRESHOLD: f32 = 22.0;
 const HIGH_ENTRY_SPEED_THRESHOLD: f32 = 340.0;
 const HIGH_CURVATURE_THROTTLE_THRESHOLD: f32 = 0.55;
 const LATE_TURN_IN_TICK_THRESHOLD: u32 = 8;
-
-#[derive(Clone, Debug, Default)]
-pub struct TurnExecutionSummary {
-    pub turn_in_latency_fraction_mean: Option<f32>,
-    pub turn_in_latency_fraction_p90: Option<f32>,
-    pub turn_in_latency_ticks_mean: Option<f32>,
-    pub throttle_release_latency_fraction_mean: Option<f32>,
-    pub throttle_release_latency_ticks_mean: Option<f32>,
-    pub steering_adequacy_mean: f32,
-    pub high_curvature_throttle_mean: f32,
-    pub curvature_steering_error_mean: f32,
-    pub curvature_steering_bias_mean: f32,
-    pub understeer_rate_mean: f32,
-    pub turn_entry_speed_mean: Option<f32>,
-    pub turn_entry_speed_p90: Option<f32>,
-    pub peak_curvature_speed_mean: Option<f32>,
-    pub crash_speed_mean: Option<f32>,
-    pub entry_lateral_offset_mean: Option<f32>,
-    pub peak_lateral_offset_mean: Option<f32>,
-    pub peak_centerline_distance_mean: Option<f32>,
-}
-
-#[derive(Clone, Debug)]
-pub struct FailureModeCount {
-    pub label: String,
-    pub count: usize,
-    pub share: f32,
-}
 
 pub fn compute_trace_metrics(ticks: &[TickTraceRecord]) -> EpisodeTraceMetrics {
     if ticks.is_empty() {
@@ -178,130 +150,6 @@ pub fn compute_trace_metrics(ticks: &[TickTraceRecord]) -> EpisodeTraceMetrics {
         mean_side_ray_distance: mean(&side_ray_distances),
         failure_mode,
     }
-}
-
-pub fn summarize_turn_execution(episodes: &[EpisodeRecord]) -> TurnExecutionSummary {
-    let turn_in_latency_fraction_values: Vec<f32> = episodes
-        .iter()
-        .filter_map(|episode| episode.turn_in_latency_fraction)
-        .collect();
-    let turn_in_latency_ticks_values: Vec<f32> = episodes
-        .iter()
-        .filter_map(|episode| episode.turn_in_latency_ticks.map(|value| value as f32))
-        .collect();
-    let throttle_release_latency_fraction_values: Vec<f32> = episodes
-        .iter()
-        .filter_map(|episode| episode.throttle_release_latency_fraction)
-        .collect();
-    let throttle_release_latency_ticks_values: Vec<f32> = episodes
-        .iter()
-        .filter_map(|episode| {
-            episode
-                .throttle_release_latency_ticks
-                .map(|value| value as f32)
-        })
-        .collect();
-    let steering_adequacy_values: Vec<f32> = episodes
-        .iter()
-        .map(|episode| episode.steering_adequacy)
-        .collect();
-    let high_curvature_throttle_values: Vec<f32> = episodes
-        .iter()
-        .map(|episode| episode.high_curvature_throttle_mean)
-        .collect();
-    let curvature_error_values: Vec<f32> = episodes
-        .iter()
-        .map(|episode| episode.curvature_steering_error_mean)
-        .collect();
-    let curvature_bias_values: Vec<f32> = episodes
-        .iter()
-        .map(|episode| episode.curvature_steering_bias_mean)
-        .collect();
-    let understeer_values: Vec<f32> = episodes
-        .iter()
-        .map(|episode| episode.understeer_rate)
-        .collect();
-    let turn_entry_speed_values: Vec<f32> = episodes
-        .iter()
-        .filter_map(|episode| episode.turn_entry_speed)
-        .collect();
-    let peak_curvature_speed_values: Vec<f32> = episodes
-        .iter()
-        .filter_map(|episode| episode.peak_curvature_speed)
-        .collect();
-    let crash_speed_values: Vec<f32> = episodes
-        .iter()
-        .filter_map(|episode| episode.crash_speed)
-        .collect();
-    let entry_offset_values: Vec<f32> = episodes
-        .iter()
-        .filter_map(|episode| episode.entry_lateral_offset)
-        .collect();
-    let peak_offset_values: Vec<f32> = episodes
-        .iter()
-        .filter_map(|episode| episode.peak_lateral_offset)
-        .collect();
-    let peak_line_gap_values: Vec<f32> = episodes
-        .iter()
-        .filter_map(|episode| episode.peak_centerline_distance)
-        .collect();
-
-    TurnExecutionSummary {
-        turn_in_latency_fraction_mean: (!turn_in_latency_fraction_values.is_empty())
-            .then_some(mean(&turn_in_latency_fraction_values)),
-        turn_in_latency_fraction_p90: (!turn_in_latency_fraction_values.is_empty())
-            .then_some(percentile(turn_in_latency_fraction_values.clone(), 0.90)),
-        turn_in_latency_ticks_mean: (!turn_in_latency_ticks_values.is_empty())
-            .then_some(mean(&turn_in_latency_ticks_values)),
-        throttle_release_latency_fraction_mean: (!throttle_release_latency_fraction_values
-            .is_empty())
-        .then_some(mean(&throttle_release_latency_fraction_values)),
-        throttle_release_latency_ticks_mean: (!throttle_release_latency_ticks_values.is_empty())
-            .then_some(mean(&throttle_release_latency_ticks_values)),
-        steering_adequacy_mean: mean(&steering_adequacy_values),
-        high_curvature_throttle_mean: mean(&high_curvature_throttle_values),
-        curvature_steering_error_mean: mean(&curvature_error_values),
-        curvature_steering_bias_mean: mean(&curvature_bias_values),
-        understeer_rate_mean: mean(&understeer_values),
-        turn_entry_speed_mean: (!turn_entry_speed_values.is_empty())
-            .then_some(mean(&turn_entry_speed_values)),
-        turn_entry_speed_p90: (!turn_entry_speed_values.is_empty())
-            .then_some(percentile(turn_entry_speed_values.clone(), 0.90)),
-        peak_curvature_speed_mean: (!peak_curvature_speed_values.is_empty())
-            .then_some(mean(&peak_curvature_speed_values)),
-        crash_speed_mean: (!crash_speed_values.is_empty()).then_some(mean(&crash_speed_values)),
-        entry_lateral_offset_mean: (!entry_offset_values.is_empty())
-            .then_some(mean(&entry_offset_values)),
-        peak_lateral_offset_mean: (!peak_offset_values.is_empty())
-            .then_some(mean(&peak_offset_values)),
-        peak_centerline_distance_mean: (!peak_line_gap_values.is_empty())
-            .then_some(mean(&peak_line_gap_values)),
-    }
-}
-
-pub fn summarize_failure_modes(episodes: &[EpisodeRecord]) -> Vec<FailureModeCount> {
-    let total_classified = episodes
-        .iter()
-        .filter(|episode| episode.failure_mode.is_some())
-        .count()
-        .max(1);
-    let mut counts = std::collections::BTreeMap::<String, usize>::new();
-    for episode in episodes {
-        if let Some(label) = &episode.failure_mode {
-            *counts.entry(label.clone()).or_default() += 1;
-        }
-    }
-
-    let mut rows: Vec<_> = counts
-        .into_iter()
-        .map(|(label, count)| FailureModeCount {
-            label,
-            count,
-            share: count as f32 / total_classified as f32,
-        })
-        .collect();
-    rows.sort_by(|a, b| b.count.cmp(&a.count));
-    rows
 }
 
 fn curvature_demand(tick: &TickTraceRecord) -> f32 {

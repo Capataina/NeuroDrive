@@ -1,8 +1,8 @@
 # Plan — PPO Optimisation and Improvement
 
-## Status — Phases 0–1 Complete, Phase 2 Partially Complete
+## Status — Phases 0–1 Complete, Phase 2 Partially Complete, Phase 3 Partially Complete
 
-Phases 0 and 1 are fully complete. Phase 2 has key items done; remaining items are valid future work.
+Phases 0 and 1 are fully complete. Phase 2 has key items done. Phase 3.3 (more envs) is done — car count bumped to 8. Remaining items are valid future work.
 
 | Item | Status | Notes |
 |------|--------|-------|
@@ -15,6 +15,7 @@ Phases 0 and 1 are fully complete. Phase 2 has key items done; remaining items a
 | Phase 2.2: Linear LR annealing | Not started | |
 | Phase 2.3: Adam ε → 1e-5 | **Done** | |
 | Phase 2.4: Increase crash penalty | **Superseded** | Crash penalty now set to `0.0` — the velocity projection reward provides sufficient signal without penalising crashes. |
+| Phase 2.5: Extract log-std Adam into shared optimiser | Not started | The `ppo_finish_epoch` function has 14 lines of inlined Adam for `a_log_std` that duplicates `AdamOptimizer::step()`. Extend `AdamOptimizer` to handle scalar params, or extract a helper. Low priority but prevents divergence if hyperparams change. |
 | Phase 3: Scale and polish | Not started | |
 
 The reward structure has been fundamentally redesigned in `context/plans/reward-and-spawn-overhaul.md`. The finish-line removal and analytics overhaul are both complete. Remaining Phase 2–3 items (observation normalisation, LR annealing, more envs, value clipping) remain valid future work under the new reward paradigm.
@@ -29,7 +30,7 @@ This plan is grounded in the research paper at `context/references/ppo-optimisat
 
 ## Success Criteria
 
-- At least one car completes a full lap (100% progress, `LapComplete` episode end)
+- At least one car achieves 100% progress (cumulative forward arc-length equivalent to track length)
 - Dead neuron rate drops below 5% (tanh effectively eliminates this)
 - Average progress across a 100-episode window exceeds 50%
 - Crash rate in a 100-episode window drops below 80%

@@ -3,14 +3,9 @@ use crate::analytics::models::{EpisodeTracker, NUM_PROGRESS_SECTORS};
 /// Per-sector behavioural profile summarising the agent's control outputs and
 /// positioning across recent episode traces.
 pub struct SectorBehaviourProfile {
-    pub sector: usize,
-    pub speed_mean: f32,
     pub speed_var: f32,
-    pub steering_mean: f32,
     pub steering_var: f32,
-    pub throttle_mean: f32,
     pub throttle_var: f32,
-    pub centerline_dist_mean: f32,
     pub centerline_dist_var: f32,
     pub sample_count: usize,
 }
@@ -56,24 +51,19 @@ impl SectorAccumulator {
         (mean as f32, var as f32)
     }
 
-    fn into_profile(self, sector: usize) -> SectorBehaviourProfile {
-        let (speed_mean, speed_var) = Self::mean_var(self.speed_sum, self.speed_sumsq, self.count);
-        let (steering_mean, steering_var) =
+    fn into_profile(self) -> SectorBehaviourProfile {
+        let (_, speed_var) = Self::mean_var(self.speed_sum, self.speed_sumsq, self.count);
+        let (_, steering_var) =
             Self::mean_var(self.steering_sum, self.steering_sumsq, self.count);
-        let (throttle_mean, throttle_var) =
+        let (_, throttle_var) =
             Self::mean_var(self.throttle_sum, self.throttle_sumsq, self.count);
-        let (centerline_dist_mean, centerline_dist_var) =
+        let (_, centerline_dist_var) =
             Self::mean_var(self.centerline_sum, self.centerline_sumsq, self.count);
 
         SectorBehaviourProfile {
-            sector,
-            speed_mean,
             speed_var,
-            steering_mean,
             steering_var,
-            throttle_mean,
             throttle_var,
-            centerline_dist_mean,
             centerline_dist_var,
             sample_count: self.count,
         }
@@ -109,8 +99,7 @@ pub fn compute_sector_consistency(
 
     accumulators
         .into_iter()
-        .enumerate()
-        .map(|(sector, acc)| acc.into_profile(sector))
+        .map(|acc| acc.into_profile())
         .collect()
 }
 
@@ -203,7 +192,7 @@ mod tests {
         let trace = make_trace(ticks);
         let tracker = EpisodeTracker {
             episodes: Vec::new(),
-            a2c_updates: Vec::new(),
+            ppo_updates: Vec::new(),
             episode_traces: vec![trace],
             last_recorded_update: 0,
         };
@@ -225,7 +214,7 @@ mod tests {
         let trace = make_trace(ticks);
         let tracker = EpisodeTracker {
             episodes: Vec::new(),
-            a2c_updates: Vec::new(),
+            ppo_updates: Vec::new(),
             episode_traces: vec![trace],
             last_recorded_update: 0,
         };
@@ -242,7 +231,7 @@ mod tests {
     fn empty_tracker_returns_one() {
         let tracker = EpisodeTracker {
             episodes: Vec::new(),
-            a2c_updates: Vec::new(),
+            ppo_updates: Vec::new(),
             episode_traces: Vec::new(),
             last_recorded_update: 0,
         };

@@ -24,8 +24,6 @@ pub struct SpawnConfig {
 pub struct TrainerConfig {
     /// Number of concurrent environment instances.
     pub num_envs: usize,
-    /// Lateral spread in world units for spawn fanout perpendicular to track heading.
-    pub spawn_lateral_spread: f32,
     /// Sprite alpha for non-best cars.
     pub default_car_alpha: f32,
     /// Sprite alpha for the best-performing car.
@@ -35,8 +33,7 @@ pub struct TrainerConfig {
 impl Default for TrainerConfig {
     fn default() -> Self {
         Self {
-            num_envs: 3,
-            spawn_lateral_spread: 30.0,
+            num_envs: 8,
             default_car_alpha: 0.35,
             best_car_alpha: 1.0,
         }

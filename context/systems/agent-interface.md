@@ -58,7 +58,7 @@ The observation vector has **43 dimensions** (`OBSERVATION_DIM = 43`):
 
 - **Input systems** run in `SimSet::Input`:
   - `keyboard_action_input_system` → `action_smoothing_system` (chained).
-  - A2C act system inserts between keyboard and smoothing via `.after()` / `.before()`.
+  - PPO act system inserts between keyboard and smoothing via `.after()` / `.before()`.
 - **Observation systems** run in `SimSet::Measurement`:
   - `update_sensor_readings_system` runs after both `update_track_progress_system` and `episode_loop_system` — so post-reset observations represent the reset spawn state rather than stale crash state.
   - `build_observation_vector_system` runs after sensor update.
@@ -70,7 +70,7 @@ The observation vector has **43 dimensions** (`OBSERVATION_DIM = 43`):
 | `ActionState.desired` | Keyboard or brain systems | Smoothing system | Single desired action per fixed tick |
 | `ActionState.applied` | Smoothing system | Physics, analytics, debug | Authoritative executed control |
 | `SensorReadings` | Observation systems | Debug overlays, HUD helpers | Raw world-derived measurements including v_forward, v_lateral, speed_delta, previous actions |
-| `ObservationVector` | Observation systems | A2C brain and future controllers | Fixed-size normalised policy input (dim 43) |
+| `ObservationVector` | Observation systems | PPO brain and future controllers | Fixed-size normalised policy input (dim 43) |
 | `ObservationConfig` | Resource defaults | Observation systems and debug overlays | Centralises ray and lookahead configuration |
 
 ## Implemented Outputs / Artifacts
@@ -92,7 +92,7 @@ The observation vector has **43 dimensions** (`OBSERVATION_DIM = 43`):
 
 ## Planned / Missing / Likely Changes
 
-- A more explicit centreline-first observation hierarchy is a likely next step if A2C continues to underperform on turn anticipation.
+- A more explicit centreline-first observation hierarchy is a likely next step if PPO continues to underperform on turn anticipation.
 - A reduced ray bundle remains a plausible experiment, but only after geometry-derived features are measured cleanly.
 - Input-health validation would be useful: saturation detection, dead-ray detection, feature distribution drift.
 - `ActionState` has been migrated to a per-car Component as part of the vectorised trainer work.

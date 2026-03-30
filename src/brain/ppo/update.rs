@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use rand::RngExt;
 
-use crate::brain::a2c::{A2cBrain, A2cLayerHealth, A2cTrainingStats};
-use crate::brain::a2c::buffer::TrainerRolloutBuffer;
+use crate::brain::ppo::{PpoBrain, PpoLayerHealth, PpoTrainingStats};
+use crate::brain::ppo::buffer::TrainerRolloutBuffer;
 use crate::brain::common::math::{normal_entropy, normal_log_prob};
 use crate::brain::common::mlp::Linear;
 
@@ -30,8 +30,6 @@ pub struct EpochAccumulator {
 }
 
 /// Pre-computed data for a PPO update that is amortised across multiple frames.
-/// Samples are processed in chunks (samples_per_tick), and epochs advance once
-/// all samples are done.
 pub struct PreparedUpdate {
     pub frozen_buffer: TrainerRolloutBuffer,
     pub advantages: Vec<f32>,
@@ -51,9 +49,12 @@ impl PreparedUpdate {
 
 /// Validates the buffer, computes per-env GAE, and freezes the data for staged
 /// epoch processing. Returns `None` if the buffer is empty or misaligned.
+///
+/// Takes ownership of the buffer contents via `std::mem::take` to avoid
+/// a deep clone. The caller's buffer is left empty.
 pub fn ppo_prepare_update(
-    brain: &mut A2cBrain,
-    buffer: &TrainerRolloutBuffer,
+    brain: &mut PpoBrain,
+    buffer: &mut TrainerRolloutBuffer,
     bootstrap_values: &HashMap<u32, f32>,
 ) -> Option<PreparedUpdate> {
     if buffer.len() == 0 {
@@ -78,16 +79,20 @@ pub fn ppo_prepare_update(
     let (advantages, returns) =
         buffer.compute_gae_per_env(bootstrap_values, brain.gamma, brain.gae_lambda);
     let value_predictions = buffer.values.clone();
+    let len = buffer.len();
 
     // Fisher-Yates shuffle for minibatch sample ordering
-    let mut indices: Vec<usize> = (0..buffer.len()).collect();
+    let mut indices: Vec<usize> = (0..len).collect();
     for i in (1..indices.len()).rev() {
         let j = brain.rng.random_range(0..=i);
         indices.swap(i, j);
     }
 
+    // Take ownership of buffer contents — avoids deep clone.
+    let frozen_buffer = std::mem::take(buffer);
+
     Some(PreparedUpdate {
-        frozen_buffer: buffer.clone(),
+        frozen_buffer,
         advantages,
         returns,
         value_predictions,
@@ -98,11 +103,11 @@ pub fn ppo_prepare_update(
     })
 }
 
-/// Processes up to `max_samples` from the current epoch. Gradients accumulate
-/// across chunks. Returns `true` when the epoch's samples are exhausted and the
-/// caller should run `ppo_finish_epoch`.
+/// Processes up to `max_samples` from the current epoch using **batched**
+/// forward and backward passes. Gradients accumulate across chunks.
+/// Returns `true` when the epoch's samples are exhausted.
 pub fn ppo_process_chunk(
-    brain: &mut A2cBrain,
+    brain: &mut PpoBrain,
     prepared: &mut PreparedUpdate,
     max_samples: usize,
 ) -> bool {
@@ -124,47 +129,86 @@ pub fn ppo_process_chunk(
     let batch_size = buffer.len();
     let batch_size_f32 = batch_size as f32;
     let end = (prepared.sample_offset + max_samples).min(batch_size);
+    let chunk_size = end - prepared.sample_offset;
     let acc = &mut prepared.accum;
 
-    // Per-chunk advantage normalisation
+    if chunk_size == 0 {
+        return true;
+    }
+
     let chunk_indices = &prepared.shuffled_indices[prepared.sample_offset..end];
-    let chunk_size_f = (end - prepared.sample_offset) as f32;
+
+    // Per-chunk advantage normalisation
+    let chunk_size_f = chunk_size as f32;
     let chunk_adv_mean = chunk_indices.iter().map(|&idx| advantages[idx]).sum::<f32>() / chunk_size_f.max(1.0);
     let chunk_adv_var = chunk_indices.iter().map(|&idx| (advantages[idx] - chunk_adv_mean).powi(2)).sum::<f32>() / chunk_size_f.max(1.0);
     let chunk_adv_std = (chunk_adv_var + 1e-8).sqrt();
 
-    for i in prepared.sample_offset..end {
-        let idx = prepared.shuffled_indices[i];
-        let state = &buffer.states[idx];
+    let obs_dim = brain.model.scratch.obs_dim;
+    let act_dim = brain.model.scratch.act_dim;
+
+    // ── Stack observations into a local batch matrix ────────────────
+    // Using a local Vec avoids a double-mutable-borrow on brain.model
+    // (scratch.obs_batch vs forward_batch(&mut self)).
+    let mut obs_batch = vec![0.0f32; chunk_size * obs_dim];
+    for (s, &idx) in chunk_indices.iter().enumerate() {
+        let src = &buffer.states[idx];
+        obs_batch[s * obs_dim..(s + 1) * obs_dim].copy_from_slice(src);
+    }
+
+    // ── Batched forward pass ────────────────────────────────────────
+    brain.model.forward_batch(&obs_batch, chunk_size);
+
+    // ── Collect tanh saturation stats from batch caches ─────────────
+    collect_saturated_slice(
+        brain.model.a_tanh1.batch_cache(),
+        &mut acc.actor_dead[0],
+        &mut acc.actor_seen[0],
+    );
+    collect_saturated_slice(
+        brain.model.a_tanh2.batch_cache(),
+        &mut acc.actor_dead[1],
+        &mut acc.actor_seen[1],
+    );
+    collect_saturated_slice(
+        brain.model.c_tanh1.batch_cache(),
+        &mut acc.critic_dead[0],
+        &mut acc.critic_seen[0],
+    );
+    collect_saturated_slice(
+        brain.model.c_tanh2.batch_cache(),
+        &mut acc.critic_dead[1],
+        &mut acc.critic_seen[1],
+    );
+
+    // ── Per-sample PPO loss computation + gradient seeds ────────────
+    // Critic: grad_values[s] = Huber gradient / batch_size
+    // Actor: grad_means[s * act_dim + j] = (-policy_weight * adv * d_lp/d_mean_j) / batch_size
+    let grad_values = &mut brain.model.scratch.gc_out;
+    let grad_means = &mut brain.model.scratch.ga_out;
+
+    let a_out = &brain.model.scratch.a_out;
+    let c_out = &brain.model.scratch.c_out;
+    let std_vals: [f32; 2] = [
+        brain.model.a_log_std[0].exp(),
+        brain.model.a_log_std[1].exp(),
+    ];
+
+    for (s, &idx) in chunk_indices.iter().enumerate() {
         let action = &buffer.actions[idx];
         let latent_action = &buffer.latent_actions[idx];
         let old_log_prob = buffer.old_log_probs[idx];
         let adv = (advantages[idx] - chunk_adv_mean) / chunk_adv_std;
         let ret = returns[idx];
 
-        let (action_dist, value) = brain.model.forward(state);
-        collect_saturated_tanh(
-            brain.model.a_tanh1.output_cache.as_deref(),
-            &mut acc.actor_dead[0],
-            &mut acc.actor_seen[0],
-        );
-        collect_saturated_tanh(
-            brain.model.a_tanh2.output_cache.as_deref(),
-            &mut acc.actor_dead[1],
-            &mut acc.actor_seen[1],
-        );
-        collect_saturated_tanh(
-            brain.model.c_tanh1.output_cache.as_deref(),
-            &mut acc.critic_dead[0],
-            &mut acc.critic_seen[0],
-        );
-        collect_saturated_tanh(
-            brain.model.c_tanh2.output_cache.as_deref(),
-            &mut acc.critic_dead[1],
-            &mut acc.critic_seen[1],
-        );
+        // Read forward pass results for this sample
+        let value = c_out[s];
+        let means: [f32; 2] = [
+            a_out[s * act_dim],
+            a_out[s * act_dim + 1],
+        ];
 
-        // --- Value loss (Huber) ---
+        // ── Value loss (Huber) ──
         let value_error = value - ret;
         let value_grad = if value_error.abs() <= VALUE_HUBER_DELTA {
             value_error
@@ -176,15 +220,9 @@ pub fn ppo_process_chunk(
         } else {
             VALUE_HUBER_DELTA * (value_error.abs() - 0.5 * VALUE_HUBER_DELTA)
         };
-        let d_value = vec![value_grad / batch_size_f32];
+        grad_values[s] = value_grad / batch_size_f32;
 
-        let c2_g = brain.model.c_value.backward(&d_value);
-        let c2_r_g = brain.model.c_tanh2.backward(&c2_g);
-        let c1_g = brain.model.c_fc2.backward(&c2_r_g);
-        let c1_r_g = brain.model.c_tanh1.backward(&c1_g);
-        brain.model.c_fc1.backward(&c1_r_g);
-
-        // --- PPO clipped policy loss ---
+        // ── PPO clipped policy loss ──
         let mut new_log_prob = 0.0;
         let mut d_lp_d_means = [0.0f32; 2];
         let mut d_lp_d_log_stds = [0.0f32; 2];
@@ -193,8 +231,8 @@ pub fn ppo_process_chunk(
             let latent = latent_action[j];
             let a = action[j];
             let squashed = if j == 0 { a } else { 2.0 * a - 1.0 };
-            let mean = action_dist.mean[j];
-            let std = action_dist.std[j];
+            let mean = means[j];
+            let std = std_vals[j];
 
             let lp = squashed_gaussian_log_prob(latent, squashed, mean, std, j);
             new_log_prob += lp;
@@ -222,19 +260,23 @@ pub fn ppo_process_chunk(
         acc.approx_kl_sum += old_log_prob - new_log_prob;
         acc.policy_loss_sum += -surr_unclipped.min(surr_clipped);
 
-        let mut d_mean = vec![0.0; 2];
+        // Gradient seeds for actor backward
         for j in 0..2 {
-            d_mean[j] = (-policy_weight * adv * d_lp_d_means[j]) / batch_size_f32;
+            grad_means[s * act_dim + j] =
+                (-policy_weight * adv * d_lp_d_means[j]) / batch_size_f32;
             brain.model.a_log_std_grad[j] +=
                 (-policy_weight * adv * d_lp_d_log_stds[j] - ENTROPY_COEF) / batch_size_f32;
         }
-
-        let a2_g = brain.model.a_mean.backward(&d_mean);
-        let a2_r_g = brain.model.a_tanh2.backward(&a2_g);
-        let a1_g = brain.model.a_fc2.backward(&a2_r_g);
-        let a1_r_g = brain.model.a_tanh1.backward(&a1_g);
-        brain.model.a_fc1.backward(&a1_r_g);
     }
+
+    // ── Batched backward passes ─────────────────────────────────────
+    // Clone the gradient seeds since backward_batch needs &[f32] while
+    // the scratch buffers are &mut — we need separate borrows.
+    let gv: Vec<f32> = grad_values[..chunk_size].to_vec();
+    let gm: Vec<f32> = grad_means[..chunk_size * act_dim].to_vec();
+
+    brain.model.backward_batch_critic(&gv, chunk_size);
+    brain.model.backward_batch_actor(&gm, chunk_size);
 
     prepared.sample_offset = end;
     end >= batch_size
@@ -243,9 +285,9 @@ pub fn ppo_process_chunk(
 /// Clips gradients, steps the optimiser, and updates log-std after all samples
 /// in the current epoch have been processed. On the final epoch, writes stats.
 pub fn ppo_finish_epoch(
-    brain: &mut A2cBrain,
+    brain: &mut PpoBrain,
     prepared: &PreparedUpdate,
-    stats: &mut A2cTrainingStats,
+    stats: &mut PpoTrainingStats,
     is_final_epoch: bool,
 ) {
     clip_linear_gradients(
@@ -289,7 +331,7 @@ pub fn ppo_finish_epoch(
             brain.model.log_std_opt_v[j] / (1.0 - 0.999f32.powf(brain.model.opt_t));
 
         brain.model.a_log_std[j] -= 3e-4 * m_hat / (v_hat.sqrt() + 1e-8);
-        brain.model.a_log_std[j] = brain.model.a_log_std[j].clamp(-2.0, 0.5);
+        brain.model.a_log_std[j] = brain.model.a_log_std[j].clamp(-1.0, 0.5);
     }
 
     if is_final_epoch {
@@ -313,37 +355,37 @@ pub fn ppo_finish_epoch(
         stats.clip_fraction = acc.clip_count as f32 / batch_size_f32.max(1.0);
         stats.approx_kl = acc.approx_kl_sum / batch_size_f32.max(1.0);
         stats.layer_health = vec![
-            A2cLayerHealth {
+            PpoLayerHealth {
                 layer_name: "actor_fc1".to_string(),
                 weight_l2_norm: brain.model.a_fc1.weight_l2_norm(),
                 gradient_l2_norm: brain.model.a_fc1.grad_l2_norm(),
                 saturated_fraction: Some(fraction(acc.actor_dead[0], acc.actor_seen[0])),
             },
-            A2cLayerHealth {
+            PpoLayerHealth {
                 layer_name: "actor_fc2".to_string(),
                 weight_l2_norm: brain.model.a_fc2.weight_l2_norm(),
                 gradient_l2_norm: brain.model.a_fc2.grad_l2_norm(),
                 saturated_fraction: Some(fraction(acc.actor_dead[1], acc.actor_seen[1])),
             },
-            A2cLayerHealth {
+            PpoLayerHealth {
                 layer_name: "actor_mean".to_string(),
                 weight_l2_norm: brain.model.a_mean.weight_l2_norm(),
                 gradient_l2_norm: brain.model.a_mean.grad_l2_norm(),
                 saturated_fraction: None,
             },
-            A2cLayerHealth {
+            PpoLayerHealth {
                 layer_name: "critic_fc1".to_string(),
                 weight_l2_norm: brain.model.c_fc1.weight_l2_norm(),
                 gradient_l2_norm: brain.model.c_fc1.grad_l2_norm(),
                 saturated_fraction: Some(fraction(acc.critic_dead[0], acc.critic_seen[0])),
             },
-            A2cLayerHealth {
+            PpoLayerHealth {
                 layer_name: "critic_fc2".to_string(),
                 weight_l2_norm: brain.model.c_fc2.weight_l2_norm(),
                 gradient_l2_norm: brain.model.c_fc2.grad_l2_norm(),
                 saturated_fraction: Some(fraction(acc.critic_dead[1], acc.critic_seen[1])),
             },
-            A2cLayerHealth {
+            PpoLayerHealth {
                 layer_name: "critic_value".to_string(),
                 weight_l2_norm: brain.model.c_value.weight_l2_norm(),
                 gradient_l2_norm: brain.model.c_value.grad_l2_norm(),
@@ -369,18 +411,17 @@ pub fn ppo_finish_epoch(
 /// Blocking PPO update — runs all epochs synchronously. Used only for the
 /// on-exit flush where frame budget does not matter.
 pub fn ppo_update_blocking(
-    brain: &mut A2cBrain,
-    buffer: &TrainerRolloutBuffer,
-    stats: &mut A2cTrainingStats,
+    brain: &mut PpoBrain,
+    buffer: &mut TrainerRolloutBuffer,
+    stats: &mut PpoTrainingStats,
     bootstrap_values: &HashMap<u32, f32>,
 ) {
     let Some(mut prepared) = ppo_prepare_update(brain, buffer, bootstrap_values) else {
         return;
     };
-    let batch_size = buffer.len();
+    let batch_size = prepared.frozen_buffer.len();
     while prepared.is_active() {
         let is_final = prepared.epochs_remaining == 1;
-        // Process entire epoch in one go
         ppo_process_chunk(brain, &mut prepared, batch_size);
         ppo_finish_epoch(brain, &prepared, stats, is_final);
         prepared.epochs_remaining -= 1;
@@ -422,10 +463,7 @@ fn explained_variance(targets: &[f32], predictions: &[f32]) -> f32 {
     1.0 - (error_variance / variance_target)
 }
 
-fn collect_saturated_tanh(cache: Option<&[f32]>, saturated: &mut usize, seen: &mut usize) {
-    let Some(values) = cache else {
-        return;
-    };
+fn collect_saturated_slice(values: &[f32], saturated: &mut usize, seen: &mut usize) {
     *seen += values.len();
     *saturated += values.iter().filter(|value| value.abs() > 0.99).count();
 }
@@ -460,19 +498,10 @@ fn clip_linear_gradients(layers: &mut [&mut Linear], max_norm: f32) {
         return;
     }
 
-    let mut sumsq = 0.0;
+    let mut sumsq = 0.0f32;
     for layer in layers.iter() {
-        sumsq += layer
-            .grad_weights
-            .iter()
-            .flat_map(|row| row.iter())
-            .map(|grad| grad * grad)
-            .sum::<f32>();
-        sumsq += layer
-            .grad_biases
-            .iter()
-            .map(|grad| grad * grad)
-            .sum::<f32>();
+        sumsq += layer.grad_weights.iter().map(|g| g * g).sum::<f32>();
+        sumsq += layer.grad_biases.iter().map(|g| g * g).sum::<f32>();
     }
 
     let norm = sumsq.sqrt();
@@ -482,13 +511,7 @@ fn clip_linear_gradients(layers: &mut [&mut Linear], max_norm: f32) {
 
     let scale = max_norm / norm;
     for layer in layers.iter_mut() {
-        for row in &mut layer.grad_weights {
-            for grad in row {
-                *grad *= scale;
-            }
-        }
-        for grad in &mut layer.grad_biases {
-            *grad *= scale;
-        }
+        layer.grad_weights.iter_mut().for_each(|g| *g *= scale);
+        layer.grad_biases.iter_mut().for_each(|g| *g *= scale);
     }
 }

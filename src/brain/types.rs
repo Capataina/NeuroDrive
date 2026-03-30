@@ -1,8 +1,5 @@
 use bevy::prelude::*;
 
-use crate::agent::action::CarAction;
-use crate::agent::observation::ObservationVector;
-
 /// The active mode of the agent.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentMode {
@@ -32,10 +29,3 @@ pub struct PolicyOutput {
     pub throttle_std: f32,
 }
 
-/// Interface for any Brain algorithm.
-/// TODO: remove in Stage 5 cleanup — vectorised path calls model.forward() directly.
-#[allow(dead_code)]
-pub trait Brain: Send + Sync {
-    /// Given an observation, returns the chosen action and any algorithm-specific state.
-    fn act(&mut self, obs: &ObservationVector) -> CarAction;
-}

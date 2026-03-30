@@ -3,6 +3,9 @@ name = "NeuroDrive"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+profiling = []
+
 [dependencies]
 bevy = "0.18.0"
 rand = "0.10.0"

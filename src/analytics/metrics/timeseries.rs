@@ -4,15 +4,12 @@ use crate::analytics::models::EpisodeTracker;
 pub struct EpisodeTimeSeries {
     pub progress: Vec<f32>,
     pub reward: Vec<f32>,
-    pub life_ticks: Vec<u32>,
     pub is_crash: Vec<bool>,
     pub env_ids: Vec<u32>,
 }
 
-/// Ordered time-series vectors extracted from A2C update records.
+/// Ordered time-series vectors extracted from PPO update records.
 pub struct UpdateTimeSeries {
-    pub policy_loss: Vec<f32>,
-    pub value_loss: Vec<f32>,
     pub entropy: Vec<f32>,
     pub clip_fraction: Vec<f32>,
     pub approx_kl: Vec<f32>,
@@ -23,14 +20,12 @@ pub struct UpdateTimeSeries {
 pub fn extract_episode_series(tracker: &EpisodeTracker) -> EpisodeTimeSeries {
     let mut progress = Vec::with_capacity(tracker.episodes.len());
     let mut reward = Vec::with_capacity(tracker.episodes.len());
-    let mut life_ticks = Vec::with_capacity(tracker.episodes.len());
     let mut is_crash = Vec::with_capacity(tracker.episodes.len());
     let mut env_ids = Vec::with_capacity(tracker.episodes.len());
 
     for ep in &tracker.episodes {
         progress.push(ep.progress);
         reward.push(ep.reward);
-        life_ticks.push(ep.ticks);
         is_crash.push(ep.end_reason == "crash");
         env_ids.push(ep.env_id);
     }
@@ -38,7 +33,6 @@ pub fn extract_episode_series(tracker: &EpisodeTracker) -> EpisodeTimeSeries {
     EpisodeTimeSeries {
         progress,
         reward,
-        life_ticks,
         is_crash,
         env_ids,
     }
@@ -46,16 +40,12 @@ pub fn extract_episode_series(tracker: &EpisodeTracker) -> EpisodeTimeSeries {
 
 /// Extracts per-update scalar series from the tracker in recording order.
 pub fn extract_update_series(tracker: &EpisodeTracker) -> UpdateTimeSeries {
-    let mut policy_loss = Vec::with_capacity(tracker.a2c_updates.len());
-    let mut value_loss = Vec::with_capacity(tracker.a2c_updates.len());
-    let mut entropy = Vec::with_capacity(tracker.a2c_updates.len());
-    let mut clip_fraction = Vec::with_capacity(tracker.a2c_updates.len());
-    let mut approx_kl = Vec::with_capacity(tracker.a2c_updates.len());
-    let mut explained_variance = Vec::with_capacity(tracker.a2c_updates.len());
+    let mut entropy = Vec::with_capacity(tracker.ppo_updates.len());
+    let mut clip_fraction = Vec::with_capacity(tracker.ppo_updates.len());
+    let mut approx_kl = Vec::with_capacity(tracker.ppo_updates.len());
+    let mut explained_variance = Vec::with_capacity(tracker.ppo_updates.len());
 
-    for u in &tracker.a2c_updates {
-        policy_loss.push(u.policy_loss);
-        value_loss.push(u.value_loss);
+    for u in &tracker.ppo_updates {
         entropy.push(u.policy_entropy);
         clip_fraction.push(u.clip_fraction);
         approx_kl.push(u.approx_kl);
@@ -63,8 +53,6 @@ pub fn extract_update_series(tracker: &EpisodeTracker) -> UpdateTimeSeries {
     }
 
     UpdateTimeSeries {
-        policy_loss,
-        value_loss,
         entropy,
         clip_fraction,
         approx_kl,

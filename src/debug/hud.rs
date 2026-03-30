@@ -8,7 +8,7 @@ use bevy::ui::{
 };
 
 use crate::agent::observation::SensorReadings;
-use crate::brain::a2c::A2cTrainingStats;
+use crate::brain::ppo::PpoTrainingStats;
 use crate::brain::ranking::TrainerLiveRanking;
 use crate::debug::overlays::DebugOverlayState;
 use crate::game::car::{Car, EnvInstanceId};
@@ -35,12 +35,6 @@ impl Default for DrivingHudStats {
         }
     }
 }
-
-/// Placeholder resource retained for compatibility with DebugPlugin resource init.
-/// Episode-level accumulation is no longer needed since we fold completions directly
-/// from EpisodeState per car.
-#[derive(Resource, Debug, Default)]
-pub struct DrivingHudEpisodeAccumulator;
 
 /// Rolling debug-only history used to split recent episodes into four real-time quarters.
 #[derive(Resource, Debug, Default)]
@@ -395,7 +389,7 @@ pub(crate) fn update_driving_hud_text_system(
     overlay: Res<DebugOverlayState>,
     hud_stats: Res<DrivingHudStats>,
     history: Res<DrivingHudHistory>,
-    a2c_stats: Option<Res<A2cTrainingStats>>,
+    ppo_stats: Option<Res<PpoTrainingStats>>,
     ranking: Option<Res<TrainerLiveRanking>>,
     car_query: Query<
         (
@@ -461,7 +455,7 @@ pub(crate) fn update_driving_hud_text_system(
         avg_progress_pct,
         moving_avg.return_mean,
     );
-    let learning_line = match a2c_stats {
+    let learning_line = match ppo_stats {
         Some(stats) if stats.last_completed_update > 0 => format!(
             "PPO #{}  EV {:.3}  VL {:.3}  Ent {:.3}  Clip {:.0}%  KL {:.4}",
             stats.last_completed_update,
