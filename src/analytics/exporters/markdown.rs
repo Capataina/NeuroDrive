@@ -247,12 +247,12 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str, context_head
     let total_crashes = crash_episodes.len();
 
     if total_crashes > 0 {
-        let mut type_counts: HashMap<&str, usize> = HashMap::new();
+        let mut type_counts: HashMap<String, usize> = HashMap::new();
         for ep in &crash_episodes {
-            let ct = ep.crash_type.as_deref().unwrap_or("Unknown");
+            let ct = ep.crash_type.map(|k| k.to_string()).unwrap_or_else(|| "Unknown".to_string());
             *type_counts.entry(ct).or_insert(0) += 1;
         }
-        let mut type_list: Vec<(&&str, &usize)> = type_counts.iter().collect();
+        let mut type_list: Vec<(&String, &usize)> = type_counts.iter().collect();
         type_list.sort_by(|a, b| b.1.cmp(a.1));
 
         md.push_str("**Crash type distribution:**\n\n```text\n");
@@ -294,7 +294,7 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str, context_head
             md.push('\n');
         }
 
-        let dominant_type = type_list.first().map(|(t, _)| **t).unwrap_or("Unknown");
+        let dominant_type = type_list.first().map(|(t, _)| t.as_str()).unwrap_or("Unknown");
         let dominant_pct = type_list.first().map(|(_, c)| **c as f32 / total_crashes as f32 * 100.0).unwrap_or(0.0);
 
         md.push_str(&format!(

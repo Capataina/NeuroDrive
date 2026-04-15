@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::analytics::models::{
-    PpoLayerRecord, PpoUpdateRecord, EpisodeRecord, EpisodeTrace, EpisodeTracker,
+    CrashKind, PpoLayerRecord, PpoUpdateRecord, EpisodeRecord, EpisodeTrace, EpisodeTracker,
     TickTraceRecord,
 };
 use crate::analytics::trackers::action::PerCarActionAccumulators;
@@ -10,8 +10,8 @@ use crate::brain::ppo::PpoTrainingStats;
 use crate::game::car::{Car, EnvInstanceId};
 use crate::game::episode::EpisodeState;
 
-/// Classifies a crash based on terminal tick data.
-fn classify_crash(tick: &TickTraceRecord) -> String {
+/// Classifies a crash based on terminal tick kinematics.
+fn classify_crash(tick: &TickTraceRecord) -> CrashKind {
     let speed = tick.speed;
     let vf = tick.v_forward;
     let vl = tick.v_lateral.abs();
@@ -19,15 +19,15 @@ fn classify_crash(tick: &TickTraceRecord) -> String {
     let heading_err = tick.heading_error.abs().to_degrees();
 
     if speed < 50.0 {
-        "Stall".to_string()
+        CrashKind::Stall
     } else if drift > 60.0 {
-        "Spin".to_string()
+        CrashKind::Spin
     } else if vl > vf.abs() {
-        "Slide".to_string()
+        CrashKind::Slide
     } else if heading_err > 30.0 {
-        "Overshoot".to_string()
+        CrashKind::Overshoot
     } else {
-        "HeadOn".to_string()
+        CrashKind::HeadOn
     }
 }
 
@@ -168,7 +168,7 @@ struct TraceAggregates {
     crash_drift_angle_deg: Option<f32>,
     crash_heading_error_deg: Option<f32>,
     crash_min_ray: Option<f32>,
-    crash_type: Option<String>,
+    crash_type: Option<CrashKind>,
     mean_value_prediction: Option<f32>,
     value_at_crash: Option<f32>,
     value_at_start: Option<f32>,
@@ -209,7 +209,7 @@ pub fn episode_tracker_system(
             .map(|episode_trace| episode_trace.metrics.clone())
             .unwrap_or_default();
 
-        let is_crash = format!("{:?}", reason).contains("Crash");
+        let is_crash = reason == crate::game::episode::EpisodeEndReason::Crash;
         let trace_agg = trace.as_ref()
             .map(|t| compute_trace_aggregates(t, is_crash))
             .unwrap_or_default();

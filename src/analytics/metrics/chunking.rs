@@ -114,13 +114,13 @@ pub fn calculate_chunks(records: &[EpisodeRecord], chunk_count: usize) -> Vec<Ch
                 .collect();
             let crash_count = crash_episodes.len().max(1) as f32;
             let slide_crashes = crash_episodes.iter()
-                .filter(|r| r.crash_type.as_deref() == Some("Slide"))
+                .filter(|r| r.crash_type == Some(crate::analytics::models::CrashKind::Slide))
                 .count() as f32;
             let overshoot_crashes = crash_episodes.iter()
-                .filter(|r| r.crash_type.as_deref() == Some("Overshoot"))
+                .filter(|r| r.crash_type == Some(crate::analytics::models::CrashKind::Overshoot))
                 .count() as f32;
             let headon_crashes = crash_episodes.iter()
-                .filter(|r| r.crash_type.as_deref() == Some("HeadOn"))
+                .filter(|r| r.crash_type == Some(crate::analytics::models::CrashKind::HeadOn))
                 .count() as f32;
 
             let avg_crash_speed = {

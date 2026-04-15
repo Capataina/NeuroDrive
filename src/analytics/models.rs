@@ -3,6 +3,28 @@ use serde::{Deserialize, Serialize};
 
 pub const NUM_PROGRESS_SECTORS: usize = 20;
 
+/// Classification of how a crash occurred, based on terminal tick kinematics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CrashKind {
+    Stall,
+    Spin,
+    Slide,
+    Overshoot,
+    HeadOn,
+}
+
+impl std::fmt::Display for CrashKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CrashKind::Stall => write!(f, "Stall"),
+            CrashKind::Spin => write!(f, "Spin"),
+            CrashKind::Slide => write!(f, "Slide"),
+            CrashKind::Overshoot => write!(f, "Overshoot"),
+            CrashKind::HeadOn => write!(f, "HeadOn"),
+        }
+    }
+}
+
 /// Exported analytics snapshot for a completed episode.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EpisodeRecord {
@@ -47,7 +69,7 @@ pub struct EpisodeRecord {
     pub crash_drift_angle_deg: Option<f32>,
     pub crash_heading_error_deg: Option<f32>,
     pub crash_min_ray: Option<f32>,
-    pub crash_type: Option<String>,
+    pub crash_type: Option<CrashKind>,
 
     // Value function
     pub mean_value_prediction: Option<f32>,

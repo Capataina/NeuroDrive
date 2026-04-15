@@ -24,21 +24,22 @@ pub fn collision_detection_system(
         return;
     };
 
-    let half_w = CAR_WIDTH * 0.5;
-    let half_h = CAR_HEIGHT * 0.5;
-
-    let local_corners = [
-        Vec2::new(half_w, half_h),
-        Vec2::new(half_w, -half_h),
-        Vec2::new(-half_w, half_h),
-        Vec2::new(-half_w, -half_h),
-    ];
+    const LOCAL_CORNERS: [Vec2; 4] = {
+        let hw = CAR_WIDTH * 0.5;
+        let hh = CAR_HEIGHT * 0.5;
+        [
+            Vec2::new(hw, hh),
+            Vec2::new(hw, -hh),
+            Vec2::new(-hw, hh),
+            Vec2::new(-hw, -hh),
+        ]
+    };
 
     for (entity, car_transform) in car_query.iter() {
         let car_pos = Vec2::new(car_transform.translation.x, car_transform.translation.y);
         let mut off_road = false;
 
-        for local in &local_corners {
+        for local in &LOCAL_CORNERS {
             let rotated =
                 (car_transform.rotation * Vec3::new(local.x, local.y, 0.0)).truncate();
             if !track.grid.is_road_at(car_pos + rotated) {

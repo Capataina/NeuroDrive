@@ -366,7 +366,7 @@ fn push_corner_arc_samples(
 ) {
     let a0 = (entry - center).y.atan2((entry - center).x);
     let a1 = (exit - center).y.atan2((exit - center).x);
-    let delta = wrap_to_pi(a1 - a0);
+    let delta = crate::sim::wrap_angle(a1 - a0);
 
     // Exclude the first point (already pushed) and include the final exit point.
     for i in 1..=CENTERLINE_ARC_SAMPLES {
@@ -377,16 +377,6 @@ fn push_corner_arc_samples(
     }
 }
 
-fn wrap_to_pi(mut a: f32) -> f32 {
-    use std::f32::consts::PI;
-    while a <= -PI {
-        a += 2.0 * PI;
-    }
-    while a > PI {
-        a -= 2.0 * PI;
-    }
-    a
-}
 
 fn corner_arc_center(tile: TilePart, cell_center: Vec2, half: f32) -> Vec2 {
     let cx = cell_center.x;

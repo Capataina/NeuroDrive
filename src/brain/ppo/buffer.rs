@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
-/// Old single-env rollout buffer. Retained temporarily.
 /// Trainer-wide rollout buffer that collects transitions from all environment
 /// instances. Each transition is tagged with its source `env_id` so GAE can
 /// be computed per-env without cross-env value leakage.

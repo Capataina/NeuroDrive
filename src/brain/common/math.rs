@@ -1,5 +1,5 @@
 use rand::Rng;
-use rand_distr::{Distribution, Normal};
+use rand_distr::{Distribution, Normal, StandardNormal};
 
 /// Initializes a vector with zeros.
 pub fn zeros(size: usize) -> Vec<f32> {
@@ -75,10 +75,10 @@ pub fn normal_log_prob(value: f32, mean: f32, std: f32) -> f32 {
     -0.5 * (diff * diff / variance + (2.0 * std::f32::consts::PI).ln() + 2.0 * std.ln())
 }
 
-/// Samples from a normal distribution.
+/// Samples from a normal distribution using the standard normal + affine transform.
 pub fn sample_normal(mean: f32, std: f32, rng: &mut impl Rng) -> f32 {
-    let normal = Normal::new(mean, std).unwrap();
-    normal.sample(rng)
+    let z: f32 = StandardNormal.sample(rng);
+    mean + std * z
 }
 
 /// Computes entropy of a normal distribution.

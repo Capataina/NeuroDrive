@@ -60,25 +60,6 @@ impl Linear {
         output
     }
 
-    /// Single-sample backward. Accumulates into grad_weights / grad_biases
-    /// and returns grad_input. Retained for non-batch training paths.
-    #[allow(dead_code)]
-    pub fn backward(&mut self, grad_output: &[f32]) -> Vec<f32> {
-        let mut grad_input = vec![0.0; self.in_dim];
-        for i in 0..self.out_dim {
-            let g = grad_output[i];
-            self.grad_biases[i] += g;
-            let row_start = i * self.in_dim;
-            let w_row = &self.weights[row_start..row_start + self.in_dim];
-            let gw_row = &mut self.grad_weights[row_start..row_start + self.in_dim];
-            let input = &self.input_cache;
-            for j in 0..self.in_dim {
-                gw_row[j] += g * input[j];
-                grad_input[j] += w_row[j] * g;
-            }
-        }
-        grad_input
-    }
 
     // ── Batch forward / backward ─────────────────────────────────────
 
@@ -197,15 +178,6 @@ impl Tanh {
         output
     }
 
-    #[allow(dead_code)]
-    pub fn backward(&mut self, grad_output: &[f32]) -> Vec<f32> {
-        let output = self.output_cache.as_ref().unwrap();
-        output
-            .iter()
-            .zip(grad_output.iter())
-            .map(|(&o, &g)| g * (1.0 - o * o))
-            .collect()
-    }
 
     /// Returns a reference to the batch output cache (for saturation diagnostics).
     pub fn batch_cache(&self) -> &[f32] {
