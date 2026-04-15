@@ -315,12 +315,13 @@ fn reset_car_to_spawn(transform: &mut Transform, car: &mut Car, spawn: &SpawnCon
 }
 
 fn sync_progress_to_transform(track: &Track, transform: &Transform, progress: &mut TrackProgress) {
-    let projection = track.centerline.project(transform.translation.truncate());
+    let projection = track.centerline.project(transform.translation.truncate(), None);
     progress.s = projection.s;
     progress.fraction = projection.fraction;
     progress.closest_point = projection.closest_point;
     progress.tangent = projection.tangent;
     progress.distance = projection.distance;
+    progress.last_segment = projection.segment_index;
 }
 
 fn finalize_episode(

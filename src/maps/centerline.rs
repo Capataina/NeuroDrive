@@ -85,27 +85,10 @@ impl TrackCenterline {
             return self.points.first().copied().unwrap_or(Vec2::ZERO);
         }
 
-        let s_wrapped = s.rem_euclid(self.total_length);
-        for i in 0..n {
-            let seg_start = self.cumulative_lengths[i];
-            let seg_end = if i + 1 < n {
-                self.cumulative_lengths[i + 1]
-            } else {
-                self.total_length
-            };
-            let seg_len = (seg_end - seg_start).max(1e-6);
-
-            let in_segment = (s_wrapped >= seg_start && s_wrapped < seg_end)
-                || (i == n - 1 && (s_wrapped - self.total_length).abs() <= 1e-6);
-            if in_segment {
-                let t = ((s_wrapped - seg_start) / seg_len).clamp(0.0, 1.0);
-                let a = self.points[i];
-                let b = self.points[(i + 1) % n];
-                return a.lerp(b, t);
-            }
-        }
-
-        self.points[0]
+        let (idx, t) = self.find_segment_at_s(s);
+        let a = self.points[idx];
+        let b = self.points[(idx + 1) % n];
+        a.lerp(b, t)
     }
 
     /// Returns the unit tangent direction at arc length `s` on the closed loop.
@@ -115,35 +98,46 @@ impl TrackCenterline {
             return Vec2::X;
         }
 
-        let s_wrapped = s.rem_euclid(self.total_length);
-        for i in 0..n {
-            let seg_start = self.cumulative_lengths[i];
-            let seg_end = if i + 1 < n {
-                self.cumulative_lengths[i + 1]
-            } else {
-                self.total_length
-            };
-
-            let in_segment = (s_wrapped >= seg_start && s_wrapped < seg_end)
-                || (i == n - 1 && (s_wrapped - self.total_length).abs() <= 1e-6);
-            if in_segment {
-                let a = self.points[i];
-                let b = self.points[(i + 1) % n];
-                let tangent = (b - a).normalize_or_zero();
-                return if tangent == Vec2::ZERO {
-                    Vec2::X
-                } else {
-                    tangent
-                };
-            }
-        }
-
-        let fallback = (self.points[1] - self.points[0]).normalize_or_zero();
-        if fallback == Vec2::ZERO {
+        let (idx, _t) = self.find_segment_at_s(s);
+        let a = self.points[idx];
+        let b = self.points[(idx + 1) % n];
+        let tangent = (b - a).normalize_or_zero();
+        if tangent == Vec2::ZERO {
             Vec2::X
         } else {
-            fallback
+            tangent
         }
+    }
+
+    /// Finds the segment index and local interpolation parameter for a given arc length.
+    ///
+    /// Uses binary search on cumulative lengths for O(log n) lookup instead of
+    /// linear scan. Returns `(segment_index, t)` where `t` is the interpolation
+    /// fraction within that segment.
+    fn find_segment_at_s(&self, s: f32) -> (usize, f32) {
+        let n = self.points.len();
+        let s_wrapped = s.rem_euclid(self.total_length);
+
+        // Binary search on cumulative_lengths to find the segment containing s_wrapped.
+        let idx = match self
+            .cumulative_lengths
+            .binary_search_by(|probe| probe.partial_cmp(&s_wrapped).unwrap())
+        {
+            Ok(i) => i,
+            Err(i) => i.saturating_sub(1),
+        };
+        let idx = idx.min(n - 1);
+
+        let seg_start = self.cumulative_lengths[idx];
+        let seg_end = if idx + 1 < n {
+            self.cumulative_lengths[idx + 1]
+        } else {
+            self.total_length
+        };
+        let seg_len = (seg_end - seg_start).max(1e-6);
+        let t = ((s_wrapped - seg_start) / seg_len).clamp(0.0, 1.0);
+
+        (idx, t)
     }
 
     /// Builds a closed centreline by traversing grid connectivity.
@@ -178,19 +172,67 @@ impl TrackCenterline {
     ///
     /// Returns the closest point on the polyline, its segment tangent, and the
     /// arc-length progress `s` along the track in `[0, total_length)`.
-    pub fn project(&self, world: Vec2) -> CenterlineProjection {
+    ///
+    /// When `hint` is provided (a segment index from the previous tick), the
+    /// search starts in a narrow window around that segment before falling back
+    /// to a full scan. This exploits temporal coherence — cars move continuously
+    /// so the closest segment is almost always the same or adjacent.
+    pub fn project(&self, world: Vec2, hint: Option<usize>) -> CenterlineProjection {
         let n = self.points.len();
         debug_assert!(n >= 2, "centreline must have at least two points");
 
-        let mut best = CenterlineProjection {
+        let default = CenterlineProjection {
             closest_point: self.points[0],
             tangent: Vec2::X,
             s: 0.0,
             fraction: 0.0,
             distance: f32::INFINITY,
+            segment_index: 0,
         };
 
-        for i in 0..n {
+        // Try hint-based local search first (±5 segments around the hint).
+        if let Some(hint_idx) = hint {
+            let hint_idx = hint_idx.min(n - 1);
+            let window = 5usize;
+            let best = self.project_range(world, hint_idx, window, n, default);
+            if best.distance < f32::INFINITY {
+                return best;
+            }
+        }
+
+        // Full scan fallback.
+        self.project_scan(world, 0..n, default)
+    }
+
+    /// Searches segments in a window of `±radius` around `center`, wrapping at
+    /// the polyline boundary.
+    fn project_range(
+        &self,
+        world: Vec2,
+        center: usize,
+        radius: usize,
+        n: usize,
+        initial: CenterlineProjection,
+    ) -> CenterlineProjection {
+        let start = if center >= radius {
+            center - radius
+        } else {
+            n - (radius - center)
+        };
+        let count = 2 * radius + 1;
+        let iter = (0..count).map(|offset| (start + offset) % n);
+        self.project_scan(world, iter, initial)
+    }
+
+    /// Core projection loop over an iterator of segment indices.
+    fn project_scan(
+        &self,
+        world: Vec2,
+        indices: impl Iterator<Item = usize>,
+        mut best: CenterlineProjection,
+    ) -> CenterlineProjection {
+        let n = self.points.len();
+        for i in indices {
             let a = self.points[i];
             let b = self.points[(i + 1) % n];
             let d = b - a;
@@ -212,6 +254,7 @@ impl TrackCenterline {
                     s,
                     fraction: (s / self.total_length).clamp(0.0, 1.0),
                     distance: dist,
+                    segment_index: i,
                 };
             }
         }
@@ -233,6 +276,8 @@ pub struct CenterlineProjection {
     pub fraction: f32,
     /// Euclidean distance from the query point to `closest_point`.
     pub distance: f32,
+    /// Index of the closest segment in the polyline.
+    pub segment_index: usize,
 }
 
 fn traverse_cells(

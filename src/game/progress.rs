@@ -20,6 +20,9 @@ pub struct TrackProgress {
     pub tangent: Vec2,
     /// Euclidean distance from the car position to the centreline.
     pub distance: f32,
+    /// Segment index from the last projection, used as a spatial hint for the
+    /// next tick's projection to avoid scanning all segments.
+    pub last_segment: usize,
 }
 
 impl Default for TrackProgress {
@@ -30,6 +33,7 @@ impl Default for TrackProgress {
             closest_point: Vec2::ZERO,
             tangent: Vec2::X,
             distance: 0.0,
+            last_segment: 0,
         }
     }
 }
@@ -45,12 +49,13 @@ pub fn update_track_progress_system(
 
     for (transform, mut progress) in car_query.iter_mut() {
         let pos = Vec2::new(transform.translation.x, transform.translation.y);
-        let projection = track.centerline.project(pos);
+        let projection = track.centerline.project(pos, Some(progress.last_segment));
 
         progress.s = projection.s;
         progress.fraction = projection.fraction;
         progress.closest_point = projection.closest_point;
         progress.tangent = projection.tangent;
         progress.distance = projection.distance;
+        progress.last_segment = projection.segment_index;
     }
 }

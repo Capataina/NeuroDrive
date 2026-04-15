@@ -129,7 +129,7 @@ impl Default for ObservationConfig {
     fn default() -> Self {
         Self {
             ray_max_range: 375.0,
-            ray_step: 3.0,
+            ray_step: 6.0,
             speed_norm_max: 900.0,
             lateral_offset_norm_max: 75.0,
             angular_velocity_norm_max: 8.0,
