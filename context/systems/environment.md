@@ -109,7 +109,7 @@
 | `Track` | `maps` startup | physics queries, observations, debug | Single authoritative track entity |
 | `Collided` marker | collision system | episode system, HUD stats | Per-car component, checked before reward finalisation |
 | `TrackProgress` | progress system | episode logic, debug, analytics, observations | Environment measurement, not policy input |
-| `EpisodeState` | episode system (per-car Component) | A2C reward collection, HUD, analytics | Current-tick and last-episode summaries per car. Contains distance_driven, spawn_s, previous_s |
+| `EpisodeState` | episode system (per-car Component) | PPO reward collection, HUD, analytics | Current-tick and last-episode summaries per car. Contains distance_driven, spawn_s, previous_s |
 | `EpisodeMovingAverages` | episode system (per-car Component) | HUD, ranking | Rolling return/progress/crash means (window=20) per car |
 | `EpisodeConfig` | resource defaults | episode system | All reward and timing parameters |
 
@@ -137,7 +137,7 @@ Physics mutates car → Progress recomputed → Episode records reward and check
 ## Partial / In Progress
 
 - Reward shaping has been revised to a velocity-projection + centreline-proximity model, but that behavioural effect depends on analytics validation rather than formal tests.
-- Progress and reward state now feed more downstream systems than originally intended: A2C, HUD, analytics, and turn-diagnosis metrics all depend on `EpisodeState`.
+- Progress and reward state now feed more downstream systems than originally intended: PPO, HUD, analytics, and turn-diagnosis metrics all depend on `EpisodeState`.
 
 ## Planned / Missing / Likely Changes
 

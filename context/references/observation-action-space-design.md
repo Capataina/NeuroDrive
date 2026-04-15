@@ -9,7 +9,15 @@
 
 ## Current Project Relevance
 
-The agent is failing to learn basic cornering despite having lookahead curvature information, heading error, and braking capability. The observation and action spaces are the remaining unexplored axis — the reward structure has been revised (velocity projection), PPO implementation details have been addressed (tanh, orthogonal init, per-minibatch normalisation), and the physics now support braking. If the agent still cannot learn, the observation or action space may be the bottleneck.
+**This reference was written when observations were 23 dimensions with 4 lookahead samples and braking was active.** Since then, all P0–P2 recommendations from this paper have been implemented:
+- **Previous actions** added (P0) — `previous_steering` and `previous_throttle` are now observation features.
+- **Velocity components** (P1) — scalar speed replaced by `v_forward` and `v_lateral` decomposition.
+- **Speed delta** (P2) — frame-over-frame acceleration signal added.
+- **Lookahead expanded** from 4 samples (260 units) to 12 samples (650 units) with heading deltas + curvatures.
+- **Braking removed** — throttle reverted to `[0, 1]` because braking created a "mostly brake" local optimum.
+- **Observation dimension** is now **43** (was 23).
+
+The remaining open recommendation (P3: running observation normalisation) has not been implemented. The durable research findings about observation space design for racing RL remain valuable. The gap analysis table is **substantially stale** — most HIGH and MEDIUM gaps have been closed.
 
 ## Current Implementation (Verified)
 

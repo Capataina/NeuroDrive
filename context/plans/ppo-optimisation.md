@@ -16,7 +16,8 @@ Phases 0 and 1 are fully complete. Phase 2 has key items done. Phase 3.3 (more e
 | Phase 2.3: Adam ε → 1e-5 | **Done** | |
 | Phase 2.4: Increase crash penalty | **Superseded** | Crash penalty now set to `0.0` — the velocity projection reward provides sufficient signal without penalising crashes. |
 | Phase 2.5: Extract log-std Adam into shared optimiser | Not started | The `ppo_finish_epoch` function has 14 lines of inlined Adam for `a_log_std` that duplicates `AdamOptimizer::step()`. Extend `AdamOptimizer` to handle scalar params, or extract a helper. Low priority but prevents divergence if hyperparams change. |
-| Phase 3: Scale and polish | Not started | |
+| Phase 3.3: More vectorised environments | **Done** | Car count bumped to 8 |
+| Phase 3: Remaining items | Not started | |
 
 The reward structure has been fundamentally redesigned in `context/plans/reward-and-spawn-overhaul.md`. The finish-line removal and analytics overhaul are both complete. Remaining Phase 2–3 items (observation normalisation, LR annealing, more envs, value clipping) remain valid future work under the new reward paradigm.
 

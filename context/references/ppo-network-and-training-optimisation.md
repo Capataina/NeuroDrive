@@ -22,9 +22,14 @@ The actor is not the bottleneck. The actor has near-zero saturation, healthy gra
 
 ## Current State Snapshot
 
-*Verified by code inspection of `src/brain/ppo/model.rs`, `src/brain/common/mlp.rs`, `src/brain/common/optim.rs`, `src/brain/ppo/update.rs` on 30 March 2026.*
+*Originally verified on 30 March 2026. The recommendations from this paper have been **implemented** — the snapshot below reflects the pre-fix state. See `context/systems/brain-ppo.md` for the current verified architecture.*
 
-### Architecture
+**What was implemented from this paper's recommendations:**
+1. **Critic widened to 2x128** (was 2x64) — recommendation #1 done.
+2. **AdamW with weight decay λ=3e-4 on critic** — recommendation #2 done.
+3. **Log-std floor raised to -1.0** (was -2.0) — recommendation #3 done.
+
+### Pre-Fix Architecture (stale — for historical context)
 
 ```text
 Actor:  obs(43) → Linear(43×64) → tanh → Linear(64×64) → tanh → Linear(64×2) → mean
@@ -35,7 +40,7 @@ Critic: obs(43) → Linear(43×64) → tanh → Linear(64×64) → tanh → Line
 
 Both networks are **separate** (no shared trunk). Weights stored as flat `Vec<f32>`, row-major. Batched forward/backward for training (128 samples per chunk). Single-sample forward for action selection.
 
-### Optimiser
+### Pre-Fix Optimiser (stale)
 
 - Adam with β₁=0.9, β₂=0.999, ε=1e-5
 - Actor LR: 3e-4, Critic LR: 5e-4

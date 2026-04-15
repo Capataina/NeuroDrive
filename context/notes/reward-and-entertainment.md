@@ -30,11 +30,6 @@ When the policy isn't learning the right behaviour, fix it through:
 
 Never through reward penalties or bonuses that would make safe play optimal.
 
-## Current Status (30 March 2026)
+## Current Status
 
-The velocity reward works — cars go fast (entertaining). The problem is they crash at the first corner because:
-- Throttle exploration collapsed (std=0.07, locked at full throttle)
-- Critic fc2 is 40.6% saturated — can't predict crashes accurately
-- Critic sees crash states as worth ~26 vs ~51 average — gap is too small to drive avoidance
-
-Next step: widen critic network to restore capacity, consider log-std floor to prevent throttle collapse.
+The velocity reward works — cars go fast (entertaining). The critic was widened (2x64 → 2x128), AdamW weight decay was added, and the log-std floor was raised from -2.0 to -1.0 to prevent throttle exploration collapse. Cars are confirmed to learn drifting corners. The remaining challenge is sustained corner survival at speed — the interplay between critic capacity, exploration, and the entertainment constraint (no crash penalties) remains the active research front within Milestone 1.

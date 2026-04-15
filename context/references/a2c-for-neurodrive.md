@@ -8,11 +8,11 @@
 
 ## Current Relevance
 
-- NeuroDrive currently uses a handwritten A2C baseline as its only autonomous learning implementation.
-- The project intent in `README.md` is eventually brain-inspired local plasticity, but the near-term engineering need is still a trustworthy baseline that can answer a narrower question:
-  - is the current environment and observation contract learnable at all?
-- This file is therefore not a decision that “A2C is the final direction”.
-- It is a research-backed reference for how far to take A2C, how to evaluate it properly here, and which implementation upgrades are worth the effort in this repository.
+- **NeuroDrive has upgraded from A2C to PPO** (clipped surrogate objective, multi-epoch updates, amortised training). A2C is no longer the live algorithm — all A2C code has been renamed to PPO equivalents.
+- The on-policy actor-critic research lessons in this file remain durable because PPO is a direct descendant of A2C and shares the same foundational principles (separate actor/critic, GAE, squashed continuous actions, gradient clipping).
+- Many gap analysis items from the A2C era (vectorised environments, observation normalisation, evaluation mode, checkpointing) remain relevant under PPO.
+- The project-specific gap analysis table (section 7) is **substantially stale** — several gaps have been closed (multi-env, tanh activation, seeded RNG) and others have been superseded (crash penalty, reward structure). See `context/references/ppo-network-and-training-optimisation.md` for the current PPO-specific analysis.
+- This file is preserved as historical research context, not as the active PPO guidance document.
 
 ## Content
 

@@ -26,5 +26,5 @@ The original Vec<Vec<f32>> weight storage caused ~43× worse performance than th
 
 ## Open Performance Problems
 
-- The 128-wide critic is still too expensive for smooth 8-car training. Options: reduce to 96 hidden, further reduce samples_per_tick, or implement SIMD intrinsics for the matrix multiply hot path.
-- Action selection forward_critic adds ~1.7ms per tick for 8 cars that could potentially be batched (run all 8 critic forwards as one batch) rather than 8 sequential single-sample forwards.
+- The 128-wide critic adds meaningful cost but is currently within budget (mean frame time 9.0ms with 8 cars after all optimisations). Headroom is tight — further car count increases or more complex models would require either reducing samples_per_tick further, batching action-selection forward passes (8 sequential single-sample forwards → one batched pass), or implementing SIMD intrinsics for the matrix multiply hot path.
+- The bimodal frame pattern remains inherent to amortised PPO. Non-training ticks are fast (~4ms); training ticks are heavier but manageable after the amortisation to 64 samples/tick.

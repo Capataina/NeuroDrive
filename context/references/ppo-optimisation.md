@@ -9,15 +9,16 @@
 
 ## Current Project Relevance
 
-The PPO implementation is live and training. Cars demonstrably learn straight-line driving and reach 11–15% track progress before crashing at the first significant corner. Run reports consistently show:
+**This reference was written during the pre-tanh, pre-batching, A2C-era implementation.** Many of its hyperparameter tables, gap analyses, and diagnostic snapshots are now stale. Specifically:
+- **Activation**: ReLU has been replaced with tanh (eliminating the dead neuron problem).
+- **Architecture**: Now asymmetric actor-critic (actor 2x64, critic 2x128) with AdamW weight decay on the critic.
+- **Observations**: 43 dimensions (was 23), with velocity decomposition, speed delta, 12-point lookahead, previous actions.
+- **Reward**: Velocity projection + centreline proximity, crash penalty 0.0 (was speed-weighted best-only progress + crash penalty -5).
+- **Training**: 8 cars vectorised (was 3), amortised PPO updates at 64 samples/tick (was 128), orthogonal init, per-minibatch advantage normalisation with sample shuffling.
 
-- 100% crash rate across hundreds of episodes
-- 92.7% of classified failures are "insufficient steering"
-- Mean heading error in the crash sector exceeds 43°
-- Steering adequacy (match between demanded curvature and actual steering) is 0.026 — essentially zero
-- Dead ReLU rates of 34–57% across all hidden layers
+The durable research findings (sections on activation functions, GAE, implementation details, reward shaping principles) remain valuable. The "Current State Snapshot" and "Gap Analysis" sections reflect the **pre-overhaul** codebase and should not be trusted for current implementation truth.
 
-The project cannot transition to biological learning (Milestone 2) until the PPO baseline demonstrates at least one full lap completion, confirming the environment and observation contract are fully learnable.
+See `context/references/ppo-network-and-training-optimisation.md` for the current PPO architecture analysis, and `context/systems/brain-ppo.md` for verified implementation state.
 
 ## Current State Snapshot
 

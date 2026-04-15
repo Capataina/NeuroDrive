@@ -262,6 +262,18 @@ auto_exit_system                          (profiling, feature-gated — exits ap
 - The `agent` boundary is stable: observations go from environment to controller, and actions go from controller to physics through `ActionState`.
 - The analytics path is **append-only** during runtime and flushes only on app exit.
 
+## Reading Guide
+
+| System file | Covers | Source roots |
+|-------------|--------|--------------|
+| `systems/environment.md` | Track topology (`src/maps/`), car lifecycle, physics, collisions, progress, reward, episodes (`src/game/`) | `src/maps/`, `src/game/` |
+| `systems/agent-interface.md` | Action contract, observation contract, scheduling | `src/agent/` |
+| `systems/brain-ppo.md` | PPO algorithm, model architecture, rollout buffer, ranking, ML primitives | `src/brain/` |
+| `systems/analytics.md` | Capture pipeline, derived metrics, two-tier export, crash classification | `src/analytics/` |
+| `systems/profiling.md` | Feature-gated per-system timing, auto-exit, performance reports | `src/profiling/` |
+| `systems/debug.md` | Live overlays, HUD panel, leaderboard | `src/debug/` |
+| `systems/determinism.md` | Cross-cutting: ordering contract, reproducibility surfaces, RNG state | `src/sim/`, cross-cutting |
+
 ## Structural Notes / Current Reality
 
 - The codebase is **not** environment-only. PPO, analytics, and the debug HUD are live and substantial subsystems. Documentation treating them as roadmap-only is obsolete.

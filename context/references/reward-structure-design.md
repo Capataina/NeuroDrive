@@ -9,14 +9,13 @@
 
 ## Current Project Relevance
 
-The reward structure is the project's most active pain point. In the most recent training run (827 episodes, 3 cars):
+**The reward structure recommendations from this paper have been implemented.** The primary recommendations (velocity projection reward, zero crash penalty, centreline proximity term) are all live in the codebase. Specifically:
+- **Velocity projection reward** replaced the best-only speed-weighted progress reward.
+- **Crash penalty** is 0.0 (episode termination is the cost).
+- **Centreline proximity** reward added (coef=0.3, max_distance=50.0).
+- **Braking removed** — throttle reverted to `[0, 1]` after braking created a "mostly brake" local optimum (exactly as this paper's analysis predicted).
 
-- The policy converged to **near-constant full brake** (throttle mean -0.94, std 0.17)
-- The final episode: **Timeout, 0.1% progress, 1800 ticks, mean speed 0.2** — the car sat still for 30 seconds
-- The policy discovered that the time penalty (-0.005/tick = -9.0 over timeout) was cheaper than crash penalties (-5.0 per crash, multiple crashes per session)
-- Crash penalty has since been set to 0.0, but the reward structure needs deeper analysis
-
-**The core tension:** the reward must make aggressive driving the only path to positive returns, while providing enough shaping signal that the policy can learn *how* to drive aggressively rather than just *that* it should.
+The durable research findings on reward design for racing RL, the comparison matrix, and the principles about dense vs sparse reward signals remain valuable. The "Current Reward Implementation" section reflects the **pre-velocity-projection** state and is stale for implementation details — see `context/systems/environment.md` for verified current reward structure.
 
 ## Current Reward Implementation (Verified)
 

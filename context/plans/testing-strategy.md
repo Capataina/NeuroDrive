@@ -2,7 +2,9 @@
 
 ## Goal
 
-Establish a test suite that catches mathematical errors, contract violations, and integration regressions before they reach a training run. The current 31 tests mostly cover analytics sparklines, phase detection, and physics determinism — they don't verify the reward computation, neural network math, PPO update correctness, observation contract, or spawn logic.
+Establish a test suite that catches mathematical errors, contract violations, and integration regressions before they reach a training run. The existing tests cover analytics sparklines, phase detection, physics determinism, GAE correctness, and HUD assessment — they do not verify the reward computation, neural network math, PPO update correctness, observation contract, or spawn logic.
+
+> **Note:** Some test descriptions below reference stale code (e.g., `speed_weighted_progress`, `lap_bonus`, `no_centerline_reward_in_episode`, `car_zero_always_at_canonical_spawn`). The reward structure, spawn logic, and observation space have all changed since this plan was written. Test concepts remain valid but need adaptation to the current implementation (velocity projection reward, random spawn for all cars, 43-dim observations).
 
 Every time we change a reward term, activation function, or initialisation scheme, we should know immediately if the math is wrong rather than discovering it 20 minutes later in a confusing run report.
 
