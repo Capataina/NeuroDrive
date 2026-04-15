@@ -34,7 +34,6 @@ pub struct PreparedUpdate {
     pub frozen_buffer: TrainerRolloutBuffer,
     pub advantages: Vec<f32>,
     pub returns: Vec<f32>,
-    pub value_predictions: Vec<f32>,
     pub epochs_remaining: usize,
     pub sample_offset: usize,
     pub accum: EpochAccumulator,
@@ -64,9 +63,9 @@ pub fn ppo_prepare_update(
     if !buffer.is_aligned() {
         bevy::log::warn!(
             "Trainer rollout misalignment detected (s={}, a={}, z={}, v={}, r={}, d={}, c={}, e={}); skipping update.",
-            buffer.states.len(),
-            buffer.actions.len(),
-            buffer.latent_actions.len(),
+            buffer.pre_step_count(),
+            buffer.actions.len() / buffer.act_dim,
+            buffer.latent_actions.len() / buffer.act_dim,
             buffer.values.len(),
             buffer.rewards.len(),
             buffer.dones.len(),
@@ -78,7 +77,6 @@ pub fn ppo_prepare_update(
 
     let (advantages, returns) =
         buffer.compute_gae_per_env(bootstrap_values, brain.gamma, brain.gae_lambda);
-    let value_predictions = buffer.values.clone();
     let len = buffer.len();
 
     // Fisher-Yates shuffle for minibatch sample ordering
@@ -95,7 +93,6 @@ pub fn ppo_prepare_update(
         frozen_buffer,
         advantages,
         returns,
-        value_predictions,
         epochs_remaining: brain.ppo_epochs,
         sample_offset: 0,
         accum: EpochAccumulator::default(),
@@ -147,17 +144,27 @@ pub fn ppo_process_chunk(
     let obs_dim = brain.model.scratch.obs_dim;
     let act_dim = brain.model.scratch.act_dim;
 
-    // ── Stack observations into a local batch matrix ────────────────
-    // Using a local Vec avoids a double-mutable-borrow on brain.model
-    // (scratch.obs_batch vs forward_batch(&mut self)).
-    let mut obs_batch = vec![0.0f32; chunk_size * obs_dim];
-    for (s, &idx) in chunk_indices.iter().enumerate() {
-        let src = &buffer.states[idx];
-        obs_batch[s * obs_dim..(s + 1) * obs_dim].copy_from_slice(src);
+    // ── Stack observations into a pre-allocated scratch buffer ──────
+    {
+        let obs_batch = &mut brain.model.scratch.obs_batch;
+        for (s, &idx) in chunk_indices.iter().enumerate() {
+            let src = &buffer.states[idx * obs_dim..(idx + 1) * obs_dim];
+            obs_batch[s * obs_dim..(s + 1) * obs_dim].copy_from_slice(src);
+        }
     }
+    // Copy to a local slice reference for forward_batch (which needs &mut self).
+    // obs_batch is a separate field from the forward/backward intermediates,
+    // but Rust's borrow checker sees &mut self — so we pass a slice from scratch
+    // before the mutable call by copying the pointer.
+    let obs_slice_len = chunk_size * obs_dim;
+    let obs_batch_ptr = brain.model.scratch.obs_batch.as_ptr();
+    // SAFETY: obs_batch is not modified during forward_batch (it only reads from
+    // the input slice and writes to separate scratch fields). We create a shared
+    // slice from the pointer for the duration of the call.
+    let obs_batch_slice = unsafe { std::slice::from_raw_parts(obs_batch_ptr, obs_slice_len) };
 
     // ── Batched forward pass ────────────────────────────────────────
-    brain.model.forward_batch(&obs_batch, chunk_size);
+    brain.model.forward_batch(obs_batch_slice, chunk_size);
 
     // ── Collect tanh saturation stats from batch caches ─────────────
     collect_saturated_slice(
@@ -195,8 +202,8 @@ pub fn ppo_process_chunk(
     ];
 
     for (s, &idx) in chunk_indices.iter().enumerate() {
-        let action = &buffer.actions[idx];
-        let latent_action = &buffer.latent_actions[idx];
+        let action = &buffer.actions[idx * act_dim..(idx + 1) * act_dim];
+        let latent_action = &buffer.latent_actions[idx * act_dim..(idx + 1) * act_dim];
         let old_log_prob = buffer.old_log_probs[idx];
         let adv = (advantages[idx] - chunk_adv_mean) / chunk_adv_std;
         let ret = returns[idx];
@@ -270,13 +277,24 @@ pub fn ppo_process_chunk(
     }
 
     // ── Batched backward passes ─────────────────────────────────────
-    // Clone the gradient seeds since backward_batch needs &[f32] while
-    // the scratch buffers are &mut — we need separate borrows.
-    let gv: Vec<f32> = grad_values[..chunk_size].to_vec();
-    let gm: Vec<f32> = grad_means[..chunk_size * act_dim].to_vec();
+    // Copy gradient seeds into dedicated scratch buffers so we can pass
+    // shared slices to backward_batch while it mutably borrows other
+    // scratch fields. The seed buffers are separate from the backward
+    // intermediates, avoiding aliasing.
+    brain.model.scratch.grad_seed_values[..chunk_size]
+        .copy_from_slice(&brain.model.scratch.gc_out[..chunk_size]);
+    brain.model.scratch.grad_seed_means[..chunk_size * act_dim]
+        .copy_from_slice(&brain.model.scratch.ga_out[..chunk_size * act_dim]);
 
-    brain.model.backward_batch_critic(&gv, chunk_size);
-    brain.model.backward_batch_actor(&gm, chunk_size);
+    let gv_ptr = brain.model.scratch.grad_seed_values.as_ptr();
+    let gm_ptr = brain.model.scratch.grad_seed_means.as_ptr();
+    // SAFETY: grad_seed_values/means are not written during backward_batch —
+    // backward only writes to the gc_*/ga_* intermediates and grad_weights/biases.
+    let gv = unsafe { std::slice::from_raw_parts(gv_ptr, chunk_size) };
+    let gm = unsafe { std::slice::from_raw_parts(gm_ptr, chunk_size * act_dim) };
+
+    brain.model.backward_batch_critic(gv, chunk_size);
+    brain.model.backward_batch_actor(gm, chunk_size);
 
     prepared.sample_offset = end;
     end >= batch_size
@@ -345,7 +363,7 @@ pub fn ppo_finish_epoch(
         stats.value_loss = acc.value_loss_sum / batch_size_f32.max(1.0);
         stats.policy_entropy = acc.entropy_sum / (batch_size_f32 * 2.0).max(1.0);
         stats.explained_variance =
-            explained_variance(&prepared.returns, &prepared.value_predictions);
+            explained_variance(&prepared.returns, &prepared.frozen_buffer.values);
         stats.steering_mean = acc.action_sum[0] / batch_size_f32.max(1.0);
         stats.steering_std = std_from_sums(acc.action_sum[0], acc.action_sumsq[0], batch_size);
         stats.throttle_mean = acc.action_sum[1] / batch_size_f32.max(1.0);

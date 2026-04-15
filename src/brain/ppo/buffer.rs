@@ -5,11 +5,18 @@ use bevy::prelude::*;
 /// Trainer-wide rollout buffer that collects transitions from all environment
 /// instances. Each transition is tagged with its source `env_id` so GAE can
 /// be computed per-env without cross-env value leakage.
-#[derive(Resource, Clone, Debug, Default)]
+///
+/// `states`, `actions`, and `latent_actions` are stored as flat contiguous
+/// `Vec<f32>` with stride `obs_dim` and `act_dim` respectively. This avoids
+/// per-transition heap allocations and gives cache-friendly sequential access
+/// during batched training.
+#[derive(Resource, Clone, Debug)]
 pub struct TrainerRolloutBuffer {
-    pub states: Vec<Vec<f32>>,
-    pub actions: Vec<Vec<f32>>,
-    pub latent_actions: Vec<Vec<f32>>,
+    pub states: Vec<f32>,          // flat, stride = obs_dim
+    pub actions: Vec<f32>,         // flat, stride = act_dim
+    pub latent_actions: Vec<f32>,  // flat, stride = act_dim
+    pub obs_dim: usize,
+    pub act_dim: usize,
     pub safety_clamp_hits: Vec<[bool; 2]>,
     pub old_log_probs: Vec<f32>,
     pub rewards: Vec<f32>,
@@ -18,20 +25,38 @@ pub struct TrainerRolloutBuffer {
     pub env_ids: Vec<u32>,
 }
 
+impl Default for TrainerRolloutBuffer {
+    fn default() -> Self {
+        Self {
+            states: Vec::new(),
+            actions: Vec::new(),
+            latent_actions: Vec::new(),
+            obs_dim: 43,
+            act_dim: 2,
+            safety_clamp_hits: Vec::new(),
+            old_log_probs: Vec::new(),
+            rewards: Vec::new(),
+            values: Vec::new(),
+            dones: Vec::new(),
+            env_ids: Vec::new(),
+        }
+    }
+}
+
 impl TrainerRolloutBuffer {
     pub fn push_pre_step(
         &mut self,
         env_id: u32,
-        state: Vec<f32>,
-        actions: Vec<f32>,
-        latent_actions: Vec<f32>,
+        state: &[f32],
+        actions: &[f32],
+        latent_actions: &[f32],
         safety_clamp_hits: [bool; 2],
         value: f32,
         log_prob: f32,
     ) {
-        self.states.push(state);
-        self.actions.push(actions);
-        self.latent_actions.push(latent_actions);
+        self.states.extend_from_slice(state);
+        self.actions.extend_from_slice(actions);
+        self.latent_actions.extend_from_slice(latent_actions);
         self.safety_clamp_hits.push(safety_clamp_hits);
         self.old_log_probs.push(log_prob);
         self.values.push(value);
@@ -48,11 +73,11 @@ impl TrainerRolloutBuffer {
     }
 
     pub fn pre_step_count(&self) -> usize {
-        self.states.len()
+        self.states.len() / self.obs_dim
     }
 
     pub fn pending_rewards(&self) -> usize {
-        self.states.len().saturating_sub(self.rewards.len())
+        self.pre_step_count().saturating_sub(self.rewards.len())
     }
 
     pub fn clear(&mut self) {
@@ -69,9 +94,9 @@ impl TrainerRolloutBuffer {
 
     pub fn is_aligned(&self) -> bool {
         let n = self.rewards.len();
-        self.states.len() == n
-            && self.actions.len() == n
-            && self.latent_actions.len() == n
+        self.pre_step_count() == n
+            && self.actions.len() / self.act_dim == n
+            && self.latent_actions.len() / self.act_dim == n
             && self.safety_clamp_hits.len() == n
             && self.old_log_probs.len() == n
             && self.values.len() == n
@@ -134,13 +159,13 @@ mod tests {
     /// as the old flat GAE (regression test).
     #[test]
     fn single_env_gae_matches_flat_gae() {
-        let mut buf = TrainerRolloutBuffer::default();
+        let mut buf = TrainerRolloutBuffer { obs_dim: 1, act_dim: 1, ..Default::default() };
         let rewards = vec![1.0, 0.5, -1.0, 2.0];
         let values = vec![0.5, 0.3, 0.1, 0.8];
         let dones = vec![false, false, true, false];
 
         for i in 0..4 {
-            buf.push_pre_step(0, vec![0.0], vec![0.0], vec![0.0], [false, false], values[i], 0.0);
+            buf.push_pre_step(0, &[0.0], &[0.0], &[0.0], [false, false], values[i], 0.0);
             buf.push_reward(rewards[i], dones[i]);
         }
 
@@ -173,7 +198,7 @@ mod tests {
     /// Verify that per-env GAE does NOT leak values across envs.
     #[test]
     fn multi_env_gae_isolates_envs() {
-        let mut buf = TrainerRolloutBuffer::default();
+        let mut buf = TrainerRolloutBuffer { obs_dim: 1, act_dim: 1, ..Default::default() };
 
         // Interleave: env0, env1, env0, env1
         // env 0: reward 1.0 (not done), reward 2.0 (done)
@@ -186,7 +211,7 @@ mod tests {
         ];
 
         for &(eid, reward, value, done) in &entries {
-            buf.push_pre_step(eid, vec![0.0], vec![0.0], vec![0.0], [false, false], value, 0.0);
+            buf.push_pre_step(eid, &[0.0], &[0.0], &[0.0], [false, false], value, 0.0);
             buf.push_reward(reward, done);
         }
 

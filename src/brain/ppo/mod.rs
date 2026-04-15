@@ -124,11 +124,31 @@ impl Plugin for PpoPlugin {
     }
 }
 
+/// Per-car intermediate results from the actor pass, held briefly between
+/// the actor and batched-critic passes within `ppo_act_all_cars_system`.
+struct CarActResult {
+    entity: bevy::ecs::entity::Entity,
+    env_id: u32,
+    actions: [f32; 2],
+    latent_actions: [f32; 2],
+    safety_clamp_hits: [bool; 2],
+    old_log_prob: f32,
+    steering_mean: f32,
+    steering_std: f32,
+    throttle_mean: f32,
+    throttle_std: f32,
+}
+
 /// Runs the shared policy for all cars, writes per-car actions, and pushes
 /// all transitions to the TrainerRolloutBuffer with env_id tagging.
+///
+/// Structured as two passes to batch critic evaluation:
+/// 1. Per-car actor forward + action sampling (sequential mat-vec — unavoidable)
+/// 2. Single batched critic forward for all cars (one mat-mat instead of N mat-vec)
+/// 3. Distribute value predictions and push to buffer
 pub fn ppo_act_all_cars_system(
     mode: Res<AgentMode>,
-    mut car_query: Query<(&EnvInstanceId, &ObservationVector, &mut ActionState, &mut PolicyOutput), With<Car>>,
+    mut car_query: Query<(bevy::ecs::entity::Entity, &EnvInstanceId, &ObservationVector, &mut ActionState, &mut PolicyOutput), With<Car>>,
     mut brain: ResMut<PpoBrain>,
     mut buffer: ResMut<TrainerRolloutBuffer>,
 ) {
@@ -136,15 +156,12 @@ pub fn ppo_act_all_cars_system(
         return;
     }
 
-    for (env_id, obs, mut action_state, mut policy_output) in car_query.iter_mut() {
-        let action_dist = brain.model.forward_actor(&obs.values);
-        let value = brain.model.forward_critic(&obs.values);
+    // ── Pass 1: actor forward + action sampling, collect obs for critic ──
+    let mut results: Vec<CarActResult> = Vec::new();
+    let mut obs_stack: Vec<f32> = Vec::new();
 
-        policy_output.value_prediction = value;
-        policy_output.steering_mean = action_dist.mean[0];
-        policy_output.steering_std = action_dist.std[0];
-        policy_output.throttle_mean = action_dist.mean[1];
-        policy_output.throttle_std = action_dist.std[1];
+    for (entity, env_id, obs, mut action_state, _policy_output) in car_query.iter_mut() {
+        let action_dist = brain.model.forward_actor(&obs.values);
 
         let mut actions = [0.0f32; 2];
         let mut latent_actions = [0.0f32; 2];
@@ -159,7 +176,6 @@ pub fn ppo_act_all_cars_system(
 
             let squashed = latent.tanh();
             actions[i] = if i == 1 {
-                // Throttle: map tanh [-1,1] to [0,1]
                 0.5 * (squashed + 1.0)
             } else {
                 squashed
@@ -197,18 +213,54 @@ pub fn ppo_act_all_cars_system(
             );
         }
 
-        buffer.push_pre_step(
-            env_id.0,
-            obs.values.to_vec(),
-            actions.to_vec(),
-            latent_actions.to_vec(),
+        obs_stack.extend_from_slice(&obs.values);
+
+        results.push(CarActResult {
+            entity,
+            env_id: env_id.0,
+            actions,
+            latent_actions,
             safety_clamp_hits,
-            value,
             old_log_prob,
-        );
+            steering_mean: action_dist.mean[0],
+            steering_std: action_dist.std[0],
+            throttle_mean: action_dist.mean[1],
+            throttle_std: action_dist.std[1],
+        });
     }
 
-    brain.step_counter += car_query.iter().count();
+    let car_count = results.len();
+    if car_count == 0 {
+        return;
+    }
+
+    // ── Pass 2: single batched critic forward ───────────────────────
+    brain.model.forward_critic_batch(&obs_stack, car_count);
+
+    // ── Pass 3: distribute values, write PolicyOutput, push to buffer ─
+    for (i, res) in results.iter().enumerate() {
+        let value = brain.model.scratch.c_out[i];
+
+        if let Ok((_entity, _env_id, obs, _action_state, mut policy_output)) = car_query.get_mut(res.entity) {
+            policy_output.value_prediction = value;
+            policy_output.steering_mean = res.steering_mean;
+            policy_output.steering_std = res.steering_std;
+            policy_output.throttle_mean = res.throttle_mean;
+            policy_output.throttle_std = res.throttle_std;
+
+            buffer.push_pre_step(
+                res.env_id,
+                &obs.values,
+                &res.actions,
+                &res.latent_actions,
+                res.safety_clamp_hits,
+                value,
+                res.old_log_prob,
+            );
+        }
+    }
+
+    brain.step_counter += car_count;
 }
 
 /// Collects per-car rewards and done flags. When the buffer reaches the

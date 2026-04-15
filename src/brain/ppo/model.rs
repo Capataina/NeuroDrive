@@ -45,6 +45,11 @@ pub struct BatchScratch {
     pub gc_h1_act: Vec<f32>,
     pub gc_h1: Vec<f32>,
     pub gc_input: Vec<f32>,
+
+    // Pre-allocated buffers for PPO loss computation to avoid per-chunk allocations
+    pub obs_batch: Vec<f32>,
+    pub grad_seed_values: Vec<f32>,
+    pub grad_seed_means: Vec<f32>,
 }
 
 impl BatchScratch {
@@ -81,6 +86,10 @@ impl BatchScratch {
             gc_h1_act: vec![0.0; bch],
             gc_h1: vec![0.0; bch],
             gc_input: vec![0.0; bo],
+
+            obs_batch: vec![0.0; bo],
+            grad_seed_values: vec![0.0; bv],
+            grad_seed_means: vec![0.0; ba],
         }
     }
 }
@@ -200,6 +209,21 @@ impl ActorCritic {
         let value = self.c_value.forward(&c2_r)[0];
 
         (ActionDist { mean, std }, value)
+    }
+
+    /// Batched critic-only forward pass for action selection.
+    ///
+    /// `obs_batch` is row-major `[batch_size × obs_dim]`.
+    /// Returns value predictions in `scratch.c_out[0..batch_size]`.
+    ///
+    /// Does **not** cache intermediates for backward — this is inference only.
+    pub fn forward_critic_batch(&mut self, obs_batch: &[f32], batch_size: usize) {
+        let ch = self.scratch.critic_hidden_dim;
+        self.c_fc1.forward_batch(obs_batch, &mut self.scratch.c_h1, batch_size);
+        self.c_tanh1.forward_batch(&self.scratch.c_h1, &mut self.scratch.c_h1_act, batch_size, ch);
+        self.c_fc2.forward_batch(&self.scratch.c_h1_act, &mut self.scratch.c_h2, batch_size);
+        self.c_tanh2.forward_batch(&self.scratch.c_h2, &mut self.scratch.c_h2_act, batch_size, ch);
+        self.c_value.forward_batch(&self.scratch.c_h2_act, &mut self.scratch.c_out, batch_size);
     }
 
     /// Batched forward pass through actor + critic.

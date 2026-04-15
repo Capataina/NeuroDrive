@@ -24,12 +24,7 @@ pub struct Linear {
 
 impl Linear {
     pub fn new_orthogonal(in_dim: usize, out_dim: usize, scale: f32, rng: &mut impl Rng) -> Self {
-        let init = crate::brain::common::math::orthogonal_init(out_dim, in_dim, scale, rng);
-        // Flatten the Vec<Vec<f32>> from orthogonal_init into contiguous row-major storage.
-        let mut weights = Vec::with_capacity(out_dim * in_dim);
-        for row in &init {
-            weights.extend_from_slice(row);
-        }
+        let weights = crate::brain::common::math::orthogonal_init(out_dim, in_dim, scale, rng);
 
         Self {
             weights,
@@ -76,7 +71,9 @@ impl Linear {
         self.batch_size_cached = batch_size;
 
         // output[s, i] = bias[i] + Σ_j input[s, j] * weights[i, j]
-        // Using ikj loop order for cache-friendly access on row-major data.
+        // Using s-i-j loop order so `weights[i * in_dim .. (i+1) * in_dim]` is
+        // read sequentially per output neuron, giving cache-friendly access on
+        // the row-major weight layout.
         // First: fill with biases (broadcast)
         for s in 0..batch_size {
             let out_row = &mut output[s * self.out_dim..(s + 1) * self.out_dim];
@@ -86,14 +83,13 @@ impl Linear {
         for s in 0..batch_size {
             let in_row = &input[s * self.in_dim..(s + 1) * self.in_dim];
             let out_row = &mut output[s * self.out_dim..(s + 1) * self.out_dim];
-            for j in 0..self.in_dim {
-                let x = in_row[j];
-                // Walk across all output neurons, adding w[i,j] * x
-                let mut w_idx = j; // weights[0 * in_dim + j]
-                for o in out_row.iter_mut() {
-                    *o += self.weights[w_idx] * x;
-                    w_idx += self.in_dim;
+            for i in 0..self.out_dim {
+                let w_row = &self.weights[i * self.in_dim..(i + 1) * self.in_dim];
+                let mut sum = 0.0f32;
+                for j in 0..self.in_dim {
+                    sum += w_row[j] * in_row[j];
                 }
+                out_row[i] += sum;
             }
         }
     }
@@ -174,8 +170,8 @@ impl Tanh {
 
     pub fn forward(&mut self, input: &[f32]) -> Vec<f32> {
         let output: Vec<f32> = input.iter().map(|&x| x.tanh()).collect();
-        self.output_cache = Some(output.clone());
-        output
+        self.output_cache = Some(output);
+        self.output_cache.as_ref().unwrap().clone()
     }
 
 
