@@ -94,12 +94,12 @@ fn on_exit_system(
             car_count: trainer_config.num_envs,
             track_name: "monaco".to_string(),
             session_timestamp: timestamp,
-            ppo_epochs: brain.ppo_epochs,
-            clip_epsilon: brain.clip_epsilon,
-            gamma: brain.gamma,
-            gae_lambda: brain.gae_lambda,
-            max_steps: brain.max_steps,
-            samples_per_tick: brain.samples_per_tick,
+            ppo_epochs: brain.config.ppo_epochs,
+            clip_epsilon: brain.config.clip_epsilon,
+            gamma: brain.config.gamma,
+            gae_lambda: brain.config.gae_lambda,
+            max_steps: brain.config.max_steps,
+            samples_per_tick: brain.config.samples_per_tick,
         };
 
         // Capture run context for the markdown header.

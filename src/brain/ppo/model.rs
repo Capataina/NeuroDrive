@@ -128,6 +128,9 @@ impl ActorCritic {
         actor_hidden_dim: usize,
         critic_hidden_dim: usize,
         act_dim: usize,
+        actor_lr: f32,
+        critic_lr: f32,
+        critic_weight_decay: f32,
         rng: &mut impl Rng,
     ) -> Self {
         let sqrt2 = 2.0f32.sqrt();
@@ -139,8 +142,8 @@ impl ActorCritic {
         let c_fc2 = Linear::new_orthogonal(critic_hidden_dim, critic_hidden_dim, sqrt2, rng);
         let c_value = Linear::new_orthogonal(critic_hidden_dim, 1, 1.0, rng);
 
-        let a_opt = AdamOptimizer::new(&[&a_fc1, &a_fc2, &a_mean], 3e-4, 0.0);
-        let c_opt = AdamOptimizer::new(&[&c_fc1, &c_fc2, &c_value], 5e-4, 3e-4);
+        let a_opt = AdamOptimizer::new(&[&a_fc1, &a_fc2, &a_mean], actor_lr, 0.0);
+        let c_opt = AdamOptimizer::new(&[&c_fc1, &c_fc2, &c_value], critic_lr, critic_weight_decay);
 
         let max_batch = 512;
         let scratch = BatchScratch::new(max_batch, in_dim, actor_hidden_dim, critic_hidden_dim, act_dim);

@@ -186,7 +186,7 @@ pub fn episode_tracker_system(
     mut tracker: ResMut<EpisodeTracker>,
 ) {
     for (env_id, episode_state) in car_query.iter() {
-        let Some(reason) = episode_state.last_end_reason else {
+        let Some(reason) = episode_state.last.end_reason else {
             continue;
         };
 
@@ -226,24 +226,24 @@ pub fn episode_tracker_system(
             }
         }
 
-        let life_seconds = episode_state.last_episode_ticks as f32 / 60.0;
+        let life_seconds = episode_state.last.ticks as f32 / 60.0;
 
         tracker.episodes.push(EpisodeRecord {
             env_id: env_id.0,
             episode_id: finished_episode_id,
-            progress: episode_state.last_episode_best_progress_fraction,
-            reward: episode_state.last_episode_return,
-            pre_terminal_return: episode_state.last_episode_pre_terminal_return,
-            progress_reward_sum: episode_state.last_episode_progress_reward_sum,
-            time_penalty_sum: episode_state.last_episode_time_penalty_sum,
-            terminal_reward_sum: episode_state.last_episode_terminal_reward_sum,
-            crash_penalty_sum: episode_state.last_episode_crash_penalty_sum,
-            ticks: episode_state.last_episode_ticks,
-            crashes: episode_state.last_episode_crashes,
+            progress: episode_state.last.best_progress_fraction,
+            reward: episode_state.last.return_sum,
+            pre_terminal_return: episode_state.last.pre_terminal_return,
+            progress_reward_sum: episode_state.last.progress_reward_sum,
+            time_penalty_sum: episode_state.last.time_penalty_sum,
+            terminal_reward_sum: episode_state.last.terminal_reward_sum,
+            crash_penalty_sum: episode_state.last.crash_penalty_sum,
+            ticks: episode_state.last.ticks,
+            crashes: episode_state.last.crashes,
             end_reason: format!("{:?}", reason),
-            distance_driven: episode_state.last_episode_distance_driven,
+            distance_driven: episode_state.last.distance_driven,
             crash_position: episode_state
-                .last_episode_crash_position
+                .last.crash_position
                 .map(|position| [position.x, position.y]),
 
             // Action behaviour
@@ -281,7 +281,7 @@ pub fn episode_tracker_system(
 
             // Efficiency and exploration
             reward_per_second: if life_seconds > 0.01 {
-                episode_state.last_episode_return / life_seconds
+                episode_state.last.return_sum / life_seconds
             } else {
                 0.0
             },

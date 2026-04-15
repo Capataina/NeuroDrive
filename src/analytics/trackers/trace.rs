@@ -96,7 +96,7 @@ pub fn capture_episode_tick_trace_system(
     mut accumulators: ResMut<PerCarTraceAccumulators>,
 ) {
     for (env_id, episode_state, action_state, sensors, transform, policy_output) in car_query.iter() {
-        let done = episode_state.current_tick_end_reason.is_some();
+        let done = episode_state.tick.end_reason.is_some();
         let target_episode_id = if done {
             episode_state.current_episode.saturating_sub(1)
         } else {
@@ -116,10 +116,7 @@ pub fn capture_episode_tick_trace_system(
             if let Ok(track) = track_query.single() {
                 compute_lookahead_snapshot(track, episode_state, &observation_config)
             } else {
-                (
-                    vec![0.0; observation_config.lookahead_distances.len()],
-                    vec![0.0; observation_config.lookahead_distances.len()],
-                )
+                ([0.0f32; 12], [0.0f32; 12])
             };
 
         let value_prediction = if *mode == AgentMode::Ai {
@@ -136,11 +133,11 @@ pub fn capture_episode_tick_trace_system(
             tick_index,
             position_x: transform.translation.x,
             position_y: transform.translation.y,
-            progress_fraction: episode_state.current_tick_progress_fraction,
-            progress_s: episode_state.current_tick_progress_s,
-            centerline_distance: episode_state.current_tick_centerline_distance,
+            progress_fraction: episode_state.tick.progress_fraction,
+            progress_s: episode_state.tick.progress_s,
+            centerline_distance: episode_state.tick.centerline_distance,
             signed_lateral_offset: sensors.signed_lateral_offset,
-            speed: episode_state.current_tick_speed,
+            speed: episode_state.tick.speed,
             v_forward: sensors.v_forward,
             v_lateral: sensors.v_lateral,
             speed_delta: sensors.speed_delta,
@@ -154,24 +151,24 @@ pub fn capture_episode_tick_trace_system(
                     0.0
                 }
             },
-            heading_error: episode_state.current_tick_heading_error,
+            heading_error: episode_state.tick.heading_error,
             min_ray_distance: sensors.ray_distances.iter().copied().fold(f32::MAX, f32::min),
-            velocity_projection: episode_state.current_tick_velocity_projection,
-            centreline_reward: episode_state.current_tick_centreline_reward,
+            velocity_projection: episode_state.tick.velocity_projection,
+            centreline_reward: episode_state.tick.centreline_reward,
             steering: action_state.applied.steering,
             throttle: action_state.applied.throttle,
             previous_steering: sensors.previous_steering,
             previous_throttle: sensors.previous_throttle,
-            reward: episode_state.current_tick_reward,
-            progress_reward: episode_state.current_tick_progress_reward,
-            time_penalty: episode_state.current_tick_time_penalty,
-            terminal_reward: episode_state.current_tick_terminal_reward,
+            reward: episode_state.tick.reward,
+            progress_reward: episode_state.tick.progress_reward,
+            time_penalty: episode_state.tick.time_penalty,
+            terminal_reward: episode_state.tick.terminal_reward,
             done,
             done_reason: episode_state
-                .current_tick_end_reason
+                .tick.end_reason
                 .map(|reason| format!("{reason:?}")),
-            sector_index: progress_to_sector(episode_state.current_tick_progress_fraction),
-            ray_distances: sensors.ray_distances.to_vec(),
+            sector_index: progress_to_sector(episode_state.tick.progress_fraction),
+            ray_distances: sensors.ray_distances,
             lookahead_heading_deltas,
             lookahead_curvatures,
             value_prediction,
@@ -189,7 +186,7 @@ pub fn snapshot_completed_episode_trace_system(
     mut accumulators: ResMut<PerCarTraceAccumulators>,
 ) {
     for (env_id, episode_state) in car_query.iter() {
-        let Some(reason) = episode_state.current_tick_end_reason else {
+        let Some(reason) = episode_state.tick.end_reason else {
             continue;
         };
 
@@ -211,7 +208,7 @@ pub fn snapshot_completed_episode_trace_system(
         accumulator.snapshot_completed_episode(
             finished_episode_id,
             reason,
-            episode_state.last_episode_best_progress_fraction,
+            episode_state.last.best_progress_fraction,
         );
         accumulator.reset_for_episode(episode_state.current_episode);
     }
@@ -221,21 +218,21 @@ fn compute_lookahead_snapshot(
     track: &Track,
     episode_state: &EpisodeState,
     observation_config: &ObservationConfig,
-) -> (Vec<f32>, Vec<f32>) {
-    let mut heading_deltas = Vec::with_capacity(observation_config.lookahead_distances.len());
-    let mut curvatures = Vec::with_capacity(observation_config.lookahead_distances.len());
+) -> ([f32; 12], [f32; 12]) {
+    let mut heading_deltas = [0.0f32; 12];
+    let mut curvatures = [0.0f32; 12];
 
-    for distance in observation_config.lookahead_distances.iter() {
-        let lookahead_s = episode_state.current_tick_progress_s + *distance;
+    for (index, distance) in observation_config.lookahead_distances.iter().enumerate() {
+        let lookahead_s = episode_state.tick.progress_s + *distance;
         let lookahead_tangent = track.centerline.tangent_at_s(lookahead_s);
         let heading_delta =
-            signed_angle_between(episode_state.current_tick_forward, lookahead_tangent);
+            signed_angle_between(episode_state.tick.forward, lookahead_tangent);
         let turn_delta =
-            signed_angle_between(episode_state.current_tick_tangent, lookahead_tangent);
+            signed_angle_between(episode_state.tick.tangent, lookahead_tangent);
         let curvature = turn_delta / distance.max(1.0);
 
-        heading_deltas.push(heading_delta);
-        curvatures.push(curvature);
+        heading_deltas[index] = heading_delta;
+        curvatures[index] = curvature;
     }
 
     (heading_deltas, curvatures)

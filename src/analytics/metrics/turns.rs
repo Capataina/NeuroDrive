@@ -174,7 +174,7 @@ fn front_ray_slice(tick: &TickTraceRecord) -> &[f32] {
 fn side_ray_slice(tick: &TickTraceRecord) -> Vec<f32> {
     let len = tick.ray_distances.len();
     if len < 2 {
-        return tick.ray_distances.clone();
+        return tick.ray_distances.to_vec();
     }
     let left = 1.min(len - 1);
     let right = len.saturating_sub(2);
@@ -278,9 +278,13 @@ mod tests {
             done: false,
             done_reason: None,
             sector_index: 0,
-            ray_distances: vec![100.0; 11],
-            lookahead_heading_deltas: vec![0.0; 4],
-            lookahead_curvatures: vec![curvature, 0.0, 0.0, 0.0],
+            ray_distances: [100.0; 11],
+            lookahead_heading_deltas: [0.0; 12],
+            lookahead_curvatures: {
+                let mut c = [0.0f32; 12];
+                c[0] = curvature;
+                c
+            },
             value_prediction: None,
             policy_steering_mean: None,
             policy_steering_std: None,

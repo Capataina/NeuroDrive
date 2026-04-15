@@ -83,16 +83,16 @@ impl RunContext {
             centreline_reward_max_distance: episode_config.centreline_reward_max_distance,
             time_penalty_per_tick: episode_config.time_penalty_per_tick,
             crash_penalty: episode_config.crash_penalty,
-            ppo_epochs: brain.ppo_epochs,
-            clip_epsilon: brain.clip_epsilon,
-            gamma: brain.gamma,
-            gae_lambda: brain.gae_lambda,
-            max_steps: brain.max_steps,
-            min_update_steps: brain.min_update_steps,
-            samples_per_tick: brain.samples_per_tick,
-            hidden_dim: 64, // from ActorCritic::new default
-            actor_lr: 3e-4, // from AdamOptimizer default in model.rs
-            critic_lr: 5e-4,
+            ppo_epochs: brain.config.ppo_epochs,
+            clip_epsilon: brain.config.clip_epsilon,
+            gamma: brain.config.gamma,
+            gae_lambda: brain.config.gae_lambda,
+            max_steps: brain.config.max_steps,
+            min_update_steps: brain.config.min_update_steps,
+            samples_per_tick: brain.config.samples_per_tick,
+            hidden_dim: brain.config.actor_hidden_dim,
+            actor_lr: brain.config.actor_lr,
+            critic_lr: brain.config.critic_lr,
         }
     }
 

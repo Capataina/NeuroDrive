@@ -7,10 +7,6 @@ use crate::brain::ppo::buffer::TrainerRolloutBuffer;
 use crate::brain::common::math::{normal_entropy, normal_log_prob};
 use crate::brain::common::mlp::Linear;
 
-const VALUE_HUBER_DELTA: f32 = 1.0;
-const ACTOR_GRAD_CLIP_NORM: f32 = 0.5;
-const CRITIC_GRAD_CLIP_NORM: f32 = 0.5;
-const ENTROPY_COEF: f32 = 0.01;
 
 /// Accumulated diagnostics for the current epoch, persisted across chunk ticks.
 #[derive(Default)]
@@ -76,7 +72,7 @@ pub fn ppo_prepare_update(
     }
 
     let (advantages, returns) =
-        buffer.compute_gae_per_env(bootstrap_values, brain.gamma, brain.gae_lambda);
+        buffer.compute_gae_per_env(bootstrap_values, brain.config.gamma, brain.config.gae_lambda);
     let len = buffer.len();
 
     // Fisher-Yates shuffle for minibatch sample ordering
@@ -93,7 +89,7 @@ pub fn ppo_prepare_update(
         frozen_buffer,
         advantages,
         returns,
-        epochs_remaining: brain.ppo_epochs,
+        epochs_remaining: brain.config.ppo_epochs,
         sample_offset: 0,
         accum: EpochAccumulator::default(),
         shuffled_indices: indices,
@@ -122,7 +118,9 @@ pub fn ppo_process_chunk(
     let buffer = &prepared.frozen_buffer;
     let advantages = &prepared.advantages;
     let returns = &prepared.returns;
-    let clip_eps = brain.clip_epsilon;
+    let clip_eps = brain.config.clip_epsilon;
+    let value_huber_delta = brain.config.value_huber_delta;
+    let entropy_coef = brain.config.entropy_coef;
     let batch_size = buffer.len();
     let batch_size_f32 = batch_size as f32;
     let end = (prepared.sample_offset + max_samples).min(batch_size);
@@ -217,15 +215,15 @@ pub fn ppo_process_chunk(
 
         // ── Value loss (Huber) ──
         let value_error = value - ret;
-        let value_grad = if value_error.abs() <= VALUE_HUBER_DELTA {
+        let value_grad = if value_error.abs() <= value_huber_delta {
             value_error
         } else {
-            VALUE_HUBER_DELTA * value_error.signum()
+            value_huber_delta * value_error.signum()
         };
-        acc.value_loss_sum += if value_error.abs() <= VALUE_HUBER_DELTA {
+        acc.value_loss_sum += if value_error.abs() <= value_huber_delta {
             0.5 * value_error.powi(2)
         } else {
-            VALUE_HUBER_DELTA * (value_error.abs() - 0.5 * VALUE_HUBER_DELTA)
+            value_huber_delta * (value_error.abs() - 0.5 * value_huber_delta)
         };
         grad_values[s] = value_grad / batch_size_f32;
 
@@ -272,7 +270,7 @@ pub fn ppo_process_chunk(
             grad_means[s * act_dim + j] =
                 (-policy_weight * adv * d_lp_d_means[j]) / batch_size_f32;
             brain.model.a_log_std_grad[j] +=
-                (-policy_weight * adv * d_lp_d_log_stds[j] - ENTROPY_COEF) / batch_size_f32;
+                (-policy_weight * adv * d_lp_d_log_stds[j] - entropy_coef) / batch_size_f32;
         }
     }
 
@@ -314,7 +312,7 @@ pub fn ppo_finish_epoch(
             &mut brain.model.a_fc2,
             &mut brain.model.a_mean,
         ],
-        ACTOR_GRAD_CLIP_NORM,
+        brain.config.actor_grad_clip,
     );
     clip_linear_gradients(
         &mut [
@@ -322,7 +320,7 @@ pub fn ppo_finish_epoch(
             &mut brain.model.c_fc2,
             &mut brain.model.c_value,
         ],
-        CRITIC_GRAD_CLIP_NORM,
+        brain.config.critic_grad_clip,
     );
 
     brain.model.a_opt.step(&mut [
@@ -348,8 +346,8 @@ pub fn ppo_finish_epoch(
         let v_hat =
             brain.model.log_std_opt_v[j] / (1.0 - 0.999f32.powf(brain.model.opt_t));
 
-        brain.model.a_log_std[j] -= 3e-4 * m_hat / (v_hat.sqrt() + 1e-8);
-        brain.model.a_log_std[j] = brain.model.a_log_std[j].clamp(-1.0, 0.5);
+        brain.model.a_log_std[j] -= brain.config.log_std_lr * m_hat / (v_hat.sqrt() + 1e-8);
+        brain.model.a_log_std[j] = brain.model.a_log_std[j].clamp(brain.config.log_std_floor, brain.config.log_std_ceil);
     }
 
     if is_final_epoch {
@@ -415,7 +413,7 @@ pub fn ppo_finish_epoch(
             "PPO update #{}: batch={} epochs={} policy_loss={:.4} value_loss={:.4} entropy={:.4} ev={:.4} clip={:.2}% kl={:.5}",
             stats.last_completed_update,
             batch_size,
-            brain.ppo_epochs,
+            brain.config.ppo_epochs,
             stats.policy_loss,
             stats.value_loss,
             stats.policy_entropy,

@@ -26,36 +26,79 @@ use self::update::{
     ppo_update_blocking, squashed_gaussian_log_prob,
 };
 
+/// All PPO hyperparameters in a single canonical location.
+#[derive(Clone, Debug)]
+pub struct PpoConfig {
+    // Rollout
+    pub gamma: f32,
+    pub gae_lambda: f32,
+    pub max_steps: usize,
+    pub min_update_steps: usize,
+    pub ppo_epochs: usize,
+    pub clip_epsilon: f32,
+    pub samples_per_tick: usize,
+    // Network
+    pub actor_hidden_dim: usize,
+    pub critic_hidden_dim: usize,
+    // Optimiser
+    pub actor_lr: f32,
+    pub critic_lr: f32,
+    pub critic_weight_decay: f32,
+    pub entropy_coef: f32,
+    pub actor_grad_clip: f32,
+    pub critic_grad_clip: f32,
+    pub value_huber_delta: f32,
+    // Exploration
+    pub log_std_floor: f32,
+    pub log_std_ceil: f32,
+    pub log_std_lr: f32,
+}
+
+impl Default for PpoConfig {
+    fn default() -> Self {
+        Self {
+            gamma: 0.99,
+            gae_lambda: 0.95,
+            max_steps: 512,
+            min_update_steps: 128,
+            ppo_epochs: 4,
+            clip_epsilon: 0.2,
+            samples_per_tick: 64,
+            actor_hidden_dim: 64,
+            critic_hidden_dim: 128,
+            actor_lr: 3e-4,
+            critic_lr: 5e-4,
+            critic_weight_decay: 3e-4,
+            entropy_coef: 0.01,
+            actor_grad_clip: 0.5,
+            critic_grad_clip: 0.5,
+            value_huber_delta: 1.0,
+            log_std_floor: -1.0,
+            log_std_ceil: 0.5,
+            log_std_lr: 3e-4,
+        }
+    }
+}
+
 /// Shared PPO brain resource. Owns the policy/value network and hyperparameters.
 /// The rollout buffer is now a separate `TrainerRolloutBuffer` resource.
 #[derive(Resource)]
 pub struct PpoBrain {
     pub model: ActorCritic,
     pub rng: StdRng,
-    pub gamma: f32,
-    pub gae_lambda: f32,
-    pub max_steps: usize,
-    pub min_update_steps: usize,
+    pub config: PpoConfig,
     pub step_counter: usize,
-    pub ppo_epochs: usize,
-    pub clip_epsilon: f32,
-    pub samples_per_tick: usize,
 }
 
 impl Default for PpoBrain {
     fn default() -> Self {
+        let config = PpoConfig::default();
         let mut init_rng = rand::rng();
         Self {
-            model: ActorCritic::new(OBSERVATION_DIM, 64, 128, 2, &mut init_rng),
+            model: ActorCritic::new(OBSERVATION_DIM, config.actor_hidden_dim, config.critic_hidden_dim, 2, config.actor_lr, config.critic_lr, config.critic_weight_decay, &mut init_rng),
             rng: StdRng::from_rng(&mut init_rng),
-            gamma: 0.99,
-            gae_lambda: 0.95,
-            max_steps: 512,
-            min_update_steps: 128,
+            config,
             step_counter: 0,
-            ppo_epochs: 4,
-            clip_epsilon: 0.2,
-            samples_per_tick: 64,
         }
     }
 }
@@ -283,8 +326,8 @@ pub fn ppo_collect_rewards_all_cars_system(
 
     let mut any_done = false;
     for (_, _, episode_state) in car_query.iter() {
-        let done = episode_state.current_tick_end_reason.is_some();
-        buffer.push_reward(episode_state.current_tick_reward, done);
+        let done = episode_state.tick.end_reason.is_some();
+        buffer.push_reward(episode_state.tick.reward, done);
         if done {
             any_done = true;
         }
@@ -298,14 +341,14 @@ pub fn ppo_collect_rewards_all_cars_system(
         buffer.env_ids.len(),
     );
 
-    let reached_horizon = buffer.len() >= brain.max_steps;
-    let reached_terminal_batch = any_done && buffer.len() >= brain.min_update_steps;
+    let reached_horizon = buffer.len() >= brain.config.max_steps;
+    let reached_terminal_batch = any_done && buffer.len() >= brain.config.min_update_steps;
 
     // Only start a new update if there is no epoch-spread update in progress
     if (reached_horizon || reached_terminal_batch) && update_state.prepared.is_none() {
         let mut bootstrap_values: HashMap<u32, f32> = HashMap::new();
         for (env_id, obs, episode_state) in car_query.iter() {
-            let done = episode_state.current_tick_end_reason.is_some();
+            let done = episode_state.tick.end_reason.is_some();
             if done {
                 bootstrap_values.insert(env_id.0, 0.0);
             } else {
@@ -345,7 +388,7 @@ pub fn ppo_epoch_system(
         return;
     }
 
-    let chunk_size = brain.samples_per_tick;
+    let chunk_size = brain.config.samples_per_tick;
     let epoch_complete = ppo_process_chunk(&mut brain, prepared, chunk_size);
 
     if epoch_complete {
@@ -410,7 +453,7 @@ pub fn ppo_flush_on_exit_system(
 
     let mut bootstrap_values: HashMap<u32, f32> = HashMap::new();
     for (env_id, obs, episode_state) in car_query.iter() {
-        let done = episode_state.current_tick_end_reason.is_some();
+        let done = episode_state.tick.end_reason.is_some();
         if done {
             bootstrap_values.insert(env_id.0, 0.0);
         } else {

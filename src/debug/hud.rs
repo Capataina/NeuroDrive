@@ -331,8 +331,8 @@ pub(crate) fn update_driving_hud_stats_system(
             hud_stats.deaths = hud_stats.deaths.saturating_add(1);
         }
 
-        if episode_state.current_best_progress_fraction > hud_stats.best_progress_fraction {
-            hud_stats.best_progress_fraction = episode_state.current_best_progress_fraction;
+        if episode_state.accum.best_progress_fraction > hud_stats.best_progress_fraction {
+            hud_stats.best_progress_fraction = episode_state.accum.best_progress_fraction;
             hud_stats.best_progress_episode = episode_state.current_episode;
         }
     }
@@ -345,19 +345,19 @@ pub(crate) fn capture_driving_hud_episode_metrics_system(
     mut history: ResMut<DrivingHudHistory>,
 ) {
     for (_env_id, episode_state) in car_query.iter() {
-        let Some(end_reason) = episode_state.current_tick_end_reason else {
+        let Some(end_reason) = episode_state.tick.end_reason else {
             continue;
         };
 
         // This car finished an episode this tick.
         history.episodes.push_back(CompletedHudEpisode {
             end_reason,
-            best_progress_fraction: episode_state.last_episode_best_progress_fraction,
-            total_return: episode_state.last_episode_return,
-            life_seconds: episode_state.last_episode_ticks as f32 * FIXED_TICK_SECONDS,
-            mean_centreline_distance: episode_state.current_tick_centerline_distance,
+            best_progress_fraction: episode_state.last.best_progress_fraction,
+            total_return: episode_state.last.return_sum,
+            life_seconds: episode_state.last.ticks as f32 * FIXED_TICK_SECONDS,
+            mean_centreline_distance: episode_state.tick.centerline_distance,
             mean_abs_heading_error_deg: episode_state
-                .current_tick_heading_error
+                .tick.heading_error
                 .abs()
                 .to_degrees(),
         });
@@ -420,14 +420,14 @@ pub(crate) fn update_driving_hud_text_system(
         return;
     };
 
-    let progress_pct = (episode_state.current_tick_progress_fraction * 100.0).clamp(0.0, 100.0);
+    let progress_pct = (episode_state.tick.progress_fraction * 100.0).clamp(0.0, 100.0);
     let best_progress_pct = (hud_stats.best_progress_fraction * 100.0).clamp(0.0, 100.0);
     let life_best_progress_pct =
-        (episode_state.current_best_progress_fraction * 100.0).clamp(0.0, 100.0);
+        (episode_state.accum.best_progress_fraction * 100.0).clamp(0.0, 100.0);
     let current_life_seconds = episode_state.ticks_in_episode as f32 * FIXED_TICK_SECONDS;
     let heading_error_deg = sensors.heading_error.to_degrees();
     let avg_progress_pct = (moving_avg.best_progress_mean * 100.0).clamp(0.0, 100.0);
-    let last_reason = match episode_state.last_end_reason {
+    let last_reason = match episode_state.last.end_reason {
         Some(EpisodeEndReason::Crash) => "Crash",
         Some(EpisodeEndReason::Timeout) => "Timeout",
         None => "N/A",
@@ -437,14 +437,14 @@ pub(crate) fn update_driving_hud_text_system(
 
     let current_line = format!(
         "Prog {progress_pct:.1}%  Best {life_best_progress_pct:.1}%  Gap {gap:.1}  Head {heading_error_deg:.1}\u{00b0}  Off {offset:+.1}",
-        gap = episode_state.current_tick_centerline_distance,
+        gap = episode_state.tick.centerline_distance,
         offset = sensors.signed_lateral_offset,
     );
     let run_line = format!(
         "Ep {}  Life {:.1}s  Rwd {:+.1}  Deaths {}  Last {}",
         episode_state.current_episode,
         current_life_seconds,
-        episode_state.current_return,
+        episode_state.accum.return_sum,
         hud_stats.deaths,
         last_reason,
     );

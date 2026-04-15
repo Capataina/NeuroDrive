@@ -144,7 +144,7 @@ pub fn snapshot_completed_episode_action_stats_system(
     mut accumulators: ResMut<PerCarActionAccumulators>,
 ) {
     for (env_id, episode_state) in car_query.iter() {
-        let Some(_reason) = episode_state.current_tick_end_reason else {
+        let Some(_reason) = episode_state.tick.end_reason else {
             continue;
         };
 
