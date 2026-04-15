@@ -8,7 +8,7 @@
 ## Configuration Drift
 
 ### PPO Hyperparameters Scattered Across Multiple Locations
-- [ ] Consolidate PPO hyperparameter defaults into a single `PpoConfig` struct instead of spreading them across `PpoBrain::default()`, `update.rs` constants, and `model.rs::ActorCritic::new()`
+- [x] Consolidate PPO hyperparameter defaults into a single `PpoConfig` struct instead of spreading them across `PpoBrain::default()`, `update.rs` constants, and `model.rs::ActorCritic::new()`
 
 **Category:** Configuration Drift
 **Severity:** Medium
@@ -78,7 +78,7 @@ Zero functional change. Same default values, same runtime behaviour. Only the lo
 ## Inconsistent Patterns
 
 ### `wrap_angle` in `sim/mod.rs` vs `wrap_to_pi` in `centerline.rs`
-- [ ] Replace the private `wrap_to_pi` in `centerline.rs` with the shared `wrap_angle` from `sim/mod.rs`
+- [x] Replace the private `wrap_to_pi` in `centerline.rs` with the shared `wrap_angle` from `sim/mod.rs`
 
 **Category:** Inconsistent Patterns
 **Severity:** Low

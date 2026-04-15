@@ -8,7 +8,7 @@
 ## Algorithm Optimisation
 
 ### Adaptive Raycast Step Size for Long-Range Rays
-- [ ] Use a larger initial step size for raycasts that are far from boundaries, falling back to fine stepping near the boundary
+- [x] Use a larger initial step size for raycasts that are far from boundaries, falling back to fine stepping near the boundary
 
 **Category:** Algorithm Optimisation
 **Severity:** High
@@ -53,7 +53,7 @@ If exact reproducibility of observation values across step-size changes is impor
 ## Inconsistent Patterns
 
 ### `tangent_at_s` and `point_at_s` Duplicate Segment-Finding Logic
-- [ ] Extract a shared `find_segment_at_s` helper from `tangent_at_s` and `point_at_s` to eliminate the duplicated linear scan
+- [x] Extract a shared `find_segment_at_s` helper from `tangent_at_s` and `point_at_s` to eliminate the duplicated linear scan
 
 **Category:** Inconsistent Patterns
 **Severity:** Medium

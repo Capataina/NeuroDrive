@@ -8,7 +8,7 @@
 ## Data Layout and Memory Access Patterns
 
 ### Flatten Rollout Buffer From AoS to SoA Flat Storage
-- [ ] Replace `Vec<Vec<f32>>` fields in `TrainerRolloutBuffer` with flat `Vec<f32>` storage and an explicit dimension stride
+- [x] Replace `Vec<Vec<f32>>` fields in `TrainerRolloutBuffer` with flat `Vec<f32>` storage and an explicit dimension stride
 
 **Category:** Data Layout and Memory Access Patterns
 **Severity:** High
@@ -50,7 +50,7 @@ Zero functional change. The same data is stored in the same logical order; only 
 ---
 
 ### Transpose Weight Access Pattern in `Linear::forward_batch`
-- [ ] Store a transposed weight copy (or restructure the inner loop) so that `forward_batch` reads weights sequentially rather than with an `in_dim` stride
+- [x] Store a transposed weight copy (or restructure the inner loop) so that `forward_batch` reads weights sequentially rather than with an `in_dim` stride
 
 **Category:** Data Layout and Memory Access Patterns
 **Severity:** High
@@ -114,7 +114,7 @@ Zero functional change. Matrix multiplication is associative and commutative ove
 ## Performance Improvement
 
 ### Eliminate Per-Car Vec Allocations in `ppo_act_all_cars_system`
-- [ ] Replace `obs.values.to_vec()`, `actions.to_vec()`, and `latent_actions.to_vec()` with slice-based buffer push
+- [x] Replace `obs.values.to_vec()`, `actions.to_vec()`, and `latent_actions.to_vec()` with slice-based buffer push
 
 **Category:** Performance Improvement
 **Severity:** High
@@ -158,7 +158,7 @@ Zero functional change by construction. The same bytes are stored in the same bu
 ---
 
 ### Cache Normal Distribution Construction in `sample_normal`
-- [ ] Avoid constructing a new `Normal` distribution on every call to `sample_normal`
+- [x] Avoid constructing a new `Normal` distribution on every call to `sample_normal`
 
 **Category:** Performance Improvement
 **Severity:** High
@@ -204,7 +204,7 @@ Zero functional change. `N(mean, std)` is defined as `mean + std * N(0, 1)`. The
 ---
 
 ### Eliminate Gradient-Seed Clone Allocations in `ppo_process_chunk`
-- [ ] Remove the `gv` and `gm` Vec clones by restructuring the borrow to allow direct slice passing
+- [x] Remove the `gv` and `gm` Vec clones by restructuring the borrow to allow direct slice passing
 
 **Category:** Performance Improvement
 **Severity:** High
@@ -246,7 +246,7 @@ Zero functional change. The same gradient values are passed to the same backward
 ---
 
 ### Eliminate obs-batch Allocation in `ppo_process_chunk`
-- [ ] Add an `obs_batch` field to `BatchScratch` to eliminate the per-chunk `vec!` allocation
+- [x] Add an `obs_batch` field to `BatchScratch` to eliminate the per-chunk `vec!` allocation
 
 **Category:** Performance Improvement
 **Severity:** High
@@ -274,7 +274,7 @@ Zero functional change by construction. The same observation data is copied into
 ---
 
 ### Batch Critic Forward Passes During Action Selection
-- [ ] Collect all 8 cars' observations and run a single batched `forward_critic` call instead of 8 sequential single-sample calls
+- [x] Collect all 8 cars' observations and run a single batched `forward_critic` call instead of 8 sequential single-sample calls
 
 **Category:** Performance Improvement
 **Severity:** High
@@ -319,7 +319,7 @@ Note: This requires a `forward_critic_batch` method or reusing the existing `for
 ## Algorithm Optimisation
 
 ### Flatten `orthogonal_init` Output to Avoid Intermediate Allocation
-- [ ] Refactor `orthogonal_init` to return a flat `Vec<f32>` in row-major order instead of `Vec<Vec<f32>>`
+- [x] Refactor `orthogonal_init` to return a flat `Vec<f32>` in row-major order instead of `Vec<Vec<f32>>`
 
 **Category:** Algorithm Optimisation
 **Severity:** Medium
@@ -357,7 +357,7 @@ Zero functional change. The same Gram-Schmidt orthogonalisation produces the sam
 ---
 
 ### Redundant `value_predictions` Clone in `ppo_prepare_update`
-- [ ] Remove the `value_predictions` clone from `ppo_prepare_update` since `PreparedUpdate` already owns the frozen buffer which contains the same values
+- [x] Remove the `value_predictions` clone from `ppo_prepare_update` since `PreparedUpdate` already owns the frozen buffer which contains the same values
 
 **Category:** Performance Improvement
 **Severity:** Medium
@@ -388,7 +388,7 @@ Zero functional change by construction. `value_predictions` and `frozen_buffer.v
 ---
 
 ### `Tanh::forward` Clones Output Unnecessarily
-- [ ] Remove the `.clone()` in `Tanh::forward` by restructuring the cache to avoid double allocation
+- [x] Remove the `.clone()` in `Tanh::forward` by restructuring the cache to avoid double allocation
 
 **Category:** Performance Improvement
 **Severity:** Medium
@@ -448,7 +448,7 @@ Zero functional change. Same tanh output, same cache.
 ## Dead Code Removal
 
 ### `Linear::backward` Single-Sample Path is Dead Code
-- [ ] Remove the `#[allow(dead_code)]` on `Linear::backward` and `Tanh::backward` and verify they are truly unused, or remove them entirely
+- [x] Remove the `#[allow(dead_code)]` on `Linear::backward` and `Tanh::backward` and verify they are truly unused, or remove them entirely
 
 **Category:** Dead Code Removal
 **Severity:** Low

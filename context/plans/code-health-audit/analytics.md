@@ -8,7 +8,7 @@
 ## Performance Improvement
 
 ### `TickTraceRecord` Uses `Vec<f32>` for Fixed-Size Arrays
-- [ ] Replace `ray_distances: Vec<f32>`, `lookahead_heading_deltas: Vec<f32>`, and `lookahead_curvatures: Vec<f32>` with fixed-size arrays in `TickTraceRecord`
+- [x] Replace `ray_distances: Vec<f32>`, `lookahead_heading_deltas: Vec<f32>`, and `lookahead_curvatures: Vec<f32>` with fixed-size arrays in `TickTraceRecord`
 
 **Category:** Performance Improvement
 **Severity:** Medium
@@ -54,7 +54,7 @@ Note: this requires updating the trace capture code in `src/analytics/trackers/t
 ## Inconsistent Patterns
 
 ### Crash Type Stored as `String` Instead of Enum
-- [ ] Replace `crash_type: Option<String>` in `EpisodeRecord` and `classify_crash` return type with a `CrashKind` enum
+- [x] Replace `crash_type: Option<String>` in `EpisodeRecord` and `classify_crash` return type with a `CrashKind` enum
 
 **Category:** Inconsistent Patterns
 **Severity:** Medium
@@ -102,7 +102,7 @@ Zero functional change. The same classification logic produces the same results,
 ## Documentation Rot
 
 ### Buffer Comment Says "Old Single-Env Rollout Buffer. Retained Temporarily."
-- [ ] Remove the stale comment at the top of `TrainerRolloutBuffer`
+- [x] Remove the stale comment at the top of `TrainerRolloutBuffer`
 
 **Category:** Documentation Rot
 **Severity:** Low
@@ -132,7 +132,7 @@ Zero functional change.
 ## Triage Needed
 
 ### `speed_std` Field Missing From `EpisodeRecord` Despite Being Computed in `TraceAggregates`
-- [ ] Decide whether speed standard deviation should be added to `EpisodeRecord` for richer per-episode analytics
+- [x] Decide whether speed standard deviation should be added to `EpisodeRecord` for richer per-episode analytics
 
 **Category:** Triage Needed
 **Severity:** Low

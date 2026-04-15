@@ -8,7 +8,7 @@
 ## Algorithm Optimisation
 
 ### Cached-Hint Centreline Projection
-- [ ] Add a `last_segment_hint` to `TrackProgress` and use it to start the projection search at the most likely segment instead of scanning all segments
+- [x] Add a `last_segment_hint` to `TrackProgress` and use it to start the projection search at the most likely segment instead of scanning all segments
 
 **Category:** Algorithm Optimisation
 **Severity:** High
@@ -47,7 +47,7 @@ Zero functional change for both changes. `project` still finds the globally clos
 ---
 
 ### Pre-Compute Local Corner Array in Collision Detection
-- [ ] Hoist the `local_corners` array computation out of `collision_detection_system` since it is constant
+- [x] Hoist the `local_corners` array computation out of `collision_detection_system` since it is constant
 
 **Category:** Performance Improvement
 **Severity:** Low
@@ -89,7 +89,7 @@ Zero functional change by construction.
 ## Known Issues and Active Risks
 
 ### Crash Classification Uses Debug Format for End Reason Matching
-- [ ] Replace `format!("{:?}", reason).contains("Crash")` with a direct pattern match on `EpisodeEndReason::Crash`
+- [x] Replace `format!("{:?}", reason).contains("Crash")` with a direct pattern match on `EpisodeEndReason::Crash`
 
 **Category:** Known Issues and Active Risks
 **Severity:** Medium
@@ -129,7 +129,7 @@ Zero functional change. `EpisodeEndReason::Crash` is the only variant whose Debu
 ## Complexity Hotspots
 
 ### `EpisodeState` Struct Has 34 Fields
-- [ ] Consider splitting `EpisodeState` into a `CurrentTickData` sub-struct and an `EpisodeAccumulator` sub-struct to reduce the cognitive load
+- [x] Consider splitting `EpisodeState` into a `CurrentTickData` sub-struct and an `EpisodeAccumulator` sub-struct to reduce the cognitive load
 
 **Category:** Complexity Hotspots
 **Severity:** Medium
