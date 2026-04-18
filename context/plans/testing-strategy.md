@@ -2,18 +2,18 @@
 
 ## Goal
 
-Establish a test suite that catches mathematical errors, contract violations, and integration regressions before they reach a training run. The existing tests cover analytics sparklines, phase detection, physics determinism, GAE correctness, and HUD assessment — they do not verify the reward computation, neural network math, PPO update correctness, observation contract, or spawn logic.
+Establish a test suite that catches mathematical errors, contract violations, and integration regressions before they reach a training run. The existing 31 tests cover analytics sparklines, phase detection, physics determinism, GAE correctness, and HUD assessment — they do not verify the reward computation, neural network math, PPO update correctness, observation contract, or random-spawn logic.
 
-> **Note:** Some test descriptions below reference stale code (e.g., `speed_weighted_progress`, `lap_bonus`, `no_centerline_reward_in_episode`, `car_zero_always_at_canonical_spawn`). The reward structure, spawn logic, and observation space have all changed since this plan was written. Test concepts remain valid but need adaptation to the current implementation (velocity projection reward, random spawn for all cars, 43-dim observations).
+Every time we change a reward term, activation function, or initialisation scheme, we should know immediately if the math is wrong rather than discovering it 20 minutes into a confusing run.
 
-Every time we change a reward term, activation function, or initialisation scheme, we should know immediately if the math is wrong rather than discovering it 20 minutes later in a confusing run report.
+The 2026-04-18 audit added a `[lib]` target to the crate — integration tests under `tests/*.rs` can now `use neurodrive::brain::...`, which unblocks the higher-leverage test categories below (category 7 especially).
 
 ## What We're NOT Doing
 
 - No mocking frameworks or heavy test infrastructure
 - No end-to-end simulation tests (too slow, too fragile)
 - No snapshot/golden-file tests for reports (format changes too often)
-- No coverage targets or metrics — just the tests that actually catch bugs
+- No coverage targets — just the tests that actually catch bugs
 
 ---
 
@@ -23,62 +23,56 @@ Every time we change a reward term, activation function, or initialisation schem
 
 **Location:** `src/brain/common/mlp.rs`, `src/brain/common/math.rs`, `src/brain/common/optim.rs`
 
-These are pure functions with known mathematical properties. Easy to test, high value.
+Pure functions with known mathematical properties. Easy to test, high value.
 
 | Test | What it verifies |
 |------|-----------------|
-| `tanh_forward_output_range` | All outputs ∈ (-1, 1) for arbitrary inputs |
+| `tanh_forward_output_range` | Outputs ∈ (−1, 1) for arbitrary inputs |
 | `tanh_forward_zero_is_zero` | tanh(0) = 0 |
-| `tanh_backward_gradient_check` | Numerical gradient matches analytical: `(tanh(x+ε) - tanh(x-ε)) / 2ε ≈ backward gradient` for several x values |
-| `tanh_backward_at_zero` | Gradient at 0 is 1.0 |
-| `linear_forward_shape` | Output dimension matches bias dimension |
-| `linear_backward_gradient_check` | Numerical gradient vs analytical for a small (3→2) layer |
+| `tanh_backward_gradient_check` | Numerical ≈ analytical gradient at several x |
+| `linear_forward_into_shape_and_zero` | `forward_into` writes `out_dim` values, with zero input producing bias |
+| `linear_backward_batch_gradient_check` | Numerical vs analytical for a small (3→2) layer |
 | `linear_zero_grad_clears_all` | After `zero_grad()`, all grad values are 0.0 |
-| `orthogonal_init_columns_unit_norm` | Each column of the weight matrix has approximately unit norm (before scaling) |
-| `orthogonal_init_columns_orthogonal` | Dot product between distinct columns ≈ 0 |
-| `orthogonal_init_scale_applied` | Column norms ≈ scale value |
-| `orthogonal_init_different_seeds_different_weights` | Two calls with different RNG states produce different matrices |
-| `adam_step_reduces_loss_on_quadratic` | A few Adam steps on `w² - target` converge toward target |
-| `adam_epsilon_is_1e5` | Verify the constant hasn't been accidentally changed |
-| `glorot_uniform_variance_bound` | Weights within expected ±√(6/(fan_in+fan_out)) range |
+| `orthogonal_init_columns_unit_norm` | Column norms ≈ 1 before scale |
+| `orthogonal_init_columns_orthogonal` | Dot products between distinct columns ≈ 0 |
+| `orthogonal_init_scale_applied` | Column norms ≈ scale |
+| `adam_step_reduces_loss_on_quadratic` | Several Adam steps converge toward target on `(w − target)²` |
 
 ### 2. Unit Tests — Reward Computation
 
 **Location:** `src/game/episode.rs`
 
-The reward logic is the most frequently changed code and the most consequential if wrong. These tests should use a helper that constructs minimal state and calls the reward computation directly.
+The reward logic is the most frequently changed code and the most consequential if wrong. Use a helper that constructs minimal state and calls the reward computation directly.
 
 | Test | What it verifies |
 |------|-----------------|
-| `speed_weighted_progress_zero_speed_zero_reward` | progress_delta > 0 but speed = 0 → reward = 0 |
-| `speed_weighted_progress_zero_progress_zero_reward` | speed > 0 but progress_delta = 0 → reward = 0 |
-| `speed_weighted_progress_positive_case` | Known delta × speed / reference × scale = expected value |
-| `speed_weighted_progress_high_speed_multiplier` | Speed > reference → multiplier > 1.0 → reward > base |
-| `backward_progress_gives_zero` | progress_delta < 0 → clamped to 0 → reward = 0 |
-| `time_penalty_is_flat` | Every tick gets exactly `time_penalty_per_tick`, no heading component |
-| `crash_penalty_magnitude` | Terminal reward on crash = crash_penalty exactly |
-| `lap_bonus_magnitude` | Terminal reward on lap complete = lap_bonus exactly |
-| `total_reward_is_sum_of_components` | tick_reward = progress_reward + time_penalty + terminal_reward |
+| `velocity_projection_aligned_with_tangent_is_max` | `dot(velocity, tangent) / speed_reference × scale` hits expected peak when velocity is parallel to the tangent at `speed_reference` |
+| `velocity_projection_perpendicular_is_zero` | Velocity perpendicular to tangent → projection = 0 → reward component = 0 |
+| `velocity_projection_reverse_is_negative` | Moving backward along the tangent → negative reward (no clamp to 0) |
+| `centreline_reward_at_zero_distance_is_coef` | On-centreline → reward = `centreline_reward_coef` |
+| `centreline_reward_at_max_distance_is_zero` | At `centreline_reward_max_distance` → reward = 0 |
+| `centreline_reward_monotone_decreasing` | Further from centreline → smaller reward |
+| `time_penalty_default_is_zero` | Regression guard — `time_penalty_per_tick == 0.0` in `EpisodeConfig::default()` |
+| `crash_penalty_default_is_zero` | Regression guard — `crash_penalty == 0.0` in `EpisodeConfig::default()` |
+| `total_reward_is_sum_of_components` | `tick.reward == velocity_projection + centreline + time_penalty + terminal` |
 
 ### 3. Unit Tests — PPO Update Math
 
 **Location:** `src/brain/ppo/update.rs`
 
-The PPO math is subtle and easy to break. These tests verify the core gradient computation.
-
 | Test | What it verifies |
 |------|-----------------|
 | `squashed_gaussian_log_prob_finite` | No NaN/Inf for reasonable inputs |
-| `squashed_gaussian_log_prob_symmetry` | log_prob(x, mean) ≈ log_prob(-x, -mean) for steering (component 0) |
-| `ppo_ratio_no_clip_when_small_change` | ratio ≈ 1.0 when new_log_prob ≈ old_log_prob → no clipping |
-| `ppo_ratio_clips_when_large_change` | ratio far from 1.0 → clipped to [1-ε, 1+ε] |
+| `squashed_gaussian_log_prob_symmetry` | log_prob(x, mean) ≈ log_prob(−x, −mean) for steering component |
+| `ppo_ratio_no_clip_when_small_change` | ratio ≈ 1 when new ≈ old log_prob |
+| `ppo_ratio_clips_when_large_change` | Far-from-1 ratio gets clipped to [1−ε, 1+ε] |
 | `advantage_normalisation_per_chunk` | Per-chunk mean ≈ 0, std ≈ 1 after normalisation |
-| `shuffled_indices_are_permutation` | All indices present exactly once after shuffle |
-| `saturated_tanh_detection` | Outputs > 0.99 counted as saturated, others not |
+| `shuffled_indices_are_permutation` | Every index present exactly once after Fisher-Yates |
+| `saturated_tanh_detection` | Outputs with |value| > 0.99 counted as saturated |
 | `value_huber_loss_quadratic_region` | Error < δ → loss = 0.5 × error² |
-| `value_huber_loss_linear_region` | Error > δ → loss = δ × (|error| - 0.5δ) |
-| `gradient_clip_scales_correctly` | When norm > max, all grads scaled by max/norm |
-| `gradient_clip_noop_when_small` | When norm ≤ max, grads unchanged |
+| `value_huber_loss_linear_region` | Error > δ → loss = δ × (|error| − 0.5δ) |
+| `gradient_clip_scales_correctly` | norm > max → all grads scaled by max/norm |
+| `gradient_clip_noop_when_small` | norm ≤ max → grads unchanged |
 
 ### 4. Unit Tests — GAE Computation
 
@@ -88,10 +82,10 @@ Already has 2 tests. Extend with:
 
 | Test | What it verifies |
 |------|-----------------|
-| `gae_terminal_state_zero_bootstrap` | Done=true → no value bootstrap leaks through |
-| `gae_advantages_not_globally_normalised` | Raw advantages are NOT zero-mean (since we removed global normalisation) |
-| `gae_returns_equal_advantages_plus_values` | returns[i] = advantages[i] + values[i] for all i |
-| `gae_single_step_episode` | One transition with done=true → advantage = reward - value |
+| `gae_terminal_state_zero_bootstrap` | `done == true` → no value bootstrap leaks through |
+| `gae_returns_equal_advantages_plus_values` | `returns[i] == advantages[i] + values[i]` |
+| `gae_single_step_episode` | One transition with done → advantage = reward − value |
+| `env_grouping_capacity_reused_across_calls` | Buckets' capacity does not regrow when `compute_gae_per_env` runs twice in sequence |
 
 ### 5. Unit Tests — Observation Contract
 
@@ -99,41 +93,41 @@ Already has 2 tests. Extend with:
 
 | Test | What it verifies |
 |------|-----------------|
-| `observation_dim_matches_constant` | OBSERVATION_DIM = NUM_RAYS + 4 + NUM_LOOKAHEAD_SAMPLES × 2 |
+| `observation_dim_matches_constant` | `OBSERVATION_DIM = 43` and matches the field-count sum |
 | `ray_normalisation_in_range` | Ray features ∈ [0, 1] |
-| `speed_normalisation_in_range` | Speed feature ∈ [0, 1] |
-| `lateral_offset_normalisation_in_range` | Lateral offset ∈ [-1, 1] |
-| `heading_error_normalisation_in_range` | Heading error ∈ [-1, 1] |
-| `curvature_normalisation_in_range` | Curvature features ∈ [-1, 1] |
+| `v_forward_v_lateral_normalisation` | Both components ∈ [−1, 1] (using `speed_reward_reference` as the normaliser) |
+| `lateral_offset_normalisation_in_range` | Centreline lateral offset ∈ [−1, 1] |
+| `heading_error_normalisation_in_range` | Heading error ∈ [−1, 1] |
+| `previous_action_recorded` | `previous_steering` / `previous_throttle` propagated correctly between ticks |
 
 ### 6. Unit Tests — Random Spawn
 
-**Location:** `src/game/episode.rs` or `src/game/plugin.rs`
+**Location:** `src/game/plugin.rs`, `src/game/episode.rs`
 
 | Test | What it verifies |
 |------|-----------------|
-| `random_spawn_position_on_track` | Sampled position via `point_at_s` is within road boundaries |
-| `random_spawn_heading_matches_tangent` | Spawn rotation = atan2(tangent.y, tangent.x) |
-| `random_spawn_covers_full_track` | 100 samples cover at least 80% of the track length (within 10% buckets) |
-| `car_zero_always_at_canonical_spawn` | Car 0 spawn position matches track.spawn_position |
+| `random_spawn_position_on_track` | Sampled position via `point_at_s` is inside the drivable grid |
+| `random_spawn_heading_matches_tangent` | Spawn rotation = `atan2(tangent.y, tangent.x)` |
+| `random_spawn_covers_full_track` | 100 samples cover at least 80% of the track length in 10%-buckets |
 
 ### 7. Integration Tests — Reward + PPO Pipeline
 
-These test that the reward flows correctly through the full pipeline: episode → buffer → GAE → PPO update. They don't run the full simulation but wire up the minimal components.
+Now unblocked by the `[lib]` target (`tests/*.rs` can import `neurodrive::brain::...`).
 
 | Test | What it verifies |
 |------|-----------------|
-| `one_episode_produces_nonzero_gradients` | After one rollout + PPO update, at least some weight gradients are nonzero |
-| `positive_advantage_increases_action_probability` | For a sample with positive advantage, the gradient direction would increase the action's log-prob |
-| `reward_scale_affects_gradient_magnitude` | Doubling progress_reward_scale roughly doubles gradient norms |
+| `one_episode_produces_nonzero_gradients` | After one rollout + PPO update, at least some weight gradients are non-zero |
+| `positive_advantage_increases_action_probability` | Sample with positive advantage → gradient direction increases log-prob |
+| `reward_scale_affects_gradient_magnitude` | Doubling `velocity_reward_scale` roughly doubles gradient norms |
+| `forward_actor_allocation_free` | Instrumented allocator sees 0 heap allocs across 1000 `forward_actor` calls (2026-04-18 `SampleScratch` regression guard) |
 
-### 8. Regression Tests — Things That Broke Before
+### 8. Regression Guards
 
-| Test | What it verifies | Motivated by |
-|------|-----------------|-------------|
-| `no_dead_relu_fields_in_analytics` | No source file in `src/` contains "dead_relu" | ReLU→Tanh migration left stale references |
-| `episode_config_crash_penalty_reasonable` | crash_penalty ∈ [-20, 0] | Accidentally set too high, caused car paralysis |
-| `no_centerline_reward_in_episode` | episode.rs doesn't contain "centerline_reward_coef" | Centreline reward was farmable |
+| Test | Motivated by |
+|------|-------------|
+| `no_dead_relu_fields_in_analytics` | ReLU → tanh migration left stale references in the past |
+| `no_unsafe_in_ppo_update` | 2026-04-18 audit removed three `unsafe` blocks via borrow split; regression guard prevents reintroduction |
+| `episode_config_defaults_match_reward_philosophy` | `time_penalty_per_tick == 0.0` and `crash_penalty == 0.0` are policy-locked per `notes/reward-and-entertainment.md` |
 
 ---
 
@@ -149,12 +143,11 @@ High value, low effort (do first)
 Medium value, low effort
   ├── Orthogonal init property tests (category 1)
   ├── Observation range tests (category 5)
-  └── Regression tests (category 8)
+  └── Regression guards (category 8)
 
 Medium value, medium effort
   ├── Random spawn tests (category 6)
-  ├── Linear backward gradient check (category 1)
-  └── Adam convergence test (category 1)
+  └── Linear backward gradient check (category 1)
 
 High value, higher effort (do later)
   └── Integration tests (category 7)
@@ -162,18 +155,12 @@ High value, higher effort (do later)
 
 ## Conventions
 
-- Tests live next to the code they test (`#[cfg(test)] mod tests` in each file) — not in a separate `tests/` directory
-- Test names describe the property being verified, not the method name: `speed_weighted_progress_zero_speed_zero_reward` not `test_progress_reward`
-- Each test should be independent — no shared mutable state between tests
-- Use `assert!((actual - expected).abs() < epsilon)` for float comparisons, with `epsilon = 1e-4` unless tighter precision is needed
+- Unit tests live next to the code they test (`#[cfg(test)] mod tests`) — not in a separate directory
+- Integration tests live in `tests/*.rs` (newly possible since the 2026-04-18 `[lib]` target)
+- Test names describe the property being verified, not the method
+- Use `assert!((actual - expected).abs() < epsilon)` for float comparisons; `epsilon = 1e-4` unless tighter precision is needed
 - Gradient checks use `epsilon = 1e-3` for the finite-difference step and `tolerance = 1e-2` for the comparison (f32 precision limits)
-
-## Open Questions
-
-- Should we add a CI step? Currently tests are run manually. Even a simple `cargo test` pre-commit hook would catch most regressions.
-- Should integration tests (category 7) use the real Bevy ECS or test the pure functions in isolation? Pure functions are faster and more stable but don't catch system wiring bugs.
-- How do we handle tests for code that depends on `Track` entities? Either extract the pure logic into free functions (preferred) or use minimal Bevy test worlds.
 
 ## Status
 
-Plan stage. No tests from this plan have been implemented yet. The existing 31 tests remain unchanged.
+Plan stage. None of the tests in this plan have been implemented. The existing 31 tests remain unchanged.
