@@ -4,7 +4,8 @@ use crate::agent::action::{
     ActionSmoothing, action_smoothing_system, keyboard_action_input_system,
 };
 use crate::agent::observation::{
-    ObservationConfig, build_observation_vector_system, update_sensor_readings_system,
+    ObservationConfig, ObservationNormalizer, build_observation_vector_system,
+    update_sensor_readings_system,
 };
 use crate::game::episode::episode_loop_system;
 use crate::game::progress::update_track_progress_system;
@@ -17,6 +18,7 @@ impl Plugin for AgentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActionSmoothing>()
             .init_resource::<ObservationConfig>()
+            .init_resource::<ObservationNormalizer>()
             // Actions must be updated on the fixed simulation tick.
             .add_systems(
                 FixedUpdate,

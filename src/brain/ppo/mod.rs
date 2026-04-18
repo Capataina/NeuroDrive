@@ -52,12 +52,75 @@ pub struct PpoConfig {
     pub log_std_floor: f32,
     pub log_std_ceil: f32,
     pub log_std_lr: f32,
+    /// Target KL divergence for PPO early-stop guardrail. When set to
+    /// `Some(target)`, the PPO epoch loop halts as soon as the observed
+    /// approximate KL at the end of an epoch exceeds `1.5 * target`. This is
+    /// the SB3 default pattern; see `context/references/ppo-tuning-knobs-racing.md`
+    /// Section B.2 for derivation. `None` disables the guardrail.
+    pub target_kl: Option<f32>,
+    /// PopArt enabled flag. When true, critic targets are normalised to
+    /// `~N(0, 1)` inside the training loop and `c_value` output is
+    /// denormalised at inference time. The POP rescale step preserves
+    /// existing predictions across µ/σ updates. See
+    /// `context/references/value-target-normalisation.md`.
+    pub popart_enabled: bool,
+    /// EMA decay for PopArt running mean/std per PPO update. 1e-4 is the
+    /// torchbeastpopart convention adapted to our per-update (not
+    /// per-step) cadence.
+    pub popart_beta: f32,
+    /// Numerical floor on PopArt's σ — prevents division by zero when
+    /// the return distribution temporarily collapses.
+    pub popart_sigma_floor: f32,
+}
+
+/// PopArt state — running mean/std of the critic's value targets.
+///
+/// `mu` and `sigma` are updated by an EMA of per-batch statistics. On each
+/// update, the `c_value` layer's weights and bias are rescaled so that
+/// externally-observed value predictions (`σ·z + µ`) are preserved across
+/// the statistics change. This keeps training on a stationary target
+/// distribution (`~N(0, 1)`) while the network itself continues to track
+/// the real return scale.
+#[derive(Clone, Debug)]
+pub struct ValueNorm {
+    pub mu: f32,
+    pub sigma: f32,
+}
+
+impl Default for ValueNorm {
+    fn default() -> Self {
+        // Identity transform at init — no rescale applied until the first
+        // update supplies real statistics.
+        Self { mu: 0.0, sigma: 1.0 }
+    }
+}
+
+impl ValueNorm {
+    /// Denormalises a raw critic output `z` back to reward units.
+    #[inline]
+    pub fn denormalise(&self, raw: f32) -> f32 {
+        self.sigma * raw + self.mu
+    }
+
+    /// Normalises a reward-unit return into the target space the critic
+    /// actually regresses to. Used by tests and reserved for a future
+    /// consumer in the exit-flush path; the hot update-loop version is
+    /// inlined in `update.rs` to avoid a function-call in the inner loop.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn normalise(&self, value: f32) -> f32 {
+        (value - self.mu) / self.sigma
+    }
 }
 
 impl Default for PpoConfig {
     fn default() -> Self {
         Self {
-            gamma: 0.99,
+            // Round-2 (2026-04-19): γ raised 0.99 → 0.995 per
+            // `context/references/ppo-tuning-knobs-racing.md` section C.
+            // Effective credit horizon 1.67s → 3.33s to match the observation
+            // lookahead window (~2.6s at current speeds).
+            gamma: 0.995,
             gae_lambda: 0.95,
             max_steps: 512,
             min_update_steps: 128,
@@ -76,6 +139,13 @@ impl Default for PpoConfig {
             log_std_floor: -1.0,
             log_std_ceil: 0.5,
             log_std_lr: 3e-4,
+            // Round-2: target-KL early stop — halts PPO epochs when the
+            // approximate KL divergence exceeds 1.5 × target_kl (SB3
+            // convention). `None` disables the guardrail entirely.
+            target_kl: Some(0.03),
+            popart_enabled: true,
+            popart_beta: 1e-4,
+            popart_sigma_floor: 1e-4,
         }
     }
 }
@@ -88,6 +158,8 @@ pub struct PpoBrain {
     pub rng: StdRng,
     pub config: PpoConfig,
     pub step_counter: usize,
+    /// PopArt running statistics on the critic's value target.
+    pub value_norm: ValueNorm,
     /// Reusable scratch for `ppo_act_all_cars_system` — carries `(entity, env_id)`
     /// pairs from the observation-stacking pass to the sampling pass. Cleared
     /// and refilled each tick; capacity preserved so no per-frame allocation.
@@ -103,6 +175,7 @@ impl Default for PpoBrain {
             rng: StdRng::from_rng(&mut init_rng),
             config,
             step_counter: 0,
+            value_norm: ValueNorm::default(),
             act_entity_buffer: Vec::with_capacity(16),
         }
     }
@@ -273,13 +346,22 @@ pub fn ppo_act_all_cars_system(
         brain.model.a_log_std[1].exp(),
     ];
 
+    // PopArt denormalisation constants snapshot — read once outside the
+    // loop since `value_norm` is not mutated during action selection.
+    // When PopArt is disabled the state is `(µ=0, σ=1)` and denormalisation
+    // is an identity transform.
+    let value_norm_mu = brain.value_norm.mu;
+    let value_norm_sigma = brain.value_norm.sigma;
+
     for i in 0..car_count {
         let (entity, env_id) = brain.act_entity_buffer[i];
         let mean: [f32; 2] = [
             brain.model.scratch.a_out[i * act_dim],
             brain.model.scratch.a_out[i * act_dim + 1],
         ];
-        let value = brain.model.scratch.c_out[i];
+        // Critic raw output represents the normalised value. Denormalise
+        // before exposing to consumers (PolicyOutput, rollout buffer, GAE).
+        let value = value_norm_sigma * brain.model.scratch.c_out[i] + value_norm_mu;
 
         // Sample latent actions from the squashed Gaussian, then squash/remap.
         let mut actions = [0.0f32; 2];
@@ -385,8 +467,11 @@ pub fn ppo_collect_rewards_all_cars_system(
             if done {
                 bootstrap_values.insert(env_id.0, 0.0);
             } else {
-                let value = brain.model.forward_critic(&obs.values);
-                bootstrap_values.insert(env_id.0, value);
+                // forward_critic returns the raw (normalised) critic output;
+                // GAE expects reward-unit values, so denormalise via PopArt
+                // state (identity when PopArt is disabled).
+                let raw = brain.model.forward_critic(&obs.values);
+                bootstrap_values.insert(env_id.0, brain.value_norm.denormalise(raw));
             }
         }
 
@@ -402,6 +487,12 @@ pub fn ppo_collect_rewards_all_cars_system(
 /// Processes a chunk of samples per tick from the in-progress PPO update.
 /// A full epoch is split across multiple ticks (samples_per_tick samples each)
 /// so the simulation stays smooth.
+///
+/// Round-2 (2026-04-19): after each completed epoch, checks the
+/// approximate KL against `config.target_kl`. If KL exceeds the SB3-style
+/// `1.5 * target_kl` guardrail, the current epoch is treated as the final
+/// one — remaining scheduled epochs are skipped and `stats.early_stopped`
+/// is set. See `context/references/ppo-tuning-knobs-racing.md` Section B.
 pub fn ppo_epoch_system(
     mode: Res<AgentMode>,
     mut brain: ResMut<PpoBrain>,
@@ -425,10 +516,35 @@ pub fn ppo_epoch_system(
     let epoch_complete = ppo_process_chunk(&mut brain, prepared, chunk_size);
 
     if epoch_complete {
-        let is_final = prepared.epochs_remaining == 1;
+        // Compute this epoch's KL from the accumulator (still intact before
+        // the next chunk resets it). Used to decide target-KL early stop.
+        let batch_size_f32 = (prepared.frozen_buffer.len() as f32).max(1.0);
+        let epoch_kl = prepared.accum.approx_kl_sum / batch_size_f32;
+        let kl_early_stop = brain
+            .config
+            .target_kl
+            .map(|target| epoch_kl > 1.5 * target)
+            .unwrap_or(false);
+
+        let is_final = prepared.epochs_remaining == 1 || kl_early_stop;
         ppo_finish_epoch(&mut brain, prepared, &mut stats, is_final);
         prepared.epochs_remaining -= 1;
         prepared.sample_offset = 0;
+
+        if is_final {
+            // Overwrite caller-owned fields on stats. `ppo_finish_epoch` wrote
+            // `epochs_completed = config.ppo_epochs` as a default for the
+            // no-early-stop case; correct it if we stopped early.
+            stats.early_stopped = kl_early_stop;
+            if kl_early_stop {
+                let epochs_done = brain
+                    .config
+                    .ppo_epochs
+                    .saturating_sub(prepared.epochs_remaining);
+                stats.epochs_completed = epochs_done as u32;
+            }
+            prepared.epochs_remaining = 0;
+        }
 
         if prepared.epochs_remaining == 0 {
             update_state.prepared = None;
@@ -490,8 +606,8 @@ pub fn ppo_flush_on_exit_system(
         if done {
             bootstrap_values.insert(env_id.0, 0.0);
         } else {
-            let value = brain.model.forward_critic(&obs.values);
-            bootstrap_values.insert(env_id.0, value);
+            let raw = brain.model.forward_critic(&obs.values);
+            bootstrap_values.insert(env_id.0, brain.value_norm.denormalise(raw));
         }
     }
 

@@ -102,6 +102,84 @@ impl Default for ObservationVector {
     }
 }
 
+/// Running per-dimension mean / variance tracker for observation
+/// normalisation, using Welford's online algorithm.
+///
+/// Round-2 (2026-04-19): Andrychowicz et al. 2021 identify observation
+/// normalisation as the single most-recommended PPO implementation detail.
+/// NeuroDrive's observations are already unit-scaled (rays divided by max
+/// range, angles in [-1, 1]), but they are **not centred** and their
+/// variance is not tracked. That leaves the critic's first hidden layer
+/// dependent on feature scale, contributing to the saturation cascade
+/// diagnosed in `context/references/ppo-critic-architecture.md`.
+#[derive(Resource, Clone, Debug)]
+pub struct ObservationNormalizer {
+    /// Running per-dim mean.
+    pub mean: [f32; OBSERVATION_DIM],
+    /// Running per-dim second-moment accumulator (Welford `M2`).
+    pub m2: [f32; OBSERVATION_DIM],
+    /// Total number of samples seen so far.
+    pub count: u64,
+    /// Minimum samples before normalisation activates — below this the
+    /// normaliser is an identity pass-through. Stats are too noisy to
+    /// normalise against with fewer samples.
+    pub warmup_samples: u64,
+    /// Hard clip on normalised output magnitude. 10.0 is the SB3 default
+    /// (`VecNormalize.clip_obs`).
+    pub clip: f32,
+    /// When false, the normaliser is fully disabled — observations pass
+    /// through unchanged. Allows ablation runs without removing the plugin.
+    pub enabled: bool,
+}
+
+impl Default for ObservationNormalizer {
+    fn default() -> Self {
+        Self {
+            mean: [0.0; OBSERVATION_DIM],
+            m2: [0.0; OBSERVATION_DIM],
+            count: 0,
+            warmup_samples: 1000,
+            clip: 10.0,
+            enabled: true,
+        }
+    }
+}
+
+impl ObservationNormalizer {
+    /// Updates running statistics from one observation (Welford online step)
+    /// and returns the normalised + clipped observation. During warmup
+    /// (count < `warmup_samples`) the input is returned unchanged after
+    /// having its statistics recorded.
+    pub fn normalise(&mut self, input: &[f32; OBSERVATION_DIM]) -> [f32; OBSERVATION_DIM] {
+        // Welford online update: new_count = count + 1;
+        // delta = x - mean; mean += delta / new_count;
+        // m2 += delta * (x - new_mean)
+        self.count = self.count.saturating_add(1);
+        let n = self.count as f32;
+        for i in 0..OBSERVATION_DIM {
+            let x = input[i];
+            let delta = x - self.mean[i];
+            self.mean[i] += delta / n;
+            let delta2 = x - self.mean[i];
+            self.m2[i] += delta * delta2;
+        }
+
+        if !self.enabled || self.count < self.warmup_samples {
+            return *input;
+        }
+
+        let mut out = [0.0; OBSERVATION_DIM];
+        let n_var = (self.count.saturating_sub(1) as f32).max(1.0);
+        for i in 0..OBSERVATION_DIM {
+            let var = self.m2[i] / n_var;
+            let std = (var + 1e-8).sqrt();
+            let normalised = (input[i] - self.mean[i]) / std;
+            out[i] = normalised.clamp(-self.clip, self.clip);
+        }
+        out
+    }
+}
+
 /// Sensor and observation configuration.
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct ObservationConfig {
@@ -229,6 +307,7 @@ pub fn update_sensor_readings_system(
 ///  angular_velocity, speed_delta, lookahead(12×2), prev_steering, prev_throttle]
 pub fn build_observation_vector_system(
     config: Res<ObservationConfig>,
+    mut normaliser: ResMut<ObservationNormalizer>,
     mut query: Query<(&SensorReadings, &mut ObservationVector)>,
 ) {
     for (sensors, mut observation) in &mut query {
@@ -280,7 +359,11 @@ pub fn build_observation_vector_system(
         cursor += 1;
         values[cursor] = sensors.previous_throttle;
 
-        observation.values = values;
+        // Round-2: apply running-mean/var normalisation. Pass-through during
+        // warmup (first `warmup_samples` observations) — the Welford stats
+        // are updated in both cases so that when the gate opens the
+        // normaliser already has a decent estimate of the distribution.
+        observation.values = normaliser.normalise(&values);
     }
 }
 
@@ -344,8 +427,62 @@ fn signed_lateral_offset(position: Vec2, closest_point: Vec2, tangent: Vec2) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::signed_lateral_offset;
+    use super::{ObservationNormalizer, OBSERVATION_DIM, signed_lateral_offset};
     use bevy::prelude::Vec2;
+
+    #[test]
+    fn observation_normaliser_is_identity_during_warmup() {
+        let mut n = ObservationNormalizer::default();
+        let input = [0.7f32; OBSERVATION_DIM];
+        let out = n.normalise(&input);
+        for i in 0..OBSERVATION_DIM {
+            assert!((out[i] - input[i]).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn observation_normaliser_centres_after_warmup() {
+        // Feed 2000 samples of a constant value — after warmup (1000)
+        // the running mean should equal the constant and normalised
+        // output should be approximately zero.
+        let mut n = ObservationNormalizer::default();
+        let input = [0.5f32; OBSERVATION_DIM];
+        for _ in 0..2000 {
+            let _ = n.normalise(&input);
+        }
+        let out = n.normalise(&input);
+        for i in 0..OBSERVATION_DIM {
+            assert!(out[i].abs() < 1e-2,
+                "expected near-zero after normalisation, got {}", out[i]);
+        }
+    }
+
+    #[test]
+    fn observation_normaliser_respects_disable_flag() {
+        let mut n = ObservationNormalizer { enabled: false, ..Default::default() };
+        // Feed many samples; disabled normaliser should always pass through.
+        let input = [42.0f32; OBSERVATION_DIM];
+        for _ in 0..2000 {
+            let out = n.normalise(&input);
+            assert_eq!(out, input);
+        }
+    }
+
+    #[test]
+    fn observation_normaliser_clips_extreme_values() {
+        let mut n = ObservationNormalizer::default();
+        // Warm up on zero-centred small variations.
+        let noise_template = [0.01f32; OBSERVATION_DIM];
+        for _ in 0..1500 {
+            let _ = n.normalise(&noise_template);
+        }
+        // Now feed a huge outlier — must be clipped to ±10.
+        let outlier = [100.0f32; OBSERVATION_DIM];
+        let out = n.normalise(&outlier);
+        for i in 0..OBSERVATION_DIM {
+            assert!(out[i].abs() <= 10.0, "output {} exceeds clip", out[i]);
+        }
+    }
 
     #[test]
     fn signed_lateral_offset_is_positive_to_the_left_of_the_tangent() {

@@ -75,6 +75,20 @@ pub fn ppo_prepare_update(
         buffer.compute_gae_per_env(bootstrap_values, brain.config.gamma, brain.config.gae_lambda);
     let len = buffer.len();
 
+    // ── PopArt update + POP rescale ─────────────────────────────────
+    // This runs once per update, before any training epoch sees the
+    // returns. We compute the new running mean/std of `returns`, then
+    // rescale the `c_value` layer so that externally-observed predictions
+    // `σ·z + µ` are preserved across the statistics change. Subsequent
+    // training then regresses `z` to `(ret − µ) / σ` (normalised target).
+    //
+    // See `context/references/value-target-normalisation.md` for the
+    // derivation of W' = W · (old_σ / new_σ) and
+    // b' = (old_σ · b + old_µ − new_µ) / new_σ.
+    if brain.config.popart_enabled && !returns.is_empty() {
+        popart_absorb_batch(brain, &returns);
+    }
+
     // Fisher-Yates shuffle for minibatch sample ordering
     let mut indices: Vec<usize> = (0..len).collect();
     for i in (1..indices.len()).rev() {
@@ -193,21 +207,33 @@ pub fn ppo_process_chunk(
         brain.model.a_log_std[1].exp(),
     ];
 
+    // PopArt state snapshot for the loss computation. When PopArt is
+    // disabled, value_norm is identity `(µ=0, σ=1)` so `ret_norm == ret`
+    // and the training path is numerically equivalent to the pre-PopArt
+    // path. When active, targets are normalised so the critic regresses
+    // to ~N(0, 1) instead of the raw (growing) reward scale.
+    let value_norm_mu = brain.value_norm.mu;
+    let value_norm_sigma = brain.value_norm.sigma;
+
     for (s, &idx) in chunk_indices.iter().enumerate() {
         let action = &buffer.actions[idx * act_dim..(idx + 1) * act_dim];
         let latent_action = &buffer.latent_actions[idx * act_dim..(idx + 1) * act_dim];
         let old_log_prob = buffer.old_log_probs[idx];
         let adv = (advantages[idx] - chunk_adv_mean) / chunk_adv_std;
-        let ret = returns[idx];
+        let ret_raw = returns[idx];
+        let ret = (ret_raw - value_norm_mu) / value_norm_sigma;
 
-        // Read forward pass results for this sample
+        // Read forward pass results for this sample. `c_out[s]` is the raw
+        // `c_value` output — interpreted as the normalised prediction under
+        // PopArt. Denormalisation to reward units happens at inference
+        // call sites, not here.
         let value = c_out[s];
         let means: [f32; 2] = [
             a_out[s * act_dim],
             a_out[s * act_dim + 1],
         ];
 
-        // ── Value loss (Huber) ──
+        // ── Value loss (Huber on normalised residual) ──
         let value_error = value - ret;
         let value_grad = if value_error.abs() <= value_huber_delta {
             value_error
@@ -367,15 +393,15 @@ pub fn ppo_finish_epoch(
         stats.return_max = r_max;
         stats.return_std = r_std;
         // Epochs-completed / early-stop flag: without target-KL early stop,
-        // every scheduled epoch runs to completion. When target-KL lands, the
-        // caller (`ppo_epoch_system`) will overwrite these fields.
+        // every scheduled epoch runs to completion. The caller
+        // (`ppo_epoch_system`) overwrites these if early-stop fired.
         stats.epochs_completed = brain.config.ppo_epochs as u32;
         stats.early_stopped = false;
-        // `value_norm_*` are overwritten by PopArt when it lands; defaults
-        // (mu=0, sigma=1) carry through here so the analytics schema is
-        // fully populated.
-        stats.value_norm_mu = 0.0;
-        stats.value_norm_sigma = 1.0;
+
+        // PopArt state — records mu/sigma after the update. Analytics uses
+        // these to verify the normaliser tracks the return distribution.
+        stats.value_norm_mu = brain.value_norm.mu;
+        stats.value_norm_sigma = brain.value_norm.sigma;
         stats.layer_health = vec![
             PpoLayerHealth {
                 layer_name: "actor_fc1".to_string(),
@@ -458,6 +484,67 @@ fn std_from_sums(sum: f32, sumsq: f32, count: usize) -> f32 {
     let n = count as f32;
     let mean = sum / n;
     ((sumsq / n) - mean * mean).max(0.0).sqrt()
+}
+
+/// PopArt adaptation step: compute batch statistics of `returns`, blend
+/// them into the running `(mu, sigma)` via EMA, and apply the POP rescale
+/// to the `c_value` layer so that externally-observed value predictions
+/// (`σ·z + µ`) are preserved across the statistics change.
+///
+/// Math (see `context/references/value-target-normalisation.md`):
+///   µ_new = (1 − β) · µ_old + β · batch_µ
+///   σ_new = max(σ_floor, sqrt(var_new))
+///   W'    = W  · (σ_old / σ_new)
+///   b'    = (σ_old · b + µ_old − µ_new) / σ_new
+///
+/// The rescale is applied in-place to the single row of `c_value.weights`
+/// (shape `[1 × critic_hidden]`) and the single scalar in `c_value.biases`.
+/// After this step, new training gradients flow into the rescaled weights;
+/// Adam moments on `c_value` are intentionally left unchanged (standard
+/// PopArt convention — the output has been preserved, so the moments
+/// retarget within a few updates).
+fn popart_absorb_batch(brain: &mut PpoBrain, returns: &[f32]) {
+    if returns.is_empty() {
+        return;
+    }
+
+    let n = returns.len() as f32;
+    let batch_mu = returns.iter().sum::<f32>() / n;
+    let batch_var = returns
+        .iter()
+        .map(|r| (r - batch_mu).powi(2))
+        .sum::<f32>()
+        / n;
+
+    let beta = brain.config.popart_beta;
+    let old_mu = brain.value_norm.mu;
+    let old_sigma = brain.value_norm.sigma;
+
+    // We use a running-mean / running-var over the EMA (textbook PopArt):
+    //   new_second_moment = (1−β)·(σ_old² + µ_old²) + β·(batch_var + batch_µ²)
+    // This is the "ART" half of PopArt exactly as in torchbeastpopart.
+    let old_second = old_sigma * old_sigma + old_mu * old_mu;
+    let batch_second = batch_var + batch_mu * batch_mu;
+    let new_mu = (1.0 - beta) * old_mu + beta * batch_mu;
+    let new_second = (1.0 - beta) * old_second + beta * batch_second;
+    let new_var = (new_second - new_mu * new_mu).max(0.0);
+    let sigma_floor = brain.config.popart_sigma_floor;
+    let new_sigma = new_var.sqrt().max(sigma_floor);
+
+    // ── POP rescale: preserve outputs across the stats change ───────
+    // c_value has shape [1 × critic_hidden]. Rescale the single weight row
+    // by (old_sigma / new_sigma), and update the single bias scalar so the
+    // constant term balances.
+    let ratio = old_sigma / new_sigma;
+    for w in brain.model.c_value.weights.iter_mut() {
+        *w *= ratio;
+    }
+    // b' = (old_sigma · b + old_mu − new_mu) / new_sigma
+    let b = brain.model.c_value.biases[0];
+    brain.model.c_value.biases[0] = (old_sigma * b + old_mu - new_mu) / new_sigma;
+
+    brain.value_norm.mu = new_mu;
+    brain.value_norm.sigma = new_sigma;
 }
 
 /// Returns `(min, mean, max, std)` of `values`. When `values` is empty, all
@@ -562,9 +649,105 @@ fn clip_linear_gradients(layers: &mut [&mut Linear], max_norm: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::brain::ppo::{PpoBrain, ValueNorm};
 
     fn approx(a: f32, b: f32, tol: f32) -> bool {
         (a - b).abs() < tol
+    }
+
+    // ── PopArt POP invariance tests ──────────────────────────────────────
+
+    #[test]
+    fn popart_pop_rescale_preserves_value_for_fixed_input() {
+        // After `popart_absorb_batch`, `sigma·z + µ` for a fixed input must
+        // equal the previous `sigma_old·z_old + µ_old` — the whole point of
+        // the POP step is to preserve externally-observed predictions.
+        let mut brain = PpoBrain::default();
+        let obs = [0.3f32; crate::agent::observation::OBSERVATION_DIM];
+
+        // Seed some non-trivial returns and a non-default initial stats.
+        let returns: Vec<f32> = (0..64).map(|i| (i as f32) * 5.0).collect();
+        brain.value_norm = ValueNorm { mu: 10.0, sigma: 2.5 };
+        brain.config.popart_enabled = true;
+        brain.config.popart_beta = 0.5;
+
+        // Pre-update predicted value in reward units.
+        let raw_before = brain.model.forward_critic(&obs);
+        let value_before = brain.value_norm.denormalise(raw_before);
+
+        popart_absorb_batch(&mut brain, &returns);
+
+        // After POP, the raw z changes but the denormalised value is
+        // preserved up to floating-point rounding.
+        let raw_after = brain.model.forward_critic(&obs);
+        let value_after = brain.value_norm.denormalise(raw_after);
+
+        assert!(
+            approx(value_before, value_after, 1e-3),
+            "POP did not preserve output: before={value_before} after={value_after}"
+        );
+    }
+
+    #[test]
+    fn popart_absorb_moves_mu_toward_batch_mean() {
+        let mut brain = PpoBrain::default();
+        brain.value_norm = ValueNorm { mu: 0.0, sigma: 1.0 };
+        brain.config.popart_enabled = true;
+        brain.config.popart_beta = 0.3;
+
+        let returns: Vec<f32> = vec![100.0; 32]; // batch_mu = 100
+        popart_absorb_batch(&mut brain, &returns);
+
+        // new_mu = 0.7 * 0 + 0.3 * 100 = 30
+        assert!(approx(brain.value_norm.mu, 30.0, 1e-2));
+        assert!(brain.value_norm.sigma > 0.0);
+    }
+
+    #[test]
+    fn popart_absorb_rejects_empty_returns() {
+        let mut brain = PpoBrain::default();
+        let mu_before = brain.value_norm.mu;
+        let sigma_before = brain.value_norm.sigma;
+        popart_absorb_batch(&mut brain, &[]);
+        assert_eq!(brain.value_norm.mu, mu_before);
+        assert_eq!(brain.value_norm.sigma, sigma_before);
+    }
+
+    #[test]
+    fn popart_absorb_respects_sigma_floor() {
+        // Zero-variance returns with PopArt active must still leave sigma
+        // above the configured floor — otherwise division by sigma blows up
+        // downstream.
+        let mut brain = PpoBrain::default();
+        brain.value_norm = ValueNorm { mu: 0.0, sigma: 1.0 };
+        brain.config.popart_enabled = true;
+        brain.config.popart_beta = 1.0; // fully absorb batch
+        brain.config.popart_sigma_floor = 0.1;
+
+        let returns: Vec<f32> = vec![42.0; 8]; // zero variance
+        popart_absorb_batch(&mut brain, &returns);
+
+        assert!(brain.value_norm.sigma >= 0.1,
+            "sigma below floor: {}", brain.value_norm.sigma);
+    }
+
+    // ── return_distribution ─────────────────────────────────────────────
+
+    #[test]
+    fn return_distribution_computes_min_mean_max_std_correctly() {
+        let (min_v, mean, max_v, std) = return_distribution(&[1.0, 2.0, 3.0, 4.0, 5.0]);
+        assert!(approx(min_v, 1.0, 1e-6));
+        assert!(approx(max_v, 5.0, 1e-6));
+        assert!(approx(mean, 3.0, 1e-6));
+        // Var = ((1-3)^2 + (2-3)^2 + (3-3)^2 + (4-3)^2 + (5-3)^2)/5 = 10/5 = 2
+        // std = sqrt(2) ≈ 1.414
+        assert!(approx(std, 2f32.sqrt(), 1e-4));
+    }
+
+    #[test]
+    fn return_distribution_empty_is_all_zero() {
+        let (a, b, c, d) = return_distribution(&[]);
+        assert_eq!((a, b, c, d), (0.0, 0.0, 0.0, 0.0));
     }
 
     // ── squashed_gaussian_log_prob ───────────────────────────────────────
