@@ -8,6 +8,7 @@ Project notes capturing durable design decisions, codebase conventions, and less
 | `notes/development-hardware.md` | Hardware constraints (M2 MacBook Air, Apple Silicon, no CUDA) and their implications for compute budget and optimisation strategy |
 | `notes/performance-tuning-lessons.md` | Lessons from PPO performance optimisation — wider critic cost, samples_per_tick as stutter knob, flat storage wins, bimodal frame pattern |
 | `notes/reward-and-entertainment.md` | Design philosophy: reward structure must produce entertaining driving behaviour, not just optimal behaviour — no crash penalty, no survival bonus / time penalty, velocity-projection reward, entertainment-first |
+| `notes/normalisation-layers.md` | The three orthogonal normalisations in the PPO stack (advantage / PopArt / observation), what each fixes, and the common misattribution to advantage-norm when the critic's target scale is the real problem |
 
 ## Active Work Areas
 

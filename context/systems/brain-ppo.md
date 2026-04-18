@@ -118,6 +118,47 @@ Each epoch:
 - `clip_fraction` — fraction of samples where the PPO ratio was clipped (healthy: 10–30%)
 - `approx_kl` — approximate KL divergence between old and new policy (healthy: < 0.02)
 - Per-layer `PpoLayerHealth`: weight L2 norm, gradient L2 norm, tanh saturation fraction
+- **Round-2 diagnostics (2026-04-19):**
+  - `return_min / return_mean / return_max / return_std` — distribution of returns seen by this update (for PopArt tracking audit)
+  - `value_norm_mu / value_norm_sigma` — PopArt running stats after the update
+  - `epochs_completed` — how many PPO epochs actually ran (≤ `ppo_epochs`; less when target-KL early stop fires)
+  - `early_stopped` — true when target-KL early-stop fired on this update
+
+### Round-2 Interventions (2026-04-19)
+
+The critic target-scaling round landed four orthogonal changes against the
+anticipatory-value failure diagnosed from `reports/analytics/run_1776543971.md`.
+See `context/plans/critic-target-scaling.md` for the plan and the three
+research references under `context/references/` for derivation.
+
+**γ = 0.995.** Credit horizon 1.67s → 3.33s. Previously, a wall-at-2s signal
+discounted to 0.30× of its present value before the critic's target update
+— muting anticipatory-braking pressure. The new horizon matches the
+observation lookahead's ~2.6s reach.
+
+**PopArt on `c_value`.** New state `ValueNorm { mu, sigma }` on `PpoBrain`.
+Once per update (in `ppo_prepare_update`, before any training chunk),
+`popart_absorb_batch` computes batch mean/variance of GAE returns,
+EMA-updates `mu`/`sigma`, and applies the POP rescale to `c_value` weights
+and bias so externally-observable predictions `σ·z + µ` are preserved
+across the statistics change. The training loss in `ppo_process_chunk`
+treats `c_out[s]` as a normalised prediction and regresses against
+`(ret − µ) / σ`; this keeps the critic targeting a stationary ~N(0, 1)
+distribution regardless of return scale. Denormalisation happens at
+inference call sites (bootstrap, action-selection PolicyOutput write,
+exit flush) via `brain.value_norm.denormalise(raw)`. When
+`popart_enabled=false`, `ValueNorm` stays at `(0, 1)` — all normalisation
+becomes identity and the pipeline is numerically equivalent to the
+pre-PopArt path.
+
+**Target-KL early stop.** After each completed PPO epoch,
+`ppo_epoch_system` checks `approx_kl > 1.5 × target_kl`. When it fires,
+the current epoch is treated as the final one — `finish_epoch` writes
+detailed stats, `early_stopped = true` is recorded, and the remaining
+scheduled epochs are skipped. Guardrail against policy overshoot while
+the critic adapts; also a passive diagnostic.
+
+**Observation normaliser** — see `agent-interface.md`.
 
 ### Trainer Ranking
 
@@ -130,23 +171,28 @@ Each epoch:
 
 ### Hyperparameters (defaults)
 
-| Parameter | Value |
-|-----------|-------|
-| `gamma` | 0.99 |
-| `gae_lambda` | 0.95 |
-| `max_steps` (rollout horizon) | 512 |
-| `min_update_steps` | 128 |
-| `ppo_epochs` | 4 |
-| `clip_epsilon` | 0.2 |
-| `samples_per_tick` | 64 |
-| Actor hidden dim | 64 |
-| Critic hidden dim | 128 |
-| Actor LR | 3e-4 (Adam, weight decay 0.0) |
-| Critic LR | 5e-4 (AdamW, weight decay 3e-4) |
-| Actor grad clip | 0.5 |
-| Critic grad clip | 0.5 |
-| Entropy coefficient | 0.01 |
-| `log_std` floor | -1.0 (min σ ≈ 0.37) |
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| `gamma` | **0.995** | Round-2 (2026-04-19): raised from 0.99 to extend credit horizon 1.67s → 3.33s |
+| `gae_lambda` | 0.95 | |
+| `max_steps` (rollout horizon) | 512 | |
+| `min_update_steps` | 128 | |
+| `ppo_epochs` | 4 | May early-stop — see `target_kl` below |
+| `clip_epsilon` | 0.2 | |
+| `samples_per_tick` | 32 | |
+| Actor hidden dim | 64 | |
+| Critic hidden dim | 128 | |
+| Actor LR | 3e-4 (Adam, weight decay 0.0) | |
+| Critic LR | 5e-4 (AdamW, weight decay 3e-4) | |
+| Actor grad clip | 0.5 | |
+| Critic grad clip | 0.5 | |
+| Entropy coefficient | 0.01 | |
+| `log_std` floor | -1.0 (min σ ≈ 0.37) | |
+| `log_std` ceil | 0.5 | |
+| **`target_kl`** | **Some(0.03)** | Round-2: PPO early-stops when approx-KL > 1.5 × target |
+| **`popart_enabled`** | **true** | Round-2: PopArt critic target normalisation |
+| **`popart_beta`** | **1e-4** | EMA decay per PPO update |
+| **`popart_sigma_floor`** | **1e-4** | Minimum σ for numerical stability |
 
 ## Key Interfaces / Data Flow
 

@@ -84,6 +84,18 @@ Each `TickTraceRecord` captures:
 - input-level summaries (mean centreline distance, heading error, ray distances)
 - heuristic failure mode classification
 
+### Per-Update Record
+
+`PpoUpdateRecord` captures one completed PPO update. Core fields: update index, batch size, `policy_loss`, `value_loss`, `policy_entropy`, `explained_variance`, `steering_mean/std`, `throttle_mean/std`, `clamped_action_fraction`, `clip_fraction`, `approx_kl`, per-layer `PpoLayerRecord` (weight L2, gradient L2, saturated fraction).
+
+**Round-2 additions (2026-04-19):**
+- `return_min / return_mean / return_max / return_std` — distribution of GAE returns in this update's training chunk. Directly answers "are returns growing?" without needing per-tick reconstruction.
+- `value_norm_mu / value_norm_sigma` — PopArt running statistics after this update. `(0, 1)` when PopArt is disabled; otherwise tracks the return distribution.
+- `epochs_completed` — actual number of PPO epochs run (≤ configured `ppo_epochs`; less when target-KL early stop triggered).
+- `early_stopped` — true when target-KL guardrail fired on this update.
+
+All round-2 fields are `#[serde(default)]` for backwards compatibility — older JSON exports still deserialise, with defaults applied.
+
 ### Crash Classification
 
 Terminal episodes are classified into crash types based on the final tick's state:
@@ -107,6 +119,7 @@ Terminal episodes are classified into crash types based on the final tick's stat
 | `turns.rs` | Turn-execution diagnostics (latency, adequacy, understeer, failure mode classification) |
 | `sectors.rs` | Progress-sector breakdown summaries (20 sectors) |
 | `trajectory.rs` | Trajectory-level derived summaries and episode selection |
+| `pre_crash.rs` | Round-2: last-30-tick analysis per crash — throttle-release latency, distance-to-wall at crash, critic value drop. `PreCrashProfile` (per crash) and `PreCrashSummary` (aggregate with release-latency and distance-to-wall histograms). |
 
 ### Two-Tier Export
 
@@ -124,7 +137,7 @@ The compact JSON is typically kilobytes; the full trace JSON can be tens of mega
 
 ### Markdown Report Structure
 
-The report is organised around **diagnostic questions** across 10 sections, each with auto-generated takeaway sentences:
+The report is organised around **diagnostic questions** across 15 sections, each with auto-generated takeaway sentences. Sections 11–15 were added in round-2 (2026-04-19) to support the critic target-scaling measurement — see `context/plans/analytics-round2.md` and `context/plans/critic-target-scaling.md`.
 
 | Section | Answers |
 |---------|---------|
@@ -138,6 +151,11 @@ The report is organised around **diagnostic questions** across 10 sections, each
 | 8. Driving Quality | Per-car comparison table, best vs worst contrast, turn-execution diagnostics |
 | 9. Training Health | PPO sparklines (entropy, clip%, KL, EV), latest update, layer health, reward decomposition |
 | 10. Trajectory Snapshots | Best, latest, latest crash episodes |
+| **11. Pre-Crash Forensics** | Anticipation vs reaction — last-30-tick throttle-release latency histogram, distance-to-wall at crash histogram, mean critic-value drop into crash. Distinguishes crashes the policy saw coming from those it did not. |
+| **12. Layer Health Over Training** | Saturation / weight L2 / gradient L2 sparklines per layer across all PPO updates. Auto-takeaway tracks `critic_fc2` as the round-1 bottleneck indicator. |
+| **13. Value Target Scale Tracker** | Return min/mean/max/std trajectories over updates. When PopArt is active, additional sparklines of `value_norm_mu` and `value_norm_sigma` plus a tracking-error check. Surfaces whether the critic's target distribution is being tamed. |
+| **14. Critic Prediction Quality** | Explained-variance timeseries plus standardised-residual histogram (episode-start value vs actual total return). Bucketed into 7 σ-bins to show critic bias direction and calibration. |
+| **15. Fleet Variance** | Per-car table (episodes, max progress, mean life, mean reward, crash count, crash %). Convergence takeaway distinguishes "lucky car" from genuine fleet learning — relevant because the baseline run had route-consistency 0.001 and one car completing the loop. |
 
 ASCII visuals include Unicode sparklines (▁▂▃▄▅▆▇█), horizontal bar charts (█░), and single-row heatmaps.
 
@@ -192,8 +210,8 @@ ASCII visuals include Unicode sparklines (▁▂▃▄▅▆▇█), horizontal 
 
 - Any reference to **first-car shims** in analytics capture is obsolete — all systems now iterate all cars with `env_id` tagging.
 - The old single-file JSON export (full EpisodeTracker serialised as one blob) has been replaced by the two-tier model.
-- The old markdown report structure (organised by metric module with dense tables) has been replaced by the 10-section diagnostic structure.
+- The old markdown report structure (organised by metric module with dense tables) has been replaced by the section-based diagnostic structure.
 - Any reference to `lap_bonus_sum` or `lap_completed` in EpisodeRecord or EpisodeTrace is obsolete — these fields have been removed.
-- Any reference to 7 sections in the markdown report is obsolete — it now has 10 sections.
+- Any reference to 7 or 10 sections in the markdown report is obsolete — it now has **15 sections** (sections 11–15 added 2026-04-19 for round-2 diagnostics).
 - Any reference to progress metrics being "misleading with random spawns" is obsolete — progress is now cumulative forward arc-length from spawn (distance_driven), which is honest across all spawn positions.
 - Any reference to value prediction being `None` for all cars is obsolete — PolicyOutput component now provides per-car value predictions directly.
