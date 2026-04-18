@@ -274,6 +274,123 @@ auto_exit_system                          (profiling, feature-gated — exits ap
 | `systems/debug.md` | Live overlays, HUD panel, leaderboard | `src/debug/` |
 | `systems/determinism.md` | Cross-cutting: ordering contract, reproducibility surfaces, RNG state | `src/sim/`, cross-cutting |
 
+## Inter-System Relationships
+
+Individual system files cover their own boundaries. This section is the canonical home for the relationships **between** systems — the connections that matter when reasoning about blast radius or change impact. Each entry names the two sides, the mechanism, the data that flows, and what breaks if the connection is violated.
+
+| A | B | Mechanism | Data | What breaks if broken |
+|---|---|-----------|------|-----------------------|
+| `game` | `agent` | Read-only: `Car`, `ActionState.applied`, `TrackProgress`, centreline projection | Physics state + projection truth | Observations become stale or wrong-tick; post-reset observations leak crash state |
+| `agent` | `game` | Write path: `ActionState.applied` consumed by `car_physics_system` | Steering + throttle | Physics stops executing policy decisions |
+| `agent` | `brain` | Read-only: `ObservationVector` (43-dim) consumed by `ppo_act_all_cars_system` | Normalised observation tensor | Any change in `OBSERVATION_DIM` constant or feature ordering desynchronises the model (dim mismatch panics on `forward_actor`); no runtime dimension assertion beyond shared `const OBSERVATION_DIM` |
+| `brain` | `agent` | Write path: writes per-car `ActionState.desired` and `PolicyOutput` component | Steering + throttle means/stds + value prediction | Smoothing + physics receive stale or default actions |
+| `game` | `brain` | `EpisodeState.current_tick_reward` + `current_tick_end_reason` consumed by `ppo_collect_rewards_all_cars_system` | Per-tick reward + terminal flag | PPO mis-aligns reward-to-observation; GAE becomes invalid |
+| `brain` | `analytics` | `PolicyOutput` per-car component read by `capture_episode_tick_trace_system`; `PpoTrainingStats` read by `episode_tracker_system` | Value prediction, policy confidences, update diagnostics | Trace records miss policy stats; Markdown report's "What Does the Car Think" section becomes meaningless |
+| `game` | `analytics` | `EpisodeState` (current and finalised), `Collided` marker, `TrackProgress` consumed by per-car capture systems | Episode summary + reward decomposition | Episode records desynchronise with env truth; crash classification becomes unreliable |
+| `maps` | `game` | `Track { grid, centerline }` singleton consumed by physics (via progress), collision, and episode reset (spawn RNG draws centreline fractions) | Spatial truth (grid occupancy + arc-length parametrisation) | No collisions, no spawn, no progress — runtime fails before first tick |
+| `maps` | `agent` | `TrackGrid` consumed by raycast marching; `TrackCenterline` consumed by lookahead features | Grid occupancy + `tangent_at_s` | Sensor readings collapse; lookahead curvature vanishes |
+| `sim` | all fixed-update subsystems | `SimSet` ordering contract: `Input → Physics → Collision → Measurement`, configured by `GamePlugin` | Schedule sets, not data | Any plugin placing systems outside `SimSet` creates silent ordering bugs (e.g., observations built from pre-reset state); only the four-stage chain guarantees the reward/observation alignment that PPO depends on |
+| `analytics::exporters::{cleanup, context}` | `profiling::exporters::json` | Direct `use crate::analytics::exporters::{cleanup::enforce_retention, context::RunContext}` | `RunContext` struct (full run config snapshot) + retention-limited directory pruning | Profiling report lose their run-context header and unbounded report directories accumulate; see Shared Infrastructure below |
+| `brain::ranking` | `debug::leaderboard` | `TrainerLiveRanking` resource + per-car `CarColour` component | Ranked car order + colour swatches | Leaderboard panel goes blank or shows stale ordering |
+| `brain::ranking` | `debug::hud` | Same `TrainerLiveRanking` read by `update_driving_hud_text_system` to pick the "best car" view (falls back to first car if unavailable) | Best car index | HUD silently shows first car instead of best — not fatal but misleading |
+
+### Shared Infrastructure: RunContext and Retention Cleanup
+
+The profiling subsystem and the analytics subsystem both export reports, and both:
+
+- capture an identical `RunContext` snapshot (car count, PPO hyperparameters, reward coefficients, observation layout) via `analytics::exporters::context::RunContext::capture()`,
+- enforce a retention limit of 3 reports per directory via `analytics::exporters::cleanup::enforce_retention()`.
+
+These helpers live in `analytics::exporters` and are imported by `profiling::exporters::json`. This is deliberate shared infrastructure, not parallel evolution — but it does mean the profiling feature has a **compile-time dependency on the analytics module** even though nothing in `systems/profiling.md`'s boundaries section makes that obvious from a quick read. If analytics were ever ripped out or relocated, the feature-gated profiling pipeline would fail to compile even with `--features profiling` enabled.
+
+### Dependency Chain Trace — One PPO Training Tick (end-to-end)
+
+The single operation that crosses the most system boundaries is one fixed tick during PPO training (mode = `Ai`, rollout near horizon). Tracing it names the full blast radius that any change to the tick pipeline must respect.
+
+```text
+Step  Owner / System                                  Reads                       Writes
+────  ──────────────────────────────────────────────  ──────────────────────────  ──────────────────────────────
+ 1    profiling::frame_start_system (feature-gated)   —                           FrameRecord.frame_start
+ 2    agent::keyboard_action_input_system             AgentMode, KeyCode          — (exits early in Ai mode)
+ 3    brain::ppo_act_all_cars_system                  ObservationVector per car,  ActionState.desired (per car),
+                                                      model (forward_actor),      PolicyOutput (per car),
+                                                      PpoBrain.rng                TrainerRolloutBuffer push
+                                                                                  (state + latent_action + action
+                                                                                  + old_log_prob + env_id)
+ 4    agent::action_smoothing_system                  ActionState.desired         ActionState.applied (per car)
+ 5    profiling::input_end_system                     —                           FrameRecord.input_end
+ 6    game::car_physics_system                        ActionState.applied, Car    Car.velocity, Transform
+ 7    analytics::capture_episode_action_stats_system  ActionState.applied         PerCarActionAccumulators entry
+ 8    profiling::physics_end_system                   —                           FrameRecord.physics_end
+ 9    game::collision_detection_system                Transform, TrackGrid        Collided marker (add/remove)
+10    profiling::collision_end_system                 —                           FrameRecord.collision_end
+11    game::update_track_progress_system              Transform, TrackCenterline  TrackProgress (per car)
+12    game::episode_loop_system                       TrackProgress, Collided,    EpisodeState.current_tick_reward,
+                                                      Car.velocity, EpisodeConfig current_tick_end_reason,
+                                                                                  SpawnRng (on reset), Transform
+                                                                                  reset, Car velocity reset
+13    agent::update_sensor_readings_system            Transform, TrackGrid,       SensorReadings (per car, now
+                                                      TrackCenterline             reflects post-reset state)
+14    agent::build_observation_vector_system          SensorReadings              ObservationVector (per car)
+15    analytics::capture_episode_tick_trace_system    EpisodeState, PolicyOutput, PerCarTraceAccumulators push
+                                                      SensorReadings, Transform
+16    analytics::snapshot_completed_episode_*_system  PerCar*Accumulators,        EpisodeTracker.pending_episodes /
+                                                      EpisodeState (terminal)     pending_traces on terminal
+17    brain::ppo_collect_rewards_all_cars_system      EpisodeState.current_tick_* TrainerRolloutBuffer
+                                                      (per car)                    reward + done push;
+                                                                                  may call ppo_prepare_update()
+                                                                                  at horizon → PreparedUpdate
+18    brain::ppo_epoch_system                         PreparedUpdate,             model weights + Adam state
+                                                      model (forward_batch +      PpoTrainingStats
+                                                      backward_batch)             (on epoch end)
+19    debug::update_driving_hud_stats_system          TrackProgress, Collided     DrivingHudStats
+20    debug::capture_driving_hud_episode_metrics      EpisodeState (terminal)     DrivingHudHistory
+21    profiling::frame_end_system + auto_exit         SystemTimers.durations_us   FrameRecord completed
+```
+
+**Failure semantics along the chain:**
+
+- **Step 3 → Step 17 alignment.** The PPO buffer push in step 3 records (state, action, old_log_prob). Step 17 pushes the matching (reward, done). Any step between them that mutates `EpisodeState` out of order or runs in the wrong `SimSet` desynchronises reward from its generating action — silent training corruption. This is why `sim::SimSet` is structural rather than decorative.
+- **Step 12 reset ordering.** Episode reset happens in `episode_loop_system` (step 12), **before** sensor readings rebuild (step 13). This is deliberate: if the order were reversed, the first observation of a new episode would be built from pre-reset crash state and the PPO rollout would bootstrap from a lie.
+- **Step 11 before Step 12.** Progress projection must run before episode logic because crash classification and velocity-projection reward both read `TrackProgress`. Swapping them gives a zero reward on the terminal tick.
+- **Step 18 amortisation.** `ppo_epoch_system` processes only `samples_per_tick` (default 64) samples of the prepared update per tick. A full 4-epoch update over a 512-sample rollout takes `4 × 512 / 64 = 32` ticks. During these 32 ticks, a new rollout buffer is collecting — PPO is **not on-policy in the strict sense** during amortised updates, but the `old_log_prob` captured at step 3 protects ratio calculation regardless.
+- **Step 9 Collided as a marker not an event.** The environment never fires Bevy events for collisions; `Collided` is added as a component marker and read by the episode system two steps later. Any system that needs to react to collisions must be placed **in `SimSet::Measurement` after `episode_loop_system`** to see it before it is cleared on reset.
+
+## Coverage (Knowledge Gaps from this 2026-04-18 Pass)
+
+This section is explicit about where this upkeep pass relied on direct code inspection versus inference from existing documentation and the scan-tool output, so the next session knows what still needs verification.
+
+**Directly inspected this session:**
+
+- `src/main.rs` (plugin registration order — verified it matches architecture.md).
+- `src/brain/ppo/update.rs` lines 140–300 (the two `unsafe` aliasing blocks — verified and captured as rationale).
+- `src/brain/ppo/mod.rs` lines 25–100 (`PpoConfig` struct — verified Phase 4 consolidation).
+- `src/game/car.rs` imports + `SpawnRng`, `EnvInstanceId`, `TrainerConfig` struct signatures.
+- `src/agent/observation.rs` header through `OBSERVATION_DIM` constant — verified 43-dim layout matches the docs.
+- `src/analytics/exporters/context.rs` full `RunContext` struct signature.
+- `src/analytics/exporters/cleanup.rs` in full (tiny file).
+- Grep for `unsafe`, `WHY/NOTE/HACK/IMPORTANT/TODO/FIXME/SAFETY`, `EventWriter|EventReader`, `StdRng|seed_from|rand::rng|ThreadRng`, `debug_assert`, `#[cfg(feature`, `EpisodeConfig|TrainerConfig|PpoConfig|AnalyticsConfig|ProfilingConfig|RunContext|EnvInstanceId` across all of `src/`.
+
+**Inspected through the scan tool output only** (file existence + import regex, not code bodies read):
+
+- All 67 Rust files were listed by `scripts/scan_repo.py`. Import regex output was consumed for roughly the first 20 files to establish dependency-direction consistency with architecture.md, then trusted by sampling.
+- `src/analytics/metrics/` 10 modules — only `chunking.rs`, `consistency.rs`, `diagnostics.rs`, `phases.rs` headers were glanced at via the scan; internal logic was trusted against `systems/analytics.md`.
+- `src/profiling/*` — the timer instrumentation structure was trusted against `systems/profiling.md` without re-reading every file body.
+
+**Described from existing context only, not re-verified this pass:**
+
+- Exact HUD layout (`src/debug/hud.rs` — trusted against `systems/debug.md`).
+- Centreline binary-search projection implementation (`src/maps/centerline.rs` — trusted against `systems/environment.md` and the Phase 2 audit note).
+- The 25 episode-level aggregates enumerated in `systems/analytics.md` — counted in the scan but field-by-field accuracy is from the previous session.
+- Analytics markdown exporter structure — architecture and systems both agree; not re-read this pass.
+
+**Known gap items re-surfaced by this pass:**
+
+- `unsafe` in `src/brain/ppo/update.rs` — now inspected and verified. SAFETY comments describe read-only aliasing of scratch buffers (`obs_batch` and `grad_seed_{values,means}`) while the model takes `&mut self`. The aliased slices are distinct from all `&mut` scratch fields used by `forward_batch`/`backward_batch`. This is a borrow-checker workaround, not an unsound pattern. The `notes/session-2026-04-15.md` checkbox for this item can be ticked.
+- User-controllable PPO seed — still not implemented; `systems/determinism.md` flags this correctly.
+- Headless training mode — still missing; flagged in `systems/environment.md` and `systems/brain-ppo.md`.
+- Analytics/profiling parallel evolution hazard — now documented under Shared Infrastructure above.
+
 ## Structural Notes / Current Reality
 
 - The codebase is **not** environment-only. PPO, analytics, and the debug HUD are live and substantial subsystems. Documentation treating them as roadmap-only is obsolete.

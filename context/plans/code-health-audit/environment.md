@@ -1,173 +1,113 @@
 # Environment — Code Health Findings
 
-**Systems covered:** `src/game/` (physics.rs, collision.rs, episode.rs, progress.rs), `src/maps/centerline.rs`
-**Finding count:** 5 findings (2 high, 2 medium, 1 low)
+**Systems covered:** `src/game/episode.rs`, `src/game/progress.rs`, `src/game/physics.rs`, `src/agent/observation.rs`, `src/maps/centerline.rs`, `src/maps/grid.rs`.
 
----
+**Finding count:** 2 findings (0 high, 1 medium, 1 low).
 
-## Algorithm Optimisation
-
-### Cached-Hint Centreline Projection
-- [x] Add a `last_segment_hint` to `TrackProgress` and use it to start the projection search at the most likely segment instead of scanning all segments
-
-**Category:** Algorithm Optimisation
-**Severity:** High
-**Effort:** Small
-**Behavioural Impact:** None (verified — projection finds the closest segment regardless of starting point; hint only reduces the search space)
-
-**Location:**
-- `src/maps/centerline.rs:181-221` — `TrackCenterline::project()`
-- `src/game/progress.rs:38-56` — `update_track_progress_system()`
-
-**Current State:**
-`TrackCenterline::project()` performs a linear scan of **all** polyline segments (line 193: `for i in 0..n`) to find the closest point. The centreline has approximately 80-120 segments (8 arc samples per corner × number of corners, plus straight segments). This means 8 cars × 80-120 segment checks × every tick = 640-960 segment distance computations per tick in `update_track_progress_system`.
-
-Additionally, `tangent_at_s` performs a similar linear scan (line 119: `for i in 0..n`) for every `tangent_at_s` call. The observation system calls `tangent_at_s` 12 times per car (once per lookahead sample) in `update_sensor_readings_system` (line 214). That is 96 linear scans of the centreline per tick just for lookahead tangents.
-
-**Proposed Change:**
-**For `project`:** Add a `last_segment: usize` field to `TrackProgress`. When projecting, start the search at `last_segment - 1` (wrapping) and search outward in both directions. Because cars move continuously and slowly relative to segment length, the closest segment is almost always `last_segment` or an adjacent one. Maintain the full-scan fallback if the hint search does not find a closer point within a small window (e.g., 5 segments in each direction).
-
-**For `tangent_at_s`:** Replace the linear scan with a binary search on the `cumulative_lengths` array. Since `cumulative_lengths` is monotonically increasing, `partition_point` or `binary_search_by` finds the correct segment in O(log n) instead of O(n).
-
-Both changes preserve the exact same output: `project` still returns the globally closest point (the hint just makes the search faster, with a fallback to full scan); `tangent_at_s` still returns the segment tangent at the given arc length.
-
-**Justification:**
-The centreline queries are the most frequently called spatial operations in the codebase:
-- `project`: 8 calls/tick (one per car)
-- `tangent_at_s`: 96 calls/tick (12 lookahead × 8 cars) + 8 calls/tick (once per car in episode loop for reward)
-
-With 104 centreline queries per tick and ~100 segments per query, that is ~10,400 segment checks per tick. The hint-based approach would reduce `project` to ~2-10 segment checks per call, and binary search would reduce `tangent_at_s` from O(100) to O(7). Total segment checks would drop from ~10,400 to ~600.
-
-**Expected Benefit:**
-Approximately 10-15x reduction in centreline query work, from ~10,400 segment checks per tick to ~600. The actual wall-clock impact depends on the cost per segment check (one dot product + one distance = ~6 FLOPs), but at 10,400 checks/tick this represents a meaningful share of the Measurement phase.
-
-**Impact Assessment:**
-Zero functional change for both changes. `project` still finds the globally closest segment (hint is an optimisation, not a semantic change). `tangent_at_s` returns the exact same tangent because the cumulative_lengths array is searched for the same value — only the search algorithm changes from linear to binary.
-
----
-
-### Pre-Compute Local Corner Array in Collision Detection
-- [x] Hoist the `local_corners` array computation out of `collision_detection_system` since it is constant
-
-**Category:** Performance Improvement
-**Severity:** Low
-**Effort:** Trivial
-**Behavioural Impact:** None (verified — identical corner positions)
-
-**Location:**
-- `src/game/collision.rs:27-35` — `local_corners` array in `collision_detection_system`
-
-**Current State:**
-The `collision_detection_system` computes the 4 local corner offsets on every invocation:
-```rust
-let half_w = CAR_WIDTH * 0.5;
-let half_h = CAR_HEIGHT * 0.5;
-let local_corners = [
-    Vec2::new(half_w, half_h),
-    Vec2::new(half_w, -half_h),
-    Vec2::new(-half_w, half_h),
-    Vec2::new(-half_w, -half_h),
-];
-```
-
-`CAR_WIDTH` and `CAR_HEIGHT` are constants, so this array is the same on every tick.
-
-**Proposed Change:**
-Make `local_corners` a `const` or `static` array defined at module level.
-
-**Justification:**
-Trivially constant computation recomputed every tick. The compiler may already optimise this away, but making it explicit improves readability and removes doubt.
-
-**Expected Benefit:**
-Negligible performance impact (compiler likely already hoists this). Improved code clarity.
-
-**Impact Assessment:**
-Zero functional change by construction.
+**Context:** the 2026-04-15 audit added the cached-hint centreline projection, binary-search arc-length lookup, adaptive raycast step, and flat `[f32; OBSERVATION_DIM]` observation construction. What remains is modest: a small mismatch between the default `time_penalty_per_tick = -0.005` and the documented reward philosophy, and a cosmetic HashSet-in-closed-loop construction that runs once at startup.
 
 ---
 
 ## Known Issues and Active Risks
 
-### Crash Classification Uses Debug Format for End Reason Matching
-- [x] Replace `format!("{:?}", reason).contains("Crash")` with a direct pattern match on `EpisodeEndReason::Crash`
+### Default `time_penalty_per_tick = -0.005` contradicts the documented reward philosophy
+- [x] Either zero `EpisodeConfig::time_penalty_per_tick` to match `context/notes/reward-and-entertainment.md`, or update the notes to acknowledge this as a deliberate small nudge
 
 **Category:** Known Issues and Active Risks
 **Severity:** Medium
-**Effort:** Trivial
-**Behavioural Impact:** None (verified — currently works because the Debug format of `EpisodeEndReason::Crash` contains "Crash", but fragile)
+**Effort:** Trivial (set the default to 0.0) or Small (audit whether the nudge matters empirically and document)
+**Behavioural Impact:** Possible (requires decision) — changing the default does affect reward shaping, which is a deliberate training decision
 
 **Location:**
-- `src/analytics/trackers/episode.rs:212` — `let is_crash = format!("{:?}", reason).contains("Crash");`
+- `src/game/episode.rs:49` — `time_penalty_per_tick: -0.005` in the `Default for EpisodeConfig` impl.
+- `src/game/episode.rs:266-300` — the penalty is applied every tick in `episode_loop_system` and accumulates into `accum.time_penalty_sum` and `tick.reward`.
+- `README.md` §"Reward Structure" — explicitly lists the reward components as velocity projection + centreline proximity + crash penalty (0.0) + **no survival bonus / no time penalty**.
+- `context/notes/reward-and-entertainment.md` §"Core Principle" — "No survival bonuses. A per-tick bonus for staying alive incentivises the policy to play safe..." The inverse — a per-tick *penalty* for existing — has a symmetric failure mode (policy is punished for episodes that last, incentivising fast crashing when progress gain is marginal).
 
 **Current State:**
-The `episode_tracker_system` determines whether an episode ended in a crash by formatting the `EpisodeEndReason` enum via `Debug` and checking if the string contains "Crash":
-```rust
-let is_crash = format!("{:?}", reason).contains("Crash");
-```
+`time_penalty_per_tick` defaults to −0.005. At 60 Hz over a 30-second episode that is up to 1,800 ticks × −0.005 = **−9.0** worth of baseline reward pressure per episode, accumulating every tick regardless of progress. The velocity projection reward tops out roughly at `1.0` per tick when the car is moving at `speed_reward_reference = 200` along the tangent, so the time penalty is −0.5% of that per tick — not insignificant.
 
-This works because `EpisodeEndReason::Crash` formats as `"Crash"`. But it is fragile — if a new variant were added whose Debug representation contained "Crash" (e.g., `NearCrash`), or if the variant were renamed, this would silently break.
+The reward philosophy file explicitly lists "No survival bonuses" as a core principle but does not explicitly list "No time penalty." The README's reward table also omits a time-penalty row. The live config includes one. This is configuration drift relative to the documented intent — either the documentation is wrong or the default is wrong.
+
+Two plausible resolutions:
+
+1. **If the penalty is intentional** (e.g. to nudge the policy away from circling at zero progress): document it in both the README reward table and the notes file with a concrete justification. The documentation should match the behaviour.
+2. **If the penalty is unintentional** (e.g. inherited from an earlier shaping experiment that was not fully cleaned up): set `time_penalty_per_tick = 0.0` to match the stated philosophy.
+
+Comparing against the reward design table in `README.md` §"Current Reward Structure," the current config mismatches the documented structure. The note file's "Failure Modes We've Hit" table shows only crash-penalty and braking experiments — there is no record of a time-penalty experiment, which suggests option 2 is more likely.
 
 **Proposed Change:**
-Replace with a direct match:
-```rust
-let is_crash = reason == EpisodeEndReason::Crash;
-```
+Either:
+- Set `time_penalty_per_tick: 0.0` in the `Default for EpisodeConfig` impl and verify that existing training runs reported in recent analytics exports did not rely on the −0.005 nudge. This is a zero-effort config change but a **behaviour-altering** one and therefore needs a decision, not an automatic flip.
+- Or add an explicit note to `context/notes/reward-and-entertainment.md` documenting why the time penalty exists and update the README's reward table to list it.
 
-The `EpisodeEndReason` enum already derives `PartialEq` and `Eq`.
+This finding is flagged as **requires decision** — the audit cannot unilaterally choose between the two resolutions without more context on whether recent training runs depended on the penalty.
 
 **Justification:**
-String-based enum matching via Debug formatting is a correctness risk. The direct comparison is simpler, faster (no allocation), and immune to naming changes.
+Direct evidence from the codebase (confidence: high) — the default is `-0.005` at `episode.rs:49` and the reward is applied every tick at `episode.rs:266,279,283`. Direct evidence from the notes + README (confidence: high) — neither documents the penalty. The gap is concrete; the resolution requires human judgment about whether to change the default or the documentation.
 
 **Expected Benefit:**
-Eliminates a fragile string comparison and a `format!` allocation on every completed episode. More importantly, prevents a future silent bug if the enum changes.
+- If the penalty is retired: removes a shaping signal the philosophy argues against and simplifies the reward structure toward the documented ideal (velocity projection + centreline proximity only).
+- If the penalty is documented: removes drift between code and docs, reducing confusion on the next read.
 
 **Impact Assessment:**
-Zero functional change. `EpisodeEndReason::Crash` is the only variant whose Debug format contains "Crash", so the string check and the direct comparison produce identical results today.
+**Possible (requires decision).** Changing the default from −0.005 to 0.0 alters the effective per-tick reward by +0.005, which is within the per-tick magnitude range the policy optimises against. The change is not "free" in the audit's sense — it belongs in a deliberate reward-shaping decision, not in a cleanup pass. The audit's job is to surface the drift; the implementing engineer / project owner decides which side to correct.
+
+Confidence: **high** that the drift exists; **requires decision** on resolution.
 
 ---
 
-## Complexity Hotspots
+## Dead Code Removal (Low)
 
-### `EpisodeState` Struct Has 34 Fields
-- [x] Consider splitting `EpisodeState` into a `CurrentTickData` sub-struct and an `EpisodeAccumulator` sub-struct to reduce the cognitive load
+### Remove the `HashSet<(usize, usize)>` visited-set in `traverse_cells` or demote the check to a `debug_assert!`
+- [x] In `centerline.rs::traverse_cells` replace the per-cell `HashSet::insert` visited tracking with a simple "we've come back to the start" check, or keep the set only under `debug_assertions`
 
-**Category:** Complexity Hotspots
-**Severity:** Medium
-**Effort:** Medium
-**Behavioural Impact:** None (verified — purely structural, same fields, same access patterns)
+**Category:** Dead Code Removal (the safety-net check is structurally dead on the production tile layout)
+**Severity:** Low
+**Effort:** Trivial
+**Behavioural Impact:** None (verified — on every valid Monaco-style track the set never triggers a `NotClosedLoop` error; on malformed tracks the error still surfaces via the `DeadEnd` arm)
 
 **Location:**
-- `src/game/episode.rs:57-101` — `EpisodeState` struct definition
+- `src/maps/centerline.rs:299-305, 323-325` — `let mut visited = std::collections::HashSet::<(usize, usize)>::new(); visited.insert(start_cell); … if !visited.insert(next) { return Err(CenterlineBuildError::NotClosedLoop); }`
 
 **Current State:**
-`EpisodeState` has 34 fields mixing three concerns:
-1. **Current-tick scratch data** (14 fields starting with `current_tick_`): reward, progress, speed, heading, forward, tangent, etc.
-2. **Episode accumulators** (8 fields): `current_return`, `current_progress_reward_sum`, `current_crashes`, `current_best_progress_fraction`, etc.
-3. **Last-episode summaries** (12 fields starting with `last_episode_`): stored after finalisation for downstream consumers.
+`traverse_cells` walks the tile grid following the unique open edge at each tile. The trap it guards against — revisiting a cell before closing — can only occur if the tile graph has a branch (which `choose_next_dir` already rejects via `AmbiguousBranch`) or if two disconnected loops share a tile (topologically impossible on a grid with degree-2 connectivity).
 
-The struct is a single Component, so all 34 fields are carried per car even though `current_tick_` fields are only meaningful within a single tick and `last_episode_` fields are only meaningful after episode end.
+For NeuroDrive's Monaco track the set is populated with ~40 cells at startup and then dropped — it is one-shot cost at track build time, not a runtime hot path. The finding is **not** about performance; it is about the check being structurally unreachable on any well-formed track, and about the `HashSet` implying a safety concern that does not exist.
 
 **Proposed Change:**
-Group into sub-structs:
-```rust
-pub struct EpisodeState {
-    pub episode_id: u32,
-    pub ticks_in_episode: u32,
-    pub tick: TickSnapshot,       // current_tick_* fields
-    pub accum: EpisodeAccum,      // running sums and counters
-    pub last: LastEpisodeSummary, // last_episode_* fields
-}
-```
+Either:
+1. Delete the `visited` set entirely and trust `choose_next_dir` + the closing-back-to-start condition to terminate. The `NotClosedLoop` arm of `CenterlineBuildError` would need to be retained (still referenced from the doc comment about closed-loop rejection).
+2. Keep the set but gate behind `#[cfg(debug_assertions)]` so release builds pay nothing for the safety net.
 
-All three sub-structs are plain data (no methods). The Component is still `EpisodeState` — callers access `episode_state.tick.reward` instead of `episode_state.current_tick_reward`. The struct remains a single Component on the entity.
+Option 2 is the safer and documented pattern ("validate aggressively in debug, assume in release"). Option 1 is more aggressive; if the track format ever grows to support branching, the visited set becomes load-bearing again.
 
 **Justification:**
-34 fields in a single flat struct is a readability and maintenance burden. The three groups have different lifetimes (per-tick, per-episode, cross-episode) and different consumers (tick data is consumed by analytics trace capture; accumulators are internal to the episode system; last-episode data is consumed by analytics episode tracker and HUD). Grouping them makes the ownership and lifecycle explicit.
+Analytical evidence (confidence: moderate — this is a cosmetic cleanup, not a correctness fix):
+- `choose_next_dir` (`centerline.rs:439-476`) already rejects the only path by which a cell could be re-visited on a valid grid — an `AmbiguousBranch`.
+- `traverse_cells` already has a terminating condition that does not depend on the visited set: the loop breaks when `next == start_cell`.
+- The `HashSet` is allocated once at app startup and never again — zero runtime impact.
 
-This is not an architecture change — it is a within-component restructure. No system boundaries or data flow changes.
+Research: not required for this finding per `detection-strategies.md` §"When Research Is Not Required" — the logic is simple enough to reason about directly.
 
 **Expected Benefit:**
-Clearer field organisation. Easier to understand which fields are valid when. Reduces the chance of accidentally reading a `current_tick_` field outside the tick it was computed in.
+- Removes one startup allocation (negligible) and one conceptual layer from `traverse_cells`.
+- Either clarifies that the check is a debug-only invariant (option 2) or proves the safety guarantee is already structural (option 1).
 
 **Impact Assessment:**
-Zero functional change. Same fields, same data, same access patterns. Only the nesting depth of field access changes. All consumers (episode system, analytics trackers, HUD) would update their field paths but the data they receive is identical.
+Zero functional change on the current track format. Both options preserve the external error-reporting shape of `traverse_cells`.
+
+Confidence: **moderate** (analytical). This is flagged as a low-severity cosmetic finding — not urgent, and the implementing engineer may legitimately keep the belt-and-braces guard as-is.
+
+---
+
+## Data Layout analysis applicability decision (required)
+
+Applied to every system file in scope. The 2026-04-15 audit already closed the cached-hint centreline projection and adaptive raycast step — those were the two high-value Data Layout wins in the environment system. Current state shows no further Data Layout findings:
+
+- `TrackProgress` is a plain POD struct; it is stored on each `Car` entity via Bevy's ECS component storage, which already gives struct-of-arrays layout at the storage level (Bevy archetypes).
+- `ObservationVector` is `[f32; OBSERVATION_DIM = 43]` — inline fixed-size array, no pointer chase, optimal for reading.
+- `SensorReadings` is similar.
+- Centreline `points: Vec<Vec2>` is contiguous; the projection hint already exploits temporal locality.
+
+No Data Layout finding for this system beyond what the prior audit closed.
