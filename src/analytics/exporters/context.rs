@@ -35,9 +35,14 @@ pub struct RunContext {
     pub max_steps: usize,
     pub min_update_steps: usize,
     pub samples_per_tick: usize,
-    pub hidden_dim: usize,
+    pub actor_hidden_dim: usize,
+    pub critic_hidden_dim: usize,
     pub actor_lr: f32,
     pub critic_lr: f32,
+    /// Active GEMM backend for this run — determined at compile time by
+    /// the `force-*` feature flags (or the platform default: Accelerate on
+    /// macOS, matrixmultiply elsewhere).
+    pub gemm_backend: &'static str,
 }
 
 impl RunContext {
@@ -90,9 +95,11 @@ impl RunContext {
             max_steps: brain.config.max_steps,
             min_update_steps: brain.config.min_update_steps,
             samples_per_tick: brain.config.samples_per_tick,
-            hidden_dim: brain.config.actor_hidden_dim,
+            actor_hidden_dim: brain.config.actor_hidden_dim,
+            critic_hidden_dim: brain.config.critic_hidden_dim,
             actor_lr: brain.config.actor_lr,
             critic_lr: brain.config.critic_lr,
+            gemm_backend: crate::brain::common::gemm_backend::backend_name(),
         }
     }
 
@@ -151,9 +158,16 @@ impl RunContext {
              | Horizon | {} |\n\
              | Min update steps | {} |\n\
              | Samples/tick | {} |\n\
-             | Hidden dim | {} |\n\
+             | Actor hidden dim | {} |\n\
+             | Critic hidden dim | {} |\n\
              | Actor LR | {:.0e} |\n\
-             | Critic LR | {:.0e} |\n",
+             | Critic LR | {:.0e} |\n\
+             \n\
+             ### Build\n\
+             \n\
+             | Parameter | Value |\n\
+             |-----------|-------|\n\
+             | GEMM backend | {} |\n",
             self.episode_count,
             self.ppo_update_count,
             self.car_count,
@@ -179,9 +193,11 @@ impl RunContext {
             self.max_steps,
             self.min_update_steps,
             self.samples_per_tick,
-            self.hidden_dim,
+            self.actor_hidden_dim,
+            self.critic_hidden_dim,
             self.actor_lr,
             self.critic_lr,
+            self.gemm_backend,
         )
     }
 }

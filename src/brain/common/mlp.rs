@@ -1,3 +1,4 @@
+use crate::brain::common::gemm_backend;
 use crate::brain::common::math::zeros;
 use rand::Rng;
 
@@ -58,71 +59,84 @@ impl Linear {
 
     // ── Batch forward / backward ─────────────────────────────────────
 
-    /// Batch forward: output = input × weights^T + bias (broadcast).
+    /// Batch forward: `output = input × weights^T + bias (broadcast)`.
     ///
     /// `input`  is row-major `[batch_size × in_dim]`.
     /// `output` is row-major `[batch_size × out_dim]`, must be pre-allocated.
     ///
-    /// Caches `input` for `backward_batch`.
+    /// Caches `input` for `backward_batch`. The mat-mat itself goes through
+    /// the selected `gemm_backend` (Accelerate on macOS by default,
+    /// matrixmultiply elsewhere, scalar fallback available behind
+    /// `--features force-scalar`).
     pub fn forward_batch(&mut self, input: &[f32], output: &mut [f32], batch_size: usize) {
-        // Cache input for backward
+        // Cache input for backward_batch
         self.batch_input_cache.resize(batch_size * self.in_dim, 0.0);
         self.batch_input_cache.copy_from_slice(&input[..batch_size * self.in_dim]);
         self.batch_size_cached = batch_size;
 
-        // output[s, i] = bias[i] + Σ_j input[s, j] * weights[i, j]
-        // Using s-i-j loop order so `weights[i * in_dim .. (i+1) * in_dim]` is
-        // read sequentially per output neuron, giving cache-friendly access on
-        // the row-major weight layout.
-        // First: fill with biases (broadcast)
+        // Broadcast biases into each output row. This is a memcpy, not a GEMM —
+        // GEMM handles the weight-contribution accumulation below with beta=1.
         for s in 0..batch_size {
             let out_row = &mut output[s * self.out_dim..(s + 1) * self.out_dim];
             out_row.copy_from_slice(&self.biases);
         }
-        // Then: accumulate weight contributions
-        for s in 0..batch_size {
-            let in_row = &input[s * self.in_dim..(s + 1) * self.in_dim];
-            let out_row = &mut output[s * self.out_dim..(s + 1) * self.out_dim];
-            for i in 0..self.out_dim {
-                let w_row = &self.weights[i * self.in_dim..(i + 1) * self.in_dim];
-                let mut sum = 0.0f32;
-                for j in 0..self.in_dim {
-                    sum += w_row[j] * in_row[j];
-                }
-                out_row[i] += sum;
-            }
-        }
+
+        // output += input × weights^T
+        //   input shape   [batch_size × in_dim]   (m × k)
+        //   weights shape [out_dim × in_dim]      (n × k, transposed inside)
+        //   output shape  [batch_size × out_dim]  (m × n)
+        gemm_backend::sgemm_nt(
+            batch_size, self.in_dim, self.out_dim,
+            1.0,
+            input, self.in_dim,
+            &self.weights, self.in_dim,
+            1.0,
+            output, self.out_dim,
+        );
     }
 
-    /// Batch backward. Accumulates into grad_weights / grad_biases.
+    /// Batch backward. Accumulates into `grad_weights` / `grad_biases` and
+    /// writes `grad_input`.
     ///
     /// `grad_output` is `[batch_size × out_dim]`.
-    /// `grad_input`  is `[batch_size × in_dim]`, must be pre-allocated (will be overwritten).
+    /// `grad_input`  is `[batch_size × in_dim]`, pre-allocated (overwritten).
+    ///
+    /// Two of the three updates go through `gemm_backend`; the bias gradient
+    /// is a simple per-element reduction, not a GEMM.
     pub fn backward_batch(&mut self, grad_output: &[f32], grad_input: &mut [f32], batch_size: usize) {
-        // Zero grad_input
-        grad_input[..batch_size * self.in_dim].iter_mut().for_each(|x| *x = 0.0);
-
-        // grad_biases += sum over batch of grad_output
-        // grad_weights += grad_output^T × input_cache  (accumulated across batch)
-        // grad_input = grad_output × weights
+        // 1. Bias gradient: grad_biases += Σ_s grad_output[s, :]
         for s in 0..batch_size {
             let go_row = &grad_output[s * self.out_dim..(s + 1) * self.out_dim];
-            let in_row = &self.batch_input_cache[s * self.in_dim..(s + 1) * self.in_dim];
-            let gi_row = &mut grad_input[s * self.in_dim..(s + 1) * self.in_dim];
-
             for i in 0..self.out_dim {
-                let g = go_row[i];
-                self.grad_biases[i] += g;
-                let row_start = i * self.in_dim;
-                let w_row = &self.weights[row_start..row_start + self.in_dim];
-                let gw_row = &mut self.grad_weights[row_start..row_start + self.in_dim];
-
-                for j in 0..self.in_dim {
-                    gw_row[j] += g * in_row[j];
-                    gi_row[j] += w_row[j] * g;
-                }
+                self.grad_biases[i] += go_row[i];
             }
         }
+
+        // 2. Weight gradient: grad_weights += grad_output^T × input_cache
+        //    grad_output transposed shape: [out_dim × batch_size]  (m × k)
+        //    input_cache shape:            [batch_size × in_dim]   (k × n)
+        //    grad_weights shape:           [out_dim × in_dim]      (m × n, accumulated with beta=1)
+        gemm_backend::sgemm_tn(
+            self.out_dim, batch_size, self.in_dim,
+            1.0,
+            grad_output, self.out_dim,
+            &self.batch_input_cache, self.in_dim,
+            1.0,
+            &mut self.grad_weights, self.in_dim,
+        );
+
+        // 3. Input gradient: grad_input := grad_output × weights  (beta=0 → overwrite)
+        //    grad_output shape: [batch_size × out_dim]  (m × k)
+        //    weights shape:     [out_dim × in_dim]     (k × n)
+        //    grad_input shape:  [batch_size × in_dim]  (m × n)
+        gemm_backend::sgemm(
+            batch_size, self.out_dim, self.in_dim,
+            1.0,
+            grad_output, self.out_dim,
+            &self.weights, self.in_dim,
+            0.0,
+            grad_input, self.in_dim,
+        );
     }
 
     // ── Utilities ────────────────────────────────────────────────────

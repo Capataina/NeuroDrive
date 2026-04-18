@@ -2,35 +2,16 @@ use crate::brain::common::mlp::{Linear, Tanh};
 use crate::brain::common::optim::AdamOptimizer;
 use rand::Rng;
 
-/// Policy distribution parameters emitted by a single-sample actor forward.
+/// Per-sample scratch buffers for the single-sample critic forward path
+/// (`forward_critic`), used on the reward-collection bootstrap and
+/// on-exit-flush bootstrap paths. Allocated once at construction; reused
+/// every call.
 ///
-/// Stored as fixed-size arrays because the environment's action dimension
-/// is structurally 2 (steering + throttle); a `Vec<f32>` here would incur a
-/// heap allocation every tick per car purely to hold two floats.
-#[derive(Clone, Copy, Debug)]
-pub struct ActionDist {
-    pub mean: [f32; 2],
-    pub std: [f32; 2],
-}
-
-/// Per-sample scratch buffers for the single-sample forward paths
-/// (`forward_actor`, `forward_critic`, `forward`). These paths run on the
-/// action-selection hot tick (every car, every tick, 60 Hz), so fresh
-/// `Vec` allocations per call were costly. Buffers are sized for the
-/// actor/critic hidden dims at construction and reused every call.
-///
-/// Separate from `BatchScratch` because the single-sample path uses
-/// `forward_into` (slice-based) while the batched path uses `forward_batch`
-/// (different buffer sizes and cache semantics).
+/// The actor now runs exclusively via the batched `forward_actor_batch`
+/// path, so no per-sample actor scratch lives here — multi-car action
+/// selection reads its inputs from `BatchIo::obs_batch` and writes to
+/// `BatchScratch` directly.
 pub struct SampleScratch {
-    // Actor intermediates [actor_hidden]
-    pub a_h1: Vec<f32>,
-    pub a_h1_act: Vec<f32>,
-    pub a_h2: Vec<f32>,
-    pub a_h2_act: Vec<f32>,
-    // Actor output [act_dim]
-    pub a_out: Vec<f32>,
-    // Critic intermediates [critic_hidden]
     pub c_h1: Vec<f32>,
     pub c_h1_act: Vec<f32>,
     pub c_h2: Vec<f32>,
@@ -38,13 +19,8 @@ pub struct SampleScratch {
 }
 
 impl SampleScratch {
-    fn new(actor_hidden: usize, critic_hidden: usize, act_dim: usize) -> Self {
+    fn new(critic_hidden: usize) -> Self {
         Self {
-            a_h1: vec![0.0; actor_hidden],
-            a_h1_act: vec![0.0; actor_hidden],
-            a_h2: vec![0.0; actor_hidden],
-            a_h2_act: vec![0.0; actor_hidden],
-            a_out: vec![0.0; act_dim],
             c_h1: vec![0.0; critic_hidden],
             c_h1_act: vec![0.0; critic_hidden],
             c_h2: vec![0.0; critic_hidden],
@@ -216,7 +192,7 @@ impl ActorCritic {
         let c_opt = AdamOptimizer::new(&[&c_fc1, &c_fc2, &c_value], critic_lr, critic_weight_decay);
 
         let max_batch = 512;
-        let sample_scratch = SampleScratch::new(actor_hidden_dim, critic_hidden_dim, act_dim);
+        let sample_scratch = SampleScratch::new(critic_hidden_dim);
         let batch_io = BatchIo::new(max_batch, in_dim, act_dim);
         let scratch = BatchScratch::new(max_batch, in_dim, actor_hidden_dim, critic_hidden_dim, act_dim);
 
@@ -247,25 +223,8 @@ impl ActorCritic {
         }
     }
 
-    /// Actor-only single-sample forward pass (used during action selection).
-    /// Skips the critic — saves ~50% of the forward cost per car.
-    ///
-    /// Allocation-free: all intermediates live in `self.sample_scratch`.
-    /// At 8 cars × 60 Hz that previously amounted to 2,880 heap allocations
-    /// per second on the hot path; now zero.
-    pub fn forward_actor(&mut self, obs: &[f32]) -> ActionDist {
-        self.a_fc1.forward_into(obs, &mut self.sample_scratch.a_h1);
-        self.a_tanh1.forward_into(&self.sample_scratch.a_h1, &mut self.sample_scratch.a_h1_act);
-        self.a_fc2.forward_into(&self.sample_scratch.a_h1_act, &mut self.sample_scratch.a_h2);
-        self.a_tanh2.forward_into(&self.sample_scratch.a_h2, &mut self.sample_scratch.a_h2_act);
-        self.a_mean.forward_into(&self.sample_scratch.a_h2_act, &mut self.sample_scratch.a_out);
-        ActionDist {
-            mean: [self.sample_scratch.a_out[0], self.sample_scratch.a_out[1]],
-            std: [self.a_log_std[0].exp(), self.a_log_std[1].exp()],
-        }
-    }
-
-    /// Critic-only single-sample forward pass (used for bootstrap values).
+    /// Critic-only single-sample forward pass (used for bootstrap values on
+    /// the reward-collection path and on the exit-flush path).
     /// Allocation-free on the hot path.
     pub fn forward_critic(&mut self, obs: &[f32]) -> f32 {
         self.c_fc1.forward_into(obs, &mut self.sample_scratch.c_h1);
@@ -277,40 +236,35 @@ impl ActorCritic {
         value_out[0]
     }
 
-    /// Full single-sample forward pass (actor + critic).
-    /// Used only off the hot path (on-exit flush bootstrap); retained for
-    /// API parity with `forward_actor` / `forward_critic`. Allocation-free.
-    pub fn forward(&mut self, obs: &[f32]) -> (ActionDist, f32) {
-        // Actor path
-        self.a_fc1.forward_into(obs, &mut self.sample_scratch.a_h1);
-        self.a_tanh1.forward_into(&self.sample_scratch.a_h1, &mut self.sample_scratch.a_h1_act);
-        self.a_fc2.forward_into(&self.sample_scratch.a_h1_act, &mut self.sample_scratch.a_h2);
-        self.a_tanh2.forward_into(&self.sample_scratch.a_h2, &mut self.sample_scratch.a_h2_act);
-        self.a_mean.forward_into(&self.sample_scratch.a_h2_act, &mut self.sample_scratch.a_out);
-        let dist = ActionDist {
-            mean: [self.sample_scratch.a_out[0], self.sample_scratch.a_out[1]],
-            std: [self.a_log_std[0].exp(), self.a_log_std[1].exp()],
-        };
-
-        // Critic path
-        self.c_fc1.forward_into(obs, &mut self.sample_scratch.c_h1);
-        self.c_tanh1.forward_into(&self.sample_scratch.c_h1, &mut self.sample_scratch.c_h1_act);
-        self.c_fc2.forward_into(&self.sample_scratch.c_h1_act, &mut self.sample_scratch.c_h2);
-        self.c_tanh2.forward_into(&self.sample_scratch.c_h2, &mut self.sample_scratch.c_h2_act);
-        let mut value_out = [0.0f32; 1];
-        self.c_value.forward_into(&self.sample_scratch.c_h2_act, &mut value_out);
-
-        (dist, value_out[0])
+    /// Batched actor-only forward pass for multi-car action selection.
+    ///
+    /// Reads observations from `self.batch_io.obs_batch[..batch_size * obs_dim]`
+    /// (caller must stack them there first).
+    /// Writes `batch_size * act_dim` means into `self.scratch.a_out`.
+    ///
+    /// Does **not** cache intermediates for backward — this is inference only,
+    /// mirroring `forward_critic_batch`.
+    pub fn forward_actor_batch(&mut self, batch_size: usize) {
+        let ah = self.scratch.actor_hidden_dim;
+        let obs_dim = self.scratch.obs_dim;
+        let obs_batch = &self.batch_io.obs_batch[..batch_size * obs_dim];
+        self.a_fc1.forward_batch(obs_batch, &mut self.scratch.a_h1, batch_size);
+        self.a_tanh1.forward_batch(&self.scratch.a_h1, &mut self.scratch.a_h1_act, batch_size, ah);
+        self.a_fc2.forward_batch(&self.scratch.a_h1_act, &mut self.scratch.a_h2, batch_size);
+        self.a_tanh2.forward_batch(&self.scratch.a_h2, &mut self.scratch.a_h2_act, batch_size, ah);
+        self.a_mean.forward_batch(&self.scratch.a_h2_act, &mut self.scratch.a_out, batch_size);
     }
 
     /// Batched critic-only forward pass for action selection.
     ///
-    /// `obs_batch` is row-major `[batch_size × obs_dim]`.
-    /// Returns value predictions in `scratch.c_out[0..batch_size]`.
+    /// Reads observations from `self.batch_io.obs_batch[..batch_size * obs_dim]`.
+    /// Writes `batch_size` value predictions into `self.scratch.c_out`.
     ///
     /// Does **not** cache intermediates for backward — this is inference only.
-    pub fn forward_critic_batch(&mut self, obs_batch: &[f32], batch_size: usize) {
+    pub fn forward_critic_batch(&mut self, batch_size: usize) {
         let ch = self.scratch.critic_hidden_dim;
+        let obs_dim = self.scratch.obs_dim;
+        let obs_batch = &self.batch_io.obs_batch[..batch_size * obs_dim];
         self.c_fc1.forward_batch(obs_batch, &mut self.scratch.c_h1, batch_size);
         self.c_tanh1.forward_batch(&self.scratch.c_h1, &mut self.scratch.c_h1_act, batch_size, ch);
         self.c_fc2.forward_batch(&self.scratch.c_h1_act, &mut self.scratch.c_h2, batch_size);

@@ -18,6 +18,23 @@ use game::GamePlugin;
 use maps::MonacoPlugin;
 
 fn main() {
+    // Pin Apple Accelerate to single-threaded before any cblas_sgemm call.
+    // Accelerate's default is to spin up worker threads for larger matrices,
+    // but our GEMMs are small enough (critic fc2 is 64×128×128) that thread
+    // spawn overhead dominates the useful work AND the worker threads
+    // compete with Bevy's render pipeline for CPU cores — a net loss.
+    //
+    // Must be set before the first Accelerate call. `App::new()` triggers
+    // bevy plugin registration which may indirectly warm up system caches;
+    // set it first to be safe. No-op on non-macOS builds.
+    #[cfg(target_os = "macos")]
+    // SAFETY: Rust 2024 marks env::set_var as unsafe because it is racy
+    // against concurrent reads. We call it here at process start, before any
+    // thread has been spawned, so there is no concurrent reader.
+    unsafe {
+        std::env::set_var("VECLIB_MAXIMUM_THREADS", "1");
+    }
+
     let mut app = App::new();
 
     app.add_plugins(DefaultPlugins.set(WindowPlugin {

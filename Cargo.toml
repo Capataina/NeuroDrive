@@ -3,8 +3,38 @@ name = "NeuroDrive"
 version = "0.1.0"
 edition = "2024"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# FEATURES — how to select a GEMM backend and profiling mode.
+#
+# Default (no feature flags): the GEMM backend is chosen automatically by
+# platform — Apple Accelerate on macOS, `matrixmultiply` everywhere else.
+# Both deliver substantial speedups over the scalar fallback (roughly 8-20x
+# and 3-5x respectively on M-series CPUs) and the default is the right
+# choice for everyday use.
+#
+# Override with exactly one of `force-scalar`, `force-matrixmultiply`, or
+# `force-accelerate` to pin a specific backend — useful for A/B correctness
+# tests and performance comparisons.
+#
+# See README.md §"Running and building" for common commands.
+# ─────────────────────────────────────────────────────────────────────────────
 [features]
+default = []
+
+# ── Instrumentation ──
+# Per-system frame timing + auto-exit + performance report. Off by default
+# because the instrumentation has measurable overhead.
 profiling = []
+
+# ── GEMM backend selection (mutually exclusive; none required) ──
+# force-scalar:          naive nested-loop Rust, works everywhere (slowest)
+# force-matrixmultiply:  the pure-Rust matrixmultiply crate (BLIS-style NEON
+#                        microkernel), portable
+# force-accelerate:      Apple Accelerate via cblas_sgemm (macOS only; will
+#                        fail to link on other platforms)
+force-scalar = []
+force-matrixmultiply = []
+force-accelerate = []
 
 [lib]
 name = "neurodrive"
@@ -20,3 +50,12 @@ rand = "0.10.0"
 rand_distr = "0.6.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+# BLIS-style NEON microkernel — the default GEMM backend on non-macOS
+# platforms, and available behind `force-matrixmultiply` on macOS too.
+matrixmultiply = "0.3"
+
+# macOS-only: Apple Accelerate via cblas for AMX-backed small-GEMM speed.
+# These deps are only compiled on macOS (Cargo skips them on other platforms).
+[target.'cfg(target_os = "macos")'.dependencies]
+blas-src = { version = "0.11", features = ["accelerate"] }
+cblas = "0.4"
