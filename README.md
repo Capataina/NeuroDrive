@@ -397,6 +397,105 @@ Result: **426 stutters to 2**, mean frame time **17.3ms to 9.0ms** with 8 cars.
 
 ---
 
+## Building and Running
+
+NeuroDrive is a standard Cargo project. The only prerequisite is a recent Rust toolchain (edition 2024, tested on stable). On macOS the Apple Accelerate framework is used automatically — it ships with the OS, no separate install. On other platforms a portable pure-Rust backend is used automatically instead.
+
+### Everyday commands
+
+| Command | What it does |
+|---------|--------------|
+| `cargo run --release` | Start the simulation with all optimisations enabled. Release mode is **strongly recommended** — `cargo run` alone (debug mode) is ~10× slower and misses the actual performance story. |
+| `cargo run` | Fast compile, slow runtime. Useful only when iterating on code changes and you don't care about frame rate. |
+| `cargo test` | Run the full test suite (99 tests as of 2026-04-18). |
+| `cargo test --release` | Tests in release mode — runs more slowly to compile but matches the optimiser flags of production code. |
+| `cargo check` | Fast syntax/type check without producing a binary. |
+| `cargo check --release` | Same but with release optimisations active (catches some LTO-specific issues). |
+
+### GEMM backend selection
+
+The PPO hot path (actor + critic forward and backward) spends most of its time in small single-precision matrix multiplications. NeuroDrive provides three interchangeable backends for that single operation, with one chosen automatically per platform:
+
+| Command | Backend used | Notes |
+|---------|--------------|-------|
+| `cargo run --release` | **macOS:** Apple Accelerate (cblas_sgemm, AMX-accelerated). **Elsewhere:** `matrixmultiply` (pure Rust, NEON on ARM64). | The default. Picks the fastest available backend for your platform without any flags. |
+| `cargo run --release --no-default-features --features force-accelerate` | Apple Accelerate, forced. **macOS only** — fails to build on other platforms. | Explicit opt-in; same as the macOS default. |
+| `cargo run --release --no-default-features --features force-matrixmultiply` | `matrixmultiply` crate, forced on any platform. | Useful to A/B against Accelerate on macOS, or as the natural default on Linux/Windows. |
+| `cargo run --release --no-default-features --features force-scalar` | Naive nested-loop Rust. Slowest by design. | Used as a **correctness reference** for the other two backends and as a fallback when neither is desired. |
+
+Every performance report (see below) records which backend was active under its new `### Build` section, so benchmarks across different runs are directly comparable.
+
+### Profiling
+
+```bash
+cargo run --release --features profiling
+```
+
+Enables the per-system frame-timing instrumentation. The app auto-exits after 30 seconds and writes two artefacts:
+
+- `reports/performance/perf_<timestamp>.md` — Markdown report with per-system breakdown, stutter analysis, and auto-generated recommendations.
+- `reports/json/performance/perf_<timestamp>.json` — raw timing data for custom post-processing.
+
+The Markdown report's Run Context section includes the active GEMM backend, so you can tell at a glance whether a given profile was produced by Accelerate, matrixmultiply, or scalar.
+
+### Benchmarking different backends
+
+To compare backends on the same workload:
+
+```bash
+cargo run --release --features profiling
+# → reports/performance/perf_A.md   (Accelerate on macOS by default)
+
+cargo run --release --no-default-features --features "force-matrixmultiply,profiling"
+# → reports/performance/perf_B.md   (matrixmultiply forced)
+
+cargo run --release --no-default-features --features "force-scalar,profiling"
+# → reports/performance/perf_C.md   (scalar reference)
+```
+
+Each report's `### Build` section records the backend; the frame-time and PPO Epoch timing tables can be compared directly.
+
+### Test suite
+
+```bash
+cargo test                                                             # full suite, default backend
+cargo test --no-default-features --features force-scalar              # scalar backend
+cargo test --no-default-features --features force-matrixmultiply      # matrixmultiply backend
+cargo test --no-default-features --features force-accelerate          # Accelerate backend (macOS only)
+```
+
+The suite includes cross-backend correctness tests in `tests/gemm_correctness.rs` that validate whichever backend is compiled in against an inline scalar reference for every matrix shape PPO actually uses.
+
+### Feature flag reference
+
+```toml
+# Defined in Cargo.toml [features]
+default = []
+profiling             # Enable per-system timing instrumentation + auto-exit
+force-scalar          # GEMM backend override — naive nested-loop reference
+force-matrixmultiply  # GEMM backend override — portable pure-Rust BLIS kernel
+force-accelerate      # GEMM backend override — Apple Accelerate (macOS only)
+```
+
+Constraints:
+
+- At most one `force-*` backend flag may be enabled at a time (compile-time error if two or three are set together).
+- `force-accelerate` on non-macOS platforms is a compile-time error (the Accelerate framework does not exist there).
+- `profiling` is orthogonal to the backend flags — any combination is valid.
+
+### Verified build matrix (2026-04-18)
+
+All of the following pass `cargo test` with zero warnings and all 99 tests green:
+
+- Default (Accelerate on this macOS M2 host)
+- `--no-default-features --features force-scalar`
+- `--no-default-features --features force-matrixmultiply`
+- `--no-default-features --features force-accelerate`
+- `--release`
+- `--features profiling`
+
+---
+
 ## Features and Roadmap
 
 NeuroDrive follows a deliberate sequencing strategy:
