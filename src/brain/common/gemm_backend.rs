@@ -132,3 +132,125 @@ pub fn sgemm_tn(
 pub fn backend_name() -> &'static str {
     active::NAME
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn approx_slice(a: &[f32], b: &[f32], tol: f32) -> bool {
+        if a.len() != b.len() {
+            return false;
+        }
+        a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() < tol)
+    }
+
+    #[test]
+    fn sgemm_known_values_2x2() {
+        //    a = [1 2 ; 3 4]    b = [5 6 ; 7 8]     expected = [19 22 ; 43 50]
+        let a = vec![1.0, 2.0, 3.0, 4.0];
+        let b = vec![5.0, 6.0, 7.0, 8.0];
+        let mut c = vec![0.0; 4];
+        sgemm(2, 2, 2, 1.0, &a, 2, &b, 2, 0.0, &mut c, 2);
+        let expected = vec![19.0, 22.0, 43.0, 50.0];
+        assert!(approx_slice(&c, &expected, 1e-4), "got {:?}, want {:?}", c, expected);
+    }
+
+    #[test]
+    fn sgemm_alpha_beta_accumulate() {
+        // c := 2 * a*b + 3 * c
+        let a = vec![1.0, 1.0, 1.0, 1.0];
+        let b = vec![1.0, 1.0, 1.0, 1.0];
+        let mut c = vec![5.0, 5.0, 5.0, 5.0];
+        // a*b = [2 2 ; 2 2]   2*a*b = [4 4 ; 4 4]   3*c = [15 15 ; 15 15]
+        // result = [19 19 ; 19 19]
+        sgemm(2, 2, 2, 2.0, &a, 2, &b, 2, 3.0, &mut c, 2);
+        for v in &c {
+            assert!((*v - 19.0).abs() < 1e-4, "got {}", v);
+        }
+    }
+
+    #[test]
+    fn sgemm_nt_is_transpose_of_b() {
+        // a = [1 2 3; 4 5 6], b = [1 0 0; 0 1 0], b^T = [1 0; 0 1; 0 0]
+        // a × b^T = [1 2; 4 5]
+        let a = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]; // 2 × 3 row-major
+        let b = vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0]; // 2 × 3 row-major (will be transposed)
+        let mut c = vec![0.0; 4];
+        sgemm_nt(2, 3, 2, 1.0, &a, 3, &b, 3, 0.0, &mut c, 2);
+        let expected = vec![1.0, 2.0, 4.0, 5.0];
+        assert!(approx_slice(&c, &expected, 1e-4), "got {:?}", c);
+    }
+
+    #[test]
+    fn sgemm_tn_is_transpose_of_a() {
+        // a = [1 2; 3 4; 5 6], a^T = [1 3 5; 2 4 6]
+        // b = [1 0; 0 1; 0 0]    but note b is k × n where k=3, n=2, so (3 × 2)
+        // Actually simpler test: a^T × I = a^T
+        let a = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]; // 3 × 2 row-major
+        let b = vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]; // 3 × 2 row-major (I_2 padded with zero row)
+        // sgemm_tn computes c := a^T × b  where a is treated as (k × m) = (3 × 2), so a^T is (m × k) = (2 × 3)
+        // But we want a^T × b where a^T is (2 × 3) and b is (3 × 2)... b is stored as (k × n) row-major = (3 × 2)
+        let mut c = vec![0.0; 4]; // 2 × 2
+        sgemm_tn(2, 3, 2, 1.0, &a, 2, &b, 2, 0.0, &mut c, 2);
+        // c[i,j] = sum_p a[p, i] * b[p, j]
+        // c[0,0] = a[0,0]*b[0,0] + a[1,0]*b[1,0] + a[2,0]*b[2,0] = 1*1 + 3*0 + 5*0 = 1
+        // c[0,1] = a[0,0]*b[0,1] + a[1,0]*b[1,1] + a[2,0]*b[2,1] = 1*0 + 3*1 + 5*0 = 3
+        // c[1,0] = a[0,1]*b[0,0] + a[1,1]*b[1,0] + a[2,1]*b[2,0] = 2*1 + 4*0 + 6*0 = 2
+        // c[1,1] = a[0,1]*b[0,1] + a[1,1]*b[1,1] + a[2,1]*b[2,1] = 2*0 + 4*1 + 6*0 = 4
+        let expected = vec![1.0, 3.0, 2.0, 4.0];
+        assert!(approx_slice(&c, &expected, 1e-4), "got {:?}", c);
+    }
+
+    #[test]
+    fn sgemm_overwrite_vs_accumulate() {
+        // beta=0 should overwrite pre-existing garbage in c; beta=1 should add.
+        let a = vec![2.0, 0.0, 0.0, 2.0]; // 2I
+        let b = vec![3.0, 0.0, 0.0, 3.0]; // 3I
+        // A*B = 6I
+        let mut c = vec![100.0; 4];
+        sgemm(2, 2, 2, 1.0, &a, 2, &b, 2, 0.0, &mut c, 2);
+        assert!((c[0] - 6.0).abs() < 1e-4);
+        assert!((c[3] - 6.0).abs() < 1e-4);
+        assert!(c[1].abs() < 1e-4);
+
+        let mut c = vec![1.0; 4];
+        sgemm(2, 2, 2, 1.0, &a, 2, &b, 2, 1.0, &mut c, 2);
+        // 6I + 1-everywhere = [7 1 ; 1 7]
+        assert!((c[0] - 7.0).abs() < 1e-4);
+        assert!((c[1] - 1.0).abs() < 1e-4);
+        assert!((c[2] - 1.0).abs() < 1e-4);
+        assert!((c[3] - 7.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn sgemm_rectangular_non_square_shapes() {
+        // 4x3 × 3x2 → 4x2
+        let a: Vec<f32> = (1..=12).map(|x| x as f32).collect(); // 4 × 3
+        let b: Vec<f32> = (1..=6).map(|x| x as f32).collect(); // 3 × 2
+        let mut c = vec![0.0; 8];
+        sgemm(4, 3, 2, 1.0, &a, 3, &b, 2, 0.0, &mut c, 2);
+        // Hand-computed:
+        // row 0 of a = [1, 2, 3] dot col 0 of b = [1, 3, 5] = 1+6+15 = 22
+        // row 0 of a = [1, 2, 3] dot col 1 of b = [2, 4, 6] = 2+8+18 = 28
+        // row 1 of a = [4, 5, 6] dot col 0 of b = [1, 3, 5] = 4+15+30 = 49
+        // row 1 of a = [4, 5, 6] dot col 1 of b = [2, 4, 6] = 8+20+36 = 64
+        // row 2 of a = [7, 8, 9] dot col 0 = 7+24+45 = 76
+        // row 2 of a = [7, 8, 9] dot col 1 = 14+32+54 = 100
+        // row 3 of a = [10, 11, 12] dot col 0 = 10+33+60 = 103
+        // row 3 of a = [10, 11, 12] dot col 1 = 20+44+72 = 136
+        let expected = vec![22.0, 28.0, 49.0, 64.0, 76.0, 100.0, 103.0, 136.0];
+        assert!(approx_slice(&c, &expected, 1e-3), "got {:?}", c);
+    }
+
+    #[test]
+    fn backend_name_is_nonempty() {
+        let name = backend_name();
+        assert!(!name.is_empty());
+        // Must be one of the three known backend identifiers (prefix check)
+        let known_prefixes = ["scalar", "matrixmultiply", "accelerate"];
+        assert!(
+            known_prefixes.iter().any(|p| name.contains(p)),
+            "unexpected backend name: {}", name
+        );
+    }
+}

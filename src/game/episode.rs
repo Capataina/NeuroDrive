@@ -425,3 +425,92 @@ fn mean(values: &VecDeque<f32>) -> f32 {
     values.iter().sum::<f32>() / values.len() as f32
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── EpisodeConfig default regression guards (2026-04-18 policy locks) ─
+
+    #[test]
+    fn default_time_penalty_is_zero() {
+        // The entertainment-first reward philosophy (see notes/reward-and-entertainment.md)
+        // requires NO per-tick survival penalty. A non-zero default was a drift
+        // bug caught and fixed during the 2026-04-18 CHA audit.
+        let cfg = EpisodeConfig::default();
+        assert_eq!(cfg.time_penalty_per_tick, 0.0,
+            "time_penalty_per_tick must stay 0.0 — see notes/reward-and-entertainment.md");
+    }
+
+    #[test]
+    fn default_crash_penalty_is_zero() {
+        // Same entertainment-first philosophy: crashes cost future discounted
+        // reward, not an explicit penalty. Non-zero values produce
+        // "stay still / brake constantly" policies.
+        let cfg = EpisodeConfig::default();
+        assert_eq!(cfg.crash_penalty, 0.0,
+            "crash_penalty must stay 0.0 — see notes/reward-and-entertainment.md");
+    }
+
+    #[test]
+    fn default_reward_weights_match_documented_values() {
+        // Regression guard: if any of these defaults drift, the README's
+        // §Reward Structure table will go stale. Flagging here forces the
+        // documentation update alongside the code change.
+        let cfg = EpisodeConfig::default();
+        assert_eq!(cfg.velocity_reward_scale, 1.0);
+        assert_eq!(cfg.speed_reward_reference, 200.0);
+        assert_eq!(cfg.centreline_reward_coef, 0.3);
+        assert_eq!(cfg.centreline_reward_max_distance, 50.0);
+    }
+
+    #[test]
+    fn default_timeout_is_thirty_seconds() {
+        let cfg = EpisodeConfig::default();
+        assert_eq!(cfg.timeout_s, 30.0);
+    }
+
+    #[test]
+    fn default_moving_average_window_is_twenty() {
+        let cfg = EpisodeConfig::default();
+        assert_eq!(cfg.moving_average_window, 20);
+    }
+
+    #[test]
+    fn push_with_limit_drops_oldest_when_full() {
+        let mut buf = VecDeque::new();
+        for i in 0..5 {
+            push_with_limit(&mut buf, i as f32, 3);
+        }
+        // Only last 3 kept
+        assert_eq!(buf.len(), 3);
+        assert_eq!(buf[0], 2.0);
+        assert_eq!(buf[1], 3.0);
+        assert_eq!(buf[2], 4.0);
+    }
+
+    #[test]
+    fn push_with_limit_zero_limit_keeps_one() {
+        // A zero limit is treated as 1 (degenerate but well-defined).
+        let mut buf = VecDeque::new();
+        push_with_limit(&mut buf, 1.0, 0);
+        push_with_limit(&mut buf, 2.0, 0);
+        assert_eq!(buf.len(), 1);
+        assert_eq!(buf[0], 2.0);
+    }
+
+    #[test]
+    fn mean_of_empty_deque_is_zero() {
+        let buf: VecDeque<f32> = VecDeque::new();
+        assert_eq!(mean(&buf), 0.0);
+    }
+
+    #[test]
+    fn mean_computes_arithmetic_mean() {
+        let mut buf = VecDeque::new();
+        buf.push_back(1.0);
+        buf.push_back(2.0);
+        buf.push_back(3.0);
+        assert!((mean(&buf) - 2.0).abs() < 1e-6);
+    }
+}

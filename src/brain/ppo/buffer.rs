@@ -290,4 +290,137 @@ mod tests {
         // Advantages are un-normalised (per-chunk normalisation happens in update loop)
         assert!(adv.len() == 4);
     }
+
+    // ── GAE extension tests (2026-04-18 test-suite expansion) ────────────
+
+    #[test]
+    fn gae_empty_buffer_returns_empty_vectors() {
+        let mut buf = TrainerRolloutBuffer { obs_dim: 1, act_dim: 1, ..Default::default() };
+        let bootstraps = HashMap::new();
+        let (adv, ret) = buf.compute_gae_per_env(&bootstraps, 0.99, 0.95);
+        assert!(adv.is_empty());
+        assert!(ret.is_empty());
+    }
+
+    #[test]
+    fn gae_returns_equal_advantages_plus_values() {
+        // Foundational identity: return[i] == advantage[i] + value[i].
+        let mut buf = TrainerRolloutBuffer { obs_dim: 1, act_dim: 1, ..Default::default() };
+        let values = vec![0.5, 0.3, 0.1, 0.8];
+        for i in 0..4 {
+            buf.push_pre_step(0, &[0.0], &[0.0], &[0.0], [false, false], values[i], 0.0);
+            buf.push_reward((i as f32) * 0.5, i == 3);
+        }
+        let mut bootstraps = HashMap::new();
+        bootstraps.insert(0, 0.0);
+        let (adv, ret) = buf.compute_gae_per_env(&bootstraps, 0.99, 0.95);
+        for i in 0..4 {
+            assert!((ret[i] - (adv[i] + values[i])).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn gae_single_step_episode_advantage_is_reward_minus_value() {
+        // When there is exactly one transition and it is terminal (done),
+        // advantage = reward - value (bootstrap is masked out).
+        let mut buf = TrainerRolloutBuffer { obs_dim: 1, act_dim: 1, ..Default::default() };
+        buf.push_pre_step(0, &[0.0], &[0.0], &[0.0], [false, false], 2.0, 0.0);
+        buf.push_reward(5.0, true); // done
+
+        let mut bootstraps = HashMap::new();
+        bootstraps.insert(0, 999.0); // should be ignored because done=true
+        let (adv, _ret) = buf.compute_gae_per_env(&bootstraps, 0.99, 0.95);
+        // delta = 5.0 + gamma * 999.0 * 0 - 2.0 = 3.0. gae = 3.0.
+        assert!((adv[0] - 3.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn gae_terminal_state_zero_bootstrap() {
+        // When done=true mid-episode, the value from the next transition
+        // must NOT propagate back past the terminal boundary.
+        let mut buf = TrainerRolloutBuffer { obs_dim: 1, act_dim: 1, ..Default::default() };
+        let values = vec![0.0, 0.0, 99.0]; // giant value after terminal — should not leak
+        let rewards = vec![1.0, 1.0, 1.0];
+        let dones = vec![false, true, false];
+        for i in 0..3 {
+            buf.push_pre_step(0, &[0.0], &[0.0], &[0.0], [false, false], values[i], 0.0);
+            buf.push_reward(rewards[i], dones[i]);
+        }
+        let mut bootstraps = HashMap::new();
+        bootstraps.insert(0, 0.0);
+        let (adv, _ret) = buf.compute_gae_per_env(&bootstraps, 0.99, 0.95);
+
+        // The huge value at t=2 should not contribute to advantage at t=0 or t=1
+        // (mask at t=1 is 0 because done=true).
+        // If leakage existed, adv[0] would be much larger than ~1-2.
+        assert!(adv[0].abs() < 10.0, "possible bootstrap leak at t=0: {}", adv[0]);
+        assert!(adv[1].abs() < 10.0, "possible bootstrap leak at t=1: {}", adv[1]);
+    }
+
+    #[test]
+    fn gae_env_grouping_capacity_preserved_across_calls() {
+        // EnvGrouping should reuse its Vec<Vec<usize>> across calls to
+        // compute_gae_per_env — the 2026-04-18 paper 2 finding.
+        let mut buf = TrainerRolloutBuffer { obs_dim: 1, act_dim: 1, ..Default::default() };
+        // First call with 4 transitions across 2 envs
+        for (env_id, val) in [(0u32, 0.5), (1u32, 0.3), (0u32, 0.1), (1u32, 0.2)] {
+            buf.push_pre_step(env_id, &[0.0], &[0.0], &[0.0], [false, false], val, 0.0);
+            buf.push_reward(0.1, false);
+        }
+        let mut bootstraps = HashMap::new();
+        bootstraps.insert(0, 0.0);
+        bootstraps.insert(1, 0.0);
+        let _ = buf.compute_gae_per_env(&bootstraps, 0.99, 0.95);
+
+        // After first call, env_grouping has 2 buckets with capacity.
+        let cap_after_first: Vec<usize> =
+            buf.env_grouping.buckets.iter().map(|v| v.capacity()).collect();
+        assert_eq!(cap_after_first.len(), 2);
+        assert!(cap_after_first.iter().all(|&c| c >= 2),
+            "buckets should have capacity >=2 after 4 transitions across 2 envs");
+
+        // Clear transitions and run again — capacity should be preserved.
+        buf.clear();
+        for (env_id, val) in [(0u32, 0.5), (1u32, 0.3), (0u32, 0.1), (1u32, 0.2)] {
+            buf.push_pre_step(env_id, &[0.0], &[0.0], &[0.0], [false, false], val, 0.0);
+            buf.push_reward(0.1, false);
+        }
+        let _ = buf.compute_gae_per_env(&bootstraps, 0.99, 0.95);
+
+        let cap_after_second: Vec<usize> =
+            buf.env_grouping.buckets.iter().map(|v| v.capacity()).collect();
+        // The buckets are still at least as large as before (clear() preserves capacity).
+        for (i, (&a, &b)) in cap_after_first.iter().zip(cap_after_second.iter()).enumerate() {
+            assert!(b >= a, "bucket {} capacity shrank from {} to {}", i, a, b);
+        }
+    }
+
+    #[test]
+    fn gae_iteration_order_is_deterministic() {
+        // With Vec<Vec<usize>> indexing by env_id, env iteration order is
+        // strictly ascending — not HashMap-order-dependent. Run twice and
+        // verify bit-identical output.
+        let build = || -> TrainerRolloutBuffer {
+            let mut buf = TrainerRolloutBuffer { obs_dim: 1, act_dim: 1, ..Default::default() };
+            for (env_id, val) in [(2u32, 0.5), (0u32, 0.3), (1u32, 0.1), (2u32, 0.2), (0u32, 0.4)] {
+                buf.push_pre_step(env_id, &[0.0], &[0.0], &[0.0], [false, false], val, 0.0);
+                buf.push_reward(0.1, false);
+            }
+            buf
+        };
+        let mut bootstraps = HashMap::new();
+        bootstraps.insert(0, 0.0);
+        bootstraps.insert(1, 0.0);
+        bootstraps.insert(2, 0.0);
+
+        let mut buf1 = build();
+        let mut buf2 = build();
+        let (adv1, ret1) = buf1.compute_gae_per_env(&bootstraps, 0.99, 0.95);
+        let (adv2, ret2) = buf2.compute_gae_per_env(&bootstraps, 0.99, 0.95);
+
+        for i in 0..adv1.len() {
+            assert!((adv1[i] - adv2[i]).abs() < 1e-9);
+            assert!((ret1[i] - ret2[i]).abs() < 1e-9);
+        }
+    }
 }

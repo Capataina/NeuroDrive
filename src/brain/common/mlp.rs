@@ -221,3 +221,199 @@ impl Tanh {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    fn approx(a: f32, b: f32, tol: f32) -> bool {
+        (a - b).abs() < tol
+    }
+
+    // ── Linear ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn linear_forward_batch_writes_bias_when_input_is_zero() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut linear = Linear::new_orthogonal(4, 3, 1.0, &mut rng);
+        linear.biases = vec![1.0, 2.0, 3.0];
+
+        let input = vec![0.0f32; 8]; // 2 × 4 zeros
+        let mut output = vec![0.0f32; 6]; // 2 × 3
+
+        linear.forward_batch(&input, &mut output, 2);
+
+        // Zero input → output = bias broadcast
+        for s in 0..2 {
+            for i in 0..3 {
+                assert!(approx(output[s * 3 + i], linear.biases[i], 1e-6),
+                    "zero input should give bias at [s={}, i={}]: got {}, want {}",
+                    s, i, output[s * 3 + i], linear.biases[i]);
+            }
+        }
+    }
+
+    #[test]
+    fn linear_forward_batch_known_handcrafted() {
+        // Hand-computed 2×2 → 1 linear: y = [1,2]·[x0,x1] + 10
+        let mut rng = StdRng::seed_from_u64(0);
+        let mut linear = Linear::new_orthogonal(2, 1, 1.0, &mut rng);
+        linear.weights = vec![1.0, 2.0]; // [out_dim=1 × in_dim=2]
+        linear.biases = vec![10.0];
+
+        let input = vec![3.0, 4.0, 5.0, 6.0]; // 2 samples
+        let mut output = vec![0.0; 2];
+        linear.forward_batch(&input, &mut output, 2);
+
+        // Sample 0: 1*3 + 2*4 + 10 = 21
+        // Sample 1: 1*5 + 2*6 + 10 = 27
+        assert!(approx(output[0], 21.0, 1e-5), "sample 0: {}", output[0]);
+        assert!(approx(output[1], 27.0, 1e-5), "sample 1: {}", output[1]);
+    }
+
+    #[test]
+    fn linear_forward_batch_caches_input() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let mut linear = Linear::new_orthogonal(3, 2, 1.0, &mut rng);
+        let input = vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+        let mut output = vec![0.0; 4];
+
+        linear.forward_batch(&input, &mut output, 2);
+
+        assert_eq!(linear.batch_size_cached, 2);
+        assert_eq!(linear.batch_input_cache, input);
+    }
+
+    #[test]
+    fn linear_backward_batch_finite_difference_gradient_check() {
+        // Central-difference gradient check against the analytical backward.
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut linear = Linear::new_orthogonal(3, 2, 1.0, &mut rng);
+        let input = vec![0.3, -0.4, 0.2, 0.1, 0.5, -0.7]; // 2 × 3
+
+        // Forward to populate cache
+        let mut output = vec![0.0; 4]; // 2 × 2
+        linear.forward_batch(&input, &mut output, 2);
+
+        // Analytical gradients: grad_output = all ones (sum loss)
+        let grad_output = vec![1.0f32; 4];
+        let mut grad_input_analytical = vec![0.0f32; 6];
+        linear.backward_batch(&grad_output, &mut grad_input_analytical, 2);
+
+        // Numerical gradient: ∂(sum(output))/∂input[j] for each j
+        let eps = 1e-3;
+        for s in 0..2 {
+            for j in 0..3 {
+                let mut input_plus = input.clone();
+                let mut input_minus = input.clone();
+                input_plus[s * 3 + j] += eps;
+                input_minus[s * 3 + j] -= eps;
+
+                let mut out_plus = vec![0.0; 4];
+                let mut out_minus = vec![0.0; 4];
+                linear.forward_batch(&input_plus, &mut out_plus, 2);
+                linear.forward_batch(&input_minus, &mut out_minus, 2);
+
+                let loss_plus: f32 = out_plus.iter().sum();
+                let loss_minus: f32 = out_minus.iter().sum();
+                let numerical = (loss_plus - loss_minus) / (2.0 * eps);
+
+                let analytical = grad_input_analytical[s * 3 + j];
+                assert!(approx(numerical, analytical, 5e-3),
+                    "grad mismatch at [s={}, j={}]: analytical={}, numerical={}",
+                    s, j, analytical, numerical);
+            }
+        }
+    }
+
+    #[test]
+    fn linear_zero_grad_clears_all_gradients() {
+        let mut rng = StdRng::seed_from_u64(3);
+        let mut linear = Linear::new_orthogonal(3, 2, 1.0, &mut rng);
+
+        // Populate gradients
+        linear.grad_weights.iter_mut().for_each(|v| *v = 1.0);
+        linear.grad_biases.iter_mut().for_each(|v| *v = 1.0);
+
+        linear.zero_grad();
+
+        assert!(linear.grad_weights.iter().all(|&v| v == 0.0));
+        assert!(linear.grad_biases.iter().all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn linear_weight_l2_norm_is_sqrt_of_sum_of_squares() {
+        let mut rng = StdRng::seed_from_u64(4);
+        let mut linear = Linear::new_orthogonal(2, 2, 1.0, &mut rng);
+        linear.weights = vec![3.0, 4.0, 0.0, 0.0];
+        linear.biases = vec![0.0, 0.0];
+
+        // sqrt(9 + 16 + 0 + 0) = 5
+        assert!(approx(linear.weight_l2_norm(), 5.0, 1e-6));
+    }
+
+    // ── Tanh ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn tanh_forward_into_writes_tanh_of_input() {
+        let tanh = Tanh::new();
+        let input = vec![-2.0, -1.0, 0.0, 1.0, 2.0];
+        let mut output = vec![0.0; 5];
+        tanh.forward_into(&input, &mut output);
+
+        for (i, x) in input.iter().enumerate() {
+            assert!(approx(output[i], x.tanh(), 1e-6));
+        }
+    }
+
+    #[test]
+    fn tanh_forward_into_output_saturates_in_closed_minus_one_to_one() {
+        let tanh = Tanh::new();
+        let input = vec![-100.0, -10.0, -1.0, 0.0, 1.0, 10.0, 100.0];
+        let mut output = vec![0.0; input.len()];
+        tanh.forward_into(&input, &mut output);
+        // tanh is mathematically in (-1, 1) but in f32 saturates to ±1 for
+        // inputs past ~9 — so the closed-range assertion is what holds.
+        for o in output.iter() {
+            assert!(*o >= -1.0 && *o <= 1.0, "out of range: {}", o);
+        }
+        // Sanity: mid-range inputs produce strictly-interior outputs.
+        assert!(output[3] == 0.0, "tanh(0) should be exactly 0");
+        assert!(output[2] > -1.0 && output[2] < 0.0, "tanh(-1) interior");
+        assert!(output[4] > 0.0 && output[4] < 1.0, "tanh(1) interior");
+    }
+
+    #[test]
+    fn tanh_forward_batch_caches_outputs() {
+        let mut tanh = Tanh::new();
+        let input = vec![0.5, -0.5, 0.1, -0.1]; // 2 samples × 2 dims
+        let mut output = vec![0.0; 4];
+        tanh.forward_batch(&input, &mut output, 2, 2);
+
+        for (i, x) in input.iter().enumerate() {
+            assert!(approx(tanh.batch_cache()[i], x.tanh(), 1e-6));
+        }
+    }
+
+    #[test]
+    fn tanh_backward_batch_finite_difference_check() {
+        // Check ∂tanh/∂x = 1 - tanh(x)² against numerical estimate.
+        let mut tanh = Tanh::new();
+        let input = vec![0.3, -0.4, 0.2, 0.1];
+        let mut output = vec![0.0; 4];
+        tanh.forward_batch(&input, &mut output, 2, 2);
+
+        let grad_output = vec![1.0, 1.0, 1.0, 1.0];
+        let mut grad_input_analytical = vec![0.0; 4];
+        tanh.backward_batch(&grad_output, &mut grad_input_analytical, 2, 2);
+
+        for (i, x) in input.iter().enumerate() {
+            let expected = 1.0 - x.tanh().powi(2); // analytical derivative
+            assert!(approx(grad_input_analytical[i], expected, 1e-5),
+                "grad at i={}: analytical={}, expected={}",
+                i, grad_input_analytical[i], expected);
+        }
+    }
+}

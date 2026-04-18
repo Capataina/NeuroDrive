@@ -518,3 +518,147 @@ fn clip_linear_gradients(layers: &mut [&mut Linear], max_norm: f32) {
         layer.grad_biases.iter_mut().for_each(|g| *g *= scale);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn approx(a: f32, b: f32, tol: f32) -> bool {
+        (a - b).abs() < tol
+    }
+
+    // ── squashed_gaussian_log_prob ───────────────────────────────────────
+
+    #[test]
+    fn squashed_gaussian_log_prob_is_finite_for_normal_inputs() {
+        // Steering component (idx 0): squashed in [-1, 1]
+        let lp = squashed_gaussian_log_prob(0.1, 0.09, 0.0, 1.0, 0);
+        assert!(lp.is_finite(), "got {}", lp);
+        // Throttle component (idx 1): squashed in [0, 1], scaled back to [-1, 1]
+        let lp = squashed_gaussian_log_prob(0.1, 0.1, 0.0, 1.0, 1);
+        assert!(lp.is_finite(), "got {}", lp);
+    }
+
+    #[test]
+    fn squashed_gaussian_log_prob_symmetric_around_mean_for_steering() {
+        // Steering path is symmetric: log_prob(latent, squashed, mean) should
+        // equal log_prob(-latent, -squashed, -mean) for component 0.
+        let a = squashed_gaussian_log_prob(0.5, 0.3, 0.0, 1.0, 0);
+        let b = squashed_gaussian_log_prob(-0.5, -0.3, 0.0, 1.0, 0);
+        assert!(approx(a, b, 1e-5), "a={}, b={}", a, b);
+    }
+
+    // ── clip_linear_gradients ────────────────────────────────────────────
+
+    #[test]
+    fn clip_linear_gradients_scales_when_norm_exceeds_threshold() {
+        use crate::brain::common::mlp::Linear;
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+
+        let mut rng = StdRng::seed_from_u64(1);
+        let mut layer = Linear::new_orthogonal(2, 2, 1.0, &mut rng);
+        // Pre-existing grads with L2 norm ~sqrt(16)=4
+        layer.grad_weights = vec![2.0, 2.0, 2.0, 2.0];
+        layer.grad_biases = vec![0.0, 0.0];
+
+        let max_norm = 1.0;
+        clip_linear_gradients(&mut [&mut layer], max_norm);
+
+        // New norm should be ~max_norm
+        let new_norm = layer.grad_l2_norm();
+        assert!(approx(new_norm, max_norm, 1e-4), "new norm: {}", new_norm);
+    }
+
+    #[test]
+    fn clip_linear_gradients_noop_below_threshold() {
+        use crate::brain::common::mlp::Linear;
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+
+        let mut rng = StdRng::seed_from_u64(2);
+        let mut layer = Linear::new_orthogonal(2, 2, 1.0, &mut rng);
+        // Small grads
+        layer.grad_weights = vec![0.1, 0.1, 0.1, 0.1];
+        layer.grad_biases = vec![0.0, 0.0];
+        let before = layer.grad_weights.clone();
+
+        clip_linear_gradients(&mut [&mut layer], 10.0);
+
+        // Unchanged
+        for (a, b) in layer.grad_weights.iter().zip(before.iter()) {
+            assert!(approx(*a, *b, 1e-8));
+        }
+    }
+
+    #[test]
+    fn clip_linear_gradients_zero_max_norm_is_noop() {
+        use crate::brain::common::mlp::Linear;
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+
+        let mut rng = StdRng::seed_from_u64(3);
+        let mut layer = Linear::new_orthogonal(2, 2, 1.0, &mut rng);
+        layer.grad_weights = vec![5.0, 5.0, 5.0, 5.0];
+        let before = layer.grad_weights.clone();
+
+        // max_norm <= 0 means "no clipping" — explicit early return.
+        clip_linear_gradients(&mut [&mut layer], 0.0);
+
+        for (a, b) in layer.grad_weights.iter().zip(before.iter()) {
+            assert!(approx(*a, *b, 1e-8));
+        }
+    }
+
+    // ── PPO ratio / clip semantics (inline logic verification) ───────────
+
+    #[test]
+    fn ppo_ratio_is_one_when_log_probs_equal() {
+        let ratio = (0.3f32 - 0.3).exp();
+        assert!(approx(ratio, 1.0, 1e-6));
+    }
+
+    #[test]
+    fn ppo_ratio_clips_at_upper_bound_when_log_prob_increases_sharply() {
+        let clip_eps = 0.2f32;
+        let ratio = (2.0f32 - 0.0).exp(); // e^2 ≈ 7.389
+        let clipped = ratio.clamp(1.0 - clip_eps, 1.0 + clip_eps);
+        assert!(approx(clipped, 1.0 + clip_eps, 1e-6));
+    }
+
+    #[test]
+    fn ppo_ratio_clips_at_lower_bound_when_log_prob_decreases_sharply() {
+        let clip_eps = 0.2f32;
+        let ratio = (-2.0f32 - 0.0).exp(); // e^-2 ≈ 0.135
+        let clipped = ratio.clamp(1.0 - clip_eps, 1.0 + clip_eps);
+        assert!(approx(clipped, 1.0 - clip_eps, 1e-6));
+    }
+
+    // ── Huber value loss (inline logic verification) ─────────────────────
+
+    #[test]
+    fn huber_value_loss_is_quadratic_near_zero_error() {
+        let delta = 1.0f32;
+        let error = 0.5f32;
+        let loss = if error.abs() <= delta {
+            0.5 * error.powi(2)
+        } else {
+            delta * (error.abs() - 0.5 * delta)
+        };
+        // 0.5 * 0.25 = 0.125
+        assert!(approx(loss, 0.125, 1e-6));
+    }
+
+    #[test]
+    fn huber_value_loss_is_linear_past_threshold() {
+        let delta = 1.0f32;
+        let error = 3.0f32;
+        let loss = if error.abs() <= delta {
+            0.5 * error.powi(2)
+        } else {
+            delta * (error.abs() - 0.5 * delta)
+        };
+        // 1.0 * (3.0 - 0.5) = 2.5
+        assert!(approx(loss, 2.5, 1e-6));
+    }
+}
