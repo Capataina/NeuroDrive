@@ -6,6 +6,14 @@ edition = "2024"
 [features]
 profiling = []
 
+[lib]
+name = "neurodrive"
+path = "src/lib.rs"
+
+[[bin]]
+name = "NeuroDrive"
+path = "src/main.rs"
+
 [dependencies]
 bevy = "0.18.0"
 rand = "0.10.0"

@@ -30,9 +30,21 @@ pub struct EpisodeConfig {
     pub centreline_reward_coef: f32,
     /// Maximum lateral offset for centreline reward (reward reaches 0 at this distance).
     pub centreline_reward_max_distance: f32,
-    /// Small per-tick time penalty to discourage stalling.
+    /// Per-tick time penalty.
+    ///
+    /// **Policy:** keep at `0.0`. See `context/notes/reward-and-entertainment.md`
+    /// — the entertainment-first reward structure is velocity-projection plus
+    /// centreline proximity only. A per-tick penalty is the symmetric failure
+    /// mode of a survival bonus: it incentivises fast crashing when progress
+    /// gain is marginal, which the velocity-projection reward already handles
+    /// implicitly (no drive → no reward → no optimum in standing still).
     pub time_penalty_per_tick: f32,
     /// Crash penalty applied once on crash episode end.
+    ///
+    /// **Policy:** keep at `0.0`. See `context/notes/reward-and-entertainment.md`
+    /// — non-zero crash penalties produce "stay still / brake constantly"
+    /// policies and are incompatible with the entertainment-first reward
+    /// philosophy. Episode termination is the cost; no explicit penalty.
     pub crash_penalty: f32,
     /// Number of episodes used for moving averages.
     pub moving_average_window: usize,
@@ -46,7 +58,7 @@ impl Default for EpisodeConfig {
             speed_reward_reference: 200.0,
             centreline_reward_coef: 0.3,
             centreline_reward_max_distance: 50.0,
-            time_penalty_per_tick: -0.005,
+            time_penalty_per_tick: 0.0,
             crash_penalty: 0.0,
             moving_average_window: 20,
         }

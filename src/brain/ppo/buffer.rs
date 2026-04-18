@@ -2,6 +2,17 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
+/// Runtime scratch — grouped indices-by-env_id used inside `compute_gae_per_env`.
+/// Held on the buffer so per-call allocations are avoided on the hot
+/// prepare path; `std::mem::take` in `ppo_prepare_update` rotates it into
+/// the frozen buffer, which then drops at the end of the update sequence.
+#[derive(Clone, Debug, Default)]
+pub struct EnvGrouping {
+    /// Indexed by `env_id as usize`. Each inner `Vec` lists buffer positions
+    /// where that env contributed a transition, in insertion order.
+    buckets: Vec<Vec<usize>>,
+}
+
 /// Trainer-wide rollout buffer that collects transitions from all environment
 /// instances. Each transition is tagged with its source `env_id` so GAE can
 /// be computed per-env without cross-env value leakage.
@@ -23,6 +34,8 @@ pub struct TrainerRolloutBuffer {
     pub values: Vec<f32>,
     pub dones: Vec<bool>,
     pub env_ids: Vec<u32>,
+    /// Scratch for per-env index grouping during GAE; reused across calls.
+    env_grouping: EnvGrouping,
 }
 
 impl Default for TrainerRolloutBuffer {
@@ -39,6 +52,7 @@ impl Default for TrainerRolloutBuffer {
             values: Vec::new(),
             dones: Vec::new(),
             env_ids: Vec::new(),
+            env_grouping: EnvGrouping::default(),
         }
     }
 }
@@ -108,8 +122,13 @@ impl TrainerRolloutBuffer {
     /// buffer. Each env's transitions are grouped and GAE is computed within
     /// that group independently. Advantages are returned un-normalised;
     /// normalisation happens per-minibatch in the update loop.
+    ///
+    /// Uses `self.env_grouping` as reusable scratch — `env_id`s are dense
+    /// small integers assigned by the trainer, so indexing a `Vec` by
+    /// `env_id as usize` avoids the per-call `HashMap` allocation plus its
+    /// non-deterministic iteration order.
     pub fn compute_gae_per_env(
-        &self,
+        &mut self,
         bootstrap_values: &HashMap<u32, f32>,
         gamma: f32,
         lambda: f32,
@@ -118,15 +137,33 @@ impl TrainerRolloutBuffer {
         let mut advantages = vec![0.0; n];
         let mut returns = vec![0.0; n];
 
-        // Group buffer indices by env_id, preserving insertion order
-        let mut env_indices: HashMap<u32, Vec<usize>> = HashMap::new();
-        for (i, &eid) in self.env_ids.iter().enumerate().take(n) {
-            env_indices.entry(eid).or_default().push(i);
+        if n == 0 {
+            return (advantages, returns);
         }
 
-        // Compute GAE independently within each env's transition sequence
-        for (eid, indices) in &env_indices {
-            let bootstrap = bootstrap_values.get(eid).copied().unwrap_or(0.0);
+        // Size buckets to `max(env_id) + 1`; reuse capacity across calls.
+        let max_env_id = self.env_ids.iter().take(n).copied().max().unwrap_or(0) as usize;
+        let needed = max_env_id + 1;
+        let buckets = &mut self.env_grouping.buckets;
+        if buckets.len() < needed {
+            buckets.resize_with(needed, Vec::new);
+        }
+        for bucket in buckets.iter_mut().take(needed) {
+            bucket.clear();
+        }
+
+        // Group buffer indices by env_id, preserving insertion order.
+        for (i, &eid) in self.env_ids.iter().enumerate().take(n) {
+            buckets[eid as usize].push(i);
+        }
+
+        // Compute GAE independently within each env's transition sequence.
+        // Iteration order over envs is deterministic (ascending env_id).
+        for (eid, indices) in buckets.iter().enumerate().take(needed) {
+            if indices.is_empty() {
+                continue;
+            }
+            let bootstrap = bootstrap_values.get(&(eid as u32)).copied().unwrap_or(0.0);
             let mut gae = 0.0;
 
             for (pos, &t) in indices.iter().enumerate().rev() {

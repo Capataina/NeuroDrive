@@ -296,8 +296,18 @@ fn traverse_cells(
     let mut cells: Vec<(usize, usize)> = vec![start_cell];
     let mut dirs: Vec<GridDir> = Vec::new();
 
-    let mut visited = std::collections::HashSet::<(usize, usize)>::new();
-    visited.insert(start_cell);
+    // Debug-only safety net. `choose_next_dir` rejects the only path by which
+    // a cell could be revisited on a valid grid (`AmbiguousBranch`), and the
+    // loop terminates on the closing-back-to-start condition. The visited-set
+    // check is therefore structurally unreachable on any well-formed track —
+    // gated behind `debug_assertions` so release builds pay nothing for it.
+    // `NotClosedLoop` is retained as an error variant for the doc contract.
+    #[cfg(debug_assertions)]
+    let mut visited = {
+        let mut set = std::collections::HashSet::<(usize, usize)>::new();
+        set.insert(start_cell);
+        set
+    };
 
     let mut current = start_cell;
     let mut incoming = start_dir.opposite();
@@ -320,6 +330,7 @@ fn traverse_cells(
             break;
         }
 
+        #[cfg(debug_assertions)]
         if !visited.insert(next) {
             return Err(CenterlineBuildError::NotClosedLoop);
         }

@@ -142,27 +142,21 @@ pub fn ppo_process_chunk(
     let obs_dim = brain.model.scratch.obs_dim;
     let act_dim = brain.model.scratch.act_dim;
 
-    // ── Stack observations into a pre-allocated scratch buffer ──────
+    // ── Stack observations into the pre-allocated input scratch ────
+    // `batch_io` is a sibling field of `scratch` on `ActorCritic`, so Rust's
+    // disjoint-field borrow inference lets `forward_batch` mutably borrow
+    // `scratch` while simultaneously reading `batch_io.obs_batch`. No
+    // raw-pointer aliasing is required.
     {
-        let obs_batch = &mut brain.model.scratch.obs_batch;
+        let obs_batch = &mut brain.model.batch_io.obs_batch;
         for (s, &idx) in chunk_indices.iter().enumerate() {
             let src = &buffer.states[idx * obs_dim..(idx + 1) * obs_dim];
             obs_batch[s * obs_dim..(s + 1) * obs_dim].copy_from_slice(src);
         }
     }
-    // Copy to a local slice reference for forward_batch (which needs &mut self).
-    // obs_batch is a separate field from the forward/backward intermediates,
-    // but Rust's borrow checker sees &mut self — so we pass a slice from scratch
-    // before the mutable call by copying the pointer.
-    let obs_slice_len = chunk_size * obs_dim;
-    let obs_batch_ptr = brain.model.scratch.obs_batch.as_ptr();
-    // SAFETY: obs_batch is not modified during forward_batch (it only reads from
-    // the input slice and writes to separate scratch fields). We create a shared
-    // slice from the pointer for the duration of the call.
-    let obs_batch_slice = unsafe { std::slice::from_raw_parts(obs_batch_ptr, obs_slice_len) };
 
     // ── Batched forward pass ────────────────────────────────────────
-    brain.model.forward_batch(obs_batch_slice, chunk_size);
+    brain.model.forward_batch(chunk_size);
 
     // ── Collect tanh saturation stats from batch caches ─────────────
     collect_saturated_slice(
@@ -275,24 +269,17 @@ pub fn ppo_process_chunk(
     }
 
     // ── Batched backward passes ─────────────────────────────────────
-    // Copy gradient seeds into dedicated scratch buffers so we can pass
-    // shared slices to backward_batch while it mutably borrows other
-    // scratch fields. The seed buffers are separate from the backward
-    // intermediates, avoiding aliasing.
-    brain.model.scratch.grad_seed_values[..chunk_size]
+    // Copy gradient seeds from the forward `scratch` buffers into the
+    // sibling `batch_io` seed buffers. After this copy, `batch_io` owns
+    // the inputs for the backward pass, and `scratch` can be borrowed
+    // mutably for the intermediate writes — no raw-pointer aliasing.
+    brain.model.batch_io.grad_seed_values[..chunk_size]
         .copy_from_slice(&brain.model.scratch.gc_out[..chunk_size]);
-    brain.model.scratch.grad_seed_means[..chunk_size * act_dim]
+    brain.model.batch_io.grad_seed_means[..chunk_size * act_dim]
         .copy_from_slice(&brain.model.scratch.ga_out[..chunk_size * act_dim]);
 
-    let gv_ptr = brain.model.scratch.grad_seed_values.as_ptr();
-    let gm_ptr = brain.model.scratch.grad_seed_means.as_ptr();
-    // SAFETY: grad_seed_values/means are not written during backward_batch —
-    // backward only writes to the gc_*/ga_* intermediates and grad_weights/biases.
-    let gv = unsafe { std::slice::from_raw_parts(gv_ptr, chunk_size) };
-    let gm = unsafe { std::slice::from_raw_parts(gm_ptr, chunk_size * act_dim) };
-
-    brain.model.backward_batch_critic(gv, chunk_size);
-    brain.model.backward_batch_actor(gm, chunk_size);
+    brain.model.backward_batch_critic(chunk_size);
+    brain.model.backward_batch_actor(chunk_size);
 
     prepared.sample_offset = end;
     end >= batch_size

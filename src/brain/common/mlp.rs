@@ -41,20 +41,20 @@ impl Linear {
 
     // ── Single-sample forward / backward ─────────────────────────────
 
-    /// Single-sample forward: output[i] = bias[i] + Σ_j weights[i,j] * input[j].
-    /// Caches input for backward. Returns a new Vec (allocation is acceptable
-    /// for the low-frequency action-selection path).
-    pub fn forward(&mut self, input: &[f32]) -> Vec<f32> {
-        self.input_cache.copy_from_slice(input);
-        let mut output = vec![0.0; self.out_dim];
+    /// Single-sample forward, writing into a caller-supplied `output` slice.
+    /// `output.len()` must be `>= self.out_dim`. Allocation-free on the hot
+    /// path — see `ActorCritic::forward_actor` / `forward_critic` / `forward`
+    /// for the scratch-buffer strategy.
+    pub fn forward_into(&mut self, input: &[f32], output: &mut [f32]) {
+        debug_assert!(input.len() >= self.in_dim);
+        debug_assert!(output.len() >= self.out_dim);
+        self.input_cache.copy_from_slice(&input[..self.in_dim]);
         for i in 0..self.out_dim {
             let row = &self.weights[i * self.in_dim..(i + 1) * self.in_dim];
             output[i] = self.biases[i]
                 + row.iter().zip(input.iter()).map(|(w, x)| w * x).sum::<f32>();
         }
-        output
     }
-
 
     // ── Batch forward / backward ─────────────────────────────────────
 
@@ -148,8 +148,6 @@ impl Linear {
 /// Tanh activation with cached output for backward pass.
 #[derive(Clone, Debug)]
 pub struct Tanh {
-    /// Output cache for single-sample backward.
-    pub output_cache: Option<Vec<f32>>,
     /// Output cache for batch backward: row-major [batch × dim].
     batch_output_cache: Vec<f32>,
     batch_size_cached: usize,
@@ -159,7 +157,6 @@ pub struct Tanh {
 impl Tanh {
     pub fn new() -> Self {
         Self {
-            output_cache: None,
             batch_output_cache: Vec::new(),
             batch_size_cached: 0,
             batch_dim_cached: 0,
@@ -168,12 +165,18 @@ impl Tanh {
 
     // ── Single ───────────────────────────────────────────────────────
 
-    pub fn forward(&mut self, input: &[f32]) -> Vec<f32> {
-        let output: Vec<f32> = input.iter().map(|&x| x.tanh()).collect();
-        self.output_cache = Some(output);
-        self.output_cache.as_ref().unwrap().clone()
+    /// Single-sample forward, writing into a caller-supplied `output` slice.
+    /// Allocation-free — the hot path passes a reusable scratch buffer.
+    ///
+    /// There is no single-sample backward pass in the PPO training code
+    /// (all gradients flow through `backward_batch`), so no output cache
+    /// is maintained on this path.
+    pub fn forward_into(&self, input: &[f32], output: &mut [f32]) {
+        debug_assert!(output.len() >= input.len());
+        for i in 0..input.len() {
+            output[i] = input[i].tanh();
+        }
     }
-
 
     /// Returns a reference to the batch output cache (for saturation diagnostics).
     pub fn batch_cache(&self) -> &[f32] {
