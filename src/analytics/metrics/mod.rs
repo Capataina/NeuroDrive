@@ -2,6 +2,7 @@ pub mod chunking;
 pub mod consistency;
 pub mod diagnostics;
 pub mod phases;
+pub mod pre_crash;
 pub mod sectors;
 pub mod sparkline;
 pub mod stats;

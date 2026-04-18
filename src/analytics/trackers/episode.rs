@@ -345,6 +345,14 @@ pub fn episode_tracker_system(
                         saturated_fraction: layer.saturated_fraction,
                     })
                     .collect(),
+                return_min: ppo_stats.return_min,
+                return_mean: ppo_stats.return_mean,
+                return_max: ppo_stats.return_max,
+                return_std: ppo_stats.return_std,
+                value_norm_mu: ppo_stats.value_norm_mu,
+                value_norm_sigma: ppo_stats.value_norm_sigma,
+                epochs_completed: ppo_stats.epochs_completed,
+                early_stopped: ppo_stats.early_stopped,
             });
         }
     }

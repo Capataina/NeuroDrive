@@ -118,7 +118,7 @@ pub struct PpoLayerHealth {
 }
 
 /// Aggregated learning-health metrics for the most recent completed PPO update.
-#[derive(Resource, Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Resource, Clone, Debug, Serialize, Deserialize)]
 pub struct PpoTrainingStats {
     pub last_completed_update: u64,
     pub batch_size: usize,
@@ -134,6 +134,51 @@ pub struct PpoTrainingStats {
     pub clip_fraction: f32,
     pub approx_kl: f32,
     pub layer_health: Vec<PpoLayerHealth>,
+
+    // ── Round-2 diagnostics (2026-04-19) ──
+    /// Minimum / mean / max / std of the returns seen by this update.
+    pub return_min: f32,
+    pub return_mean: f32,
+    pub return_max: f32,
+    pub return_std: f32,
+    /// PopArt running mean of returns (identity when disabled).
+    pub value_norm_mu: f32,
+    /// PopArt running std of returns (1.0 when disabled).
+    pub value_norm_sigma: f32,
+    /// PPO epochs that actually ran for this update (may be less than
+    /// `ppo_epochs` when target-KL early-stop triggers).
+    pub epochs_completed: u32,
+    /// True if target-KL early-stop fired on this update.
+    pub early_stopped: bool,
+}
+
+impl Default for PpoTrainingStats {
+    fn default() -> Self {
+        Self {
+            last_completed_update: 0,
+            batch_size: 0,
+            policy_loss: 0.0,
+            value_loss: 0.0,
+            policy_entropy: 0.0,
+            explained_variance: 0.0,
+            steering_mean: 0.0,
+            steering_std: 0.0,
+            throttle_mean: 0.0,
+            throttle_std: 0.0,
+            clamped_action_fraction: 0.0,
+            clip_fraction: 0.0,
+            approx_kl: 0.0,
+            layer_health: Vec::new(),
+            return_min: 0.0,
+            return_mean: 0.0,
+            return_max: 0.0,
+            return_std: 0.0,
+            value_norm_mu: 0.0,
+            value_norm_sigma: 1.0,
+            epochs_completed: 0,
+            early_stopped: false,
+        }
+    }
 }
 
 /// Holds an in-progress PPO update that is amortised across frames.

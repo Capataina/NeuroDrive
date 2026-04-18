@@ -197,6 +197,10 @@ pub struct PpoLayerRecord {
 }
 
 /// Exported analytics snapshot for one completed PPO update.
+///
+/// The round-2 fields (`return_*`, `value_norm_*`, `epochs_completed`,
+/// `early_stopped`) are defaulted on deserialisation so older JSON exports
+/// can still be read after the schema was extended in 2026-04-19.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PpoUpdateRecord {
     pub update_index: u64,
@@ -213,6 +217,40 @@ pub struct PpoUpdateRecord {
     pub clip_fraction: f32,
     pub approx_kl: f32,
     pub layer_health: Vec<PpoLayerRecord>,
+
+    // ── Round-2 diagnostics (2026-04-19) ──
+    /// Minimum of the GAE returns seen in this update's training chunk.
+    #[serde(default)]
+    pub return_min: f32,
+    /// Mean of the GAE returns seen in this update's training chunk.
+    #[serde(default)]
+    pub return_mean: f32,
+    /// Maximum of the GAE returns seen in this update's training chunk.
+    #[serde(default)]
+    pub return_max: f32,
+    /// Standard deviation of the GAE returns in this update's training chunk.
+    #[serde(default)]
+    pub return_std: f32,
+    /// PopArt running-mean of returns after this update. `0.0` when PopArt is
+    /// disabled; tracks the critic's value-target distribution otherwise.
+    #[serde(default)]
+    pub value_norm_mu: f32,
+    /// PopArt running-std of returns after this update. `1.0` when PopArt is
+    /// disabled; with PopArt this should track the growth of return magnitude.
+    #[serde(default = "one_f32")]
+    pub value_norm_sigma: f32,
+    /// Number of PPO epochs that actually ran for this update. Equals
+    /// `ppo_epochs` when target-KL early-stop is disabled or never triggered;
+    /// smaller when KL exceeded the configured threshold.
+    #[serde(default)]
+    pub epochs_completed: u32,
+    /// True if the target-KL early-stop fired on this update.
+    #[serde(default)]
+    pub early_stopped: bool,
+}
+
+fn one_f32() -> f32 {
+    1.0
 }
 
 /// Exported run-level analytics data.

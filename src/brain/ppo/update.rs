@@ -357,6 +357,25 @@ pub fn ppo_finish_epoch(
             acc.clamped_count as f32 / (batch_size.saturating_mul(2) as f32).max(1.0);
         stats.clip_fraction = acc.clip_count as f32 / batch_size_f32.max(1.0);
         stats.approx_kl = acc.approx_kl_sum / batch_size_f32.max(1.0);
+
+        // Round-2 diagnostics: capture the return distribution seen by this
+        // update. Round 2 research uses this to verify PopArt (when enabled)
+        // is tracking the returns as they grow.
+        let (r_min, r_mean, r_max, r_std) = return_distribution(&prepared.returns);
+        stats.return_min = r_min;
+        stats.return_mean = r_mean;
+        stats.return_max = r_max;
+        stats.return_std = r_std;
+        // Epochs-completed / early-stop flag: without target-KL early stop,
+        // every scheduled epoch runs to completion. When target-KL lands, the
+        // caller (`ppo_epoch_system`) will overwrite these fields.
+        stats.epochs_completed = brain.config.ppo_epochs as u32;
+        stats.early_stopped = false;
+        // `value_norm_*` are overwritten by PopArt when it lands; defaults
+        // (mu=0, sigma=1) carry through here so the analytics schema is
+        // fully populated.
+        stats.value_norm_mu = 0.0;
+        stats.value_norm_sigma = 1.0;
         stats.layer_health = vec![
             PpoLayerHealth {
                 layer_name: "actor_fc1".to_string(),
@@ -439,6 +458,27 @@ fn std_from_sums(sum: f32, sumsq: f32, count: usize) -> f32 {
     let n = count as f32;
     let mean = sum / n;
     ((sumsq / n) - mean * mean).max(0.0).sqrt()
+}
+
+/// Returns `(min, mean, max, std)` of `values`. When `values` is empty, all
+/// fields are zero. Used for round-2 analytics to surface the return-scale
+/// trajectory so PopArt adaptation can be audited.
+fn return_distribution(values: &[f32]) -> (f32, f32, f32, f32) {
+    if values.is_empty() {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    let n = values.len() as f32;
+    let mut min_v = f32::INFINITY;
+    let mut max_v = f32::NEG_INFINITY;
+    let mut sum = 0.0f32;
+    for &v in values {
+        if v < min_v { min_v = v; }
+        if v > max_v { max_v = v; }
+        sum += v;
+    }
+    let mean = sum / n;
+    let var = values.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / n;
+    (min_v, mean, max_v, var.max(0.0).sqrt())
 }
 
 fn explained_variance(targets: &[f32], predictions: &[f32]) -> f32 {

@@ -178,6 +178,14 @@ mod tests {
             clip_fraction: 0.10,
             approx_kl: 0.005,
             layer_health: Vec::new(),
+            return_min: 0.0,
+            return_mean: 0.0,
+            return_max: 0.0,
+            return_std: 0.0,
+            value_norm_mu: 0.0,
+            value_norm_sigma: 1.0,
+            epochs_completed: 4,
+            early_stopped: false,
         }
     }
 

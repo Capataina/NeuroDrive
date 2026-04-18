@@ -8,6 +8,9 @@ use crate::analytics::metrics::consistency::{
 };
 use crate::analytics::metrics::diagnostics::compute_diagnostic_flags;
 use crate::analytics::metrics::phases::detect_learning_phase;
+use crate::analytics::metrics::pre_crash::{
+    PRE_CRASH_WINDOW, collect_pre_crash_profiles, summarise,
+};
 use crate::analytics::metrics::sectors::compute_sector_diagnostics;
 use crate::analytics::metrics::sparkline::{ascii_bar, heatmap_row, sparkline};
 use crate::analytics::metrics::stats::mean;
@@ -516,6 +519,429 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str, context_head
                 row.best_progress * 100.0, row.ticks, row.mean_speed, row.peak_speed,
             ));
         }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 11. Pre-Crash Forensics (round-2 diagnostic)
+    // ════════════════════════════════════════════════════════════════════
+    md.push_str("## 11. Pre-Crash Forensics\n\n");
+    md.push_str(&format!(
+        "Analyses the last {} ticks ({:.2}s at 60Hz) before each crash to \
+         distinguish **anticipation failures** (policy unaware) from \
+         **reaction failures** (policy knew but couldn't respond in time).\n\n",
+        PRE_CRASH_WINDOW,
+        PRE_CRASH_WINDOW as f32 / 60.0,
+    ));
+
+    let pre_crash_profiles = collect_pre_crash_profiles(&tracker.episode_traces);
+    if pre_crash_profiles.is_empty() {
+        md.push_str("No crash traces available (episode_traces may be empty for this run).\n\n");
+    } else {
+        let summary = summarise(&pre_crash_profiles);
+        md.push_str("| Metric | Value |\n");
+        md.push_str("|--------|-------|\n");
+        md.push_str(&format!("| Crashes analysed | {} |\n", summary.crash_count));
+        md.push_str(&format!(
+            "| Mean throttle delta (late − early half) | {:+.3} |\n",
+            summary.mean_throttle_delta,
+        ));
+        md.push_str(&format!(
+            "| Mean distance-to-wall at crash | {:.1} units |\n",
+            summary.mean_distance_to_wall,
+        ));
+        md.push_str(&format!(
+            "| Median distance-to-wall at crash | {:.1} units |\n",
+            summary.median_distance_to_wall,
+        ));
+        md.push_str(&format!(
+            "| Throttle released at least once in window | {:.0}% of crashes |\n",
+            summary.release_any_fraction * 100.0,
+        ));
+        md.push_str(&format!(
+            "| Throttle released > 0.25s before crash | {:.0}% of crashes |\n",
+            summary.release_early_fraction * 100.0,
+        ));
+        if let Some(drop) = summary.mean_value_drop {
+            md.push_str(&format!(
+                "| Mean critic-value drop (window → crash) | {:+.2} |\n",
+                drop,
+            ));
+        }
+        md.push('\n');
+
+        md.push_str("**Throttle-release latency histogram** (ticks-before-crash):\n\n");
+        md.push_str("```text\n");
+        let labels = [" 0- 5", " 5-10", "10-15", "15-20", "20-25", "25-30"];
+        let release_max = summary.release_histogram.iter().max().copied().unwrap_or(1) as f32;
+        for (label, &count) in labels.iter().zip(summary.release_histogram.iter()) {
+            md.push_str(&format!(
+                "{label}  {} {}\n",
+                ascii_bar(count as f32, release_max, BAR_WIDTH),
+                count,
+            ));
+        }
+        md.push_str("```\n\n");
+
+        md.push_str("**Distance-to-wall at crash histogram** (units):\n\n");
+        md.push_str("```text\n");
+        let dist_labels = [" 0- 5", " 5-10", "10-20", "20-40", "40-80", " 80+ "];
+        let dist_max = summary.distance_histogram.iter().max().copied().unwrap_or(1) as f32;
+        for (label, &count) in dist_labels.iter().zip(summary.distance_histogram.iter()) {
+            md.push_str(&format!(
+                "{label}  {} {}\n",
+                ascii_bar(count as f32, dist_max, BAR_WIDTH),
+                count,
+            ));
+        }
+        md.push_str("```\n\n");
+
+        let anticipatory = summary.release_early_fraction > 0.3
+            && summary.mean_throttle_delta < -0.1
+            && summary.mean_value_drop.map(|d| d > 0.0).unwrap_or(false);
+        let reactive = summary.release_any_fraction < 0.2 && summary.mean_throttle_delta > -0.05;
+        md.push_str(&format!(
+            "> **Takeaway:** {}\n\n",
+            if anticipatory {
+                "Anticipation is emerging — policy releases throttle early and critic values drop before crashes."
+            } else if reactive {
+                "Purely reactive — policy doesn't release throttle, critic doesn't anticipate."
+            } else {
+                "Mixed picture — partial anticipation but not consistent."
+            }
+        ));
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 12. Layer Health Over Training (round-2 diagnostic)
+    // ════════════════════════════════════════════════════════════════════
+    md.push_str("## 12. Layer Health Over Training\n\n");
+
+    if tracker.ppo_updates.is_empty() {
+        md.push_str("No PPO updates recorded.\n\n");
+    } else {
+        // Collect per-layer timeseries: layer name → (sat %, weight L2, grad L2) per update.
+        let mut layer_names: Vec<String> = tracker.ppo_updates.first()
+            .map(|u| u.layer_health.iter().map(|l| l.layer_name.clone()).collect())
+            .unwrap_or_default();
+        layer_names.sort();
+        layer_names.dedup();
+
+        md.push_str("**Saturation % over training** (activation layers only; `.` = no data):\n\n");
+        md.push_str("```text\n");
+        for layer_name in &layer_names {
+            let series: Vec<f32> = tracker.ppo_updates.iter()
+                .filter_map(|u| u.layer_health.iter()
+                    .find(|l| &l.layer_name == layer_name)
+                    .and_then(|l| l.saturated_fraction)
+                    .map(|f| f * 100.0))
+                .collect();
+            if !series.is_empty() {
+                md.push_str(&format!(
+                    "{:<14}  {}  latest {:.1}%\n",
+                    layer_name,
+                    sparkline(&series, SPARKLINE_WIDTH),
+                    series.last().copied().unwrap_or(0.0),
+                ));
+            }
+        }
+        md.push_str("```\n\n");
+
+        md.push_str("**Weight L2 norms over training:**\n\n");
+        md.push_str("```text\n");
+        for layer_name in &layer_names {
+            let series: Vec<f32> = tracker.ppo_updates.iter()
+                .filter_map(|u| u.layer_health.iter()
+                    .find(|l| &l.layer_name == layer_name)
+                    .map(|l| l.weight_l2_norm))
+                .collect();
+            if !series.is_empty() {
+                md.push_str(&format!(
+                    "{:<14}  {}  latest {:.2}\n",
+                    layer_name,
+                    sparkline(&series, SPARKLINE_WIDTH),
+                    series.last().copied().unwrap_or(0.0),
+                ));
+            }
+        }
+        md.push_str("```\n\n");
+
+        md.push_str("**Gradient L2 norms over training:**\n\n");
+        md.push_str("```text\n");
+        for layer_name in &layer_names {
+            let series: Vec<f32> = tracker.ppo_updates.iter()
+                .filter_map(|u| u.layer_health.iter()
+                    .find(|l| &l.layer_name == layer_name)
+                    .map(|l| l.gradient_l2_norm))
+                .collect();
+            if !series.is_empty() {
+                md.push_str(&format!(
+                    "{:<14}  {}  latest {:.4}\n",
+                    layer_name,
+                    sparkline(&series, SPARKLINE_WIDTH),
+                    series.last().copied().unwrap_or(0.0),
+                ));
+            }
+        }
+        md.push_str("```\n\n");
+
+        // Auto-generated takeaway focused on c_fc2 (the round-1 bottleneck).
+        let c_fc2_series: Vec<f32> = tracker.ppo_updates.iter()
+            .filter_map(|u| u.layer_health.iter()
+                .find(|l| l.layer_name == "critic_fc2")
+                .and_then(|l| l.saturated_fraction))
+            .collect();
+        if !c_fc2_series.is_empty() {
+            let latest_c_fc2 = c_fc2_series.last().copied().unwrap_or(0.0);
+            let trend_c_fc2 = {
+                let n = c_fc2_series.len();
+                if n < 4 { "stable" }
+                else {
+                    let early = mean(&c_fc2_series[..(n/3).max(1)].to_vec());
+                    let late = mean(&c_fc2_series[(2*n/3)..].to_vec());
+                    if late > early + 0.05 { "rising" }
+                    else if late + 0.05 < early { "falling" }
+                    else { "stable" }
+                }
+            };
+            md.push_str(&format!(
+                "> **Takeaway:** `critic_fc2` saturation latest {:.0}% (trend: {}). {}\n\n",
+                latest_c_fc2 * 100.0,
+                trend_c_fc2,
+                if latest_c_fc2 > 0.5 {
+                    "Critic hidden layer is saturated — target scale is likely the bottleneck."
+                } else if latest_c_fc2 > 0.3 {
+                    "Moderate saturation — worth watching."
+                } else {
+                    "Saturation within healthy range."
+                },
+            ));
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 13. Value Target Scale Tracker (PopArt, round-2 diagnostic)
+    // ════════════════════════════════════════════════════════════════════
+    md.push_str("## 13. Value Target Scale Tracker\n\n");
+    if tracker.ppo_updates.is_empty() {
+        md.push_str("No PPO updates recorded.\n\n");
+    } else {
+        let return_means: Vec<f32> = tracker.ppo_updates.iter().map(|u| u.return_mean).collect();
+        let return_stds: Vec<f32> = tracker.ppo_updates.iter().map(|u| u.return_std).collect();
+        let return_maxes: Vec<f32> = tracker.ppo_updates.iter().map(|u| u.return_max).collect();
+        let popart_mu_series: Vec<f32> = tracker.ppo_updates.iter().map(|u| u.value_norm_mu).collect();
+        let popart_sigma_series: Vec<f32> = tracker.ppo_updates.iter().map(|u| u.value_norm_sigma).collect();
+
+        md.push_str(&format!("**Return mean over updates:** `{}` latest {:.2}\n\n",
+            sparkline(&return_means, SPARKLINE_WIDTH),
+            return_means.last().copied().unwrap_or(0.0),
+        ));
+        md.push_str(&format!("**Return std over updates:** `{}` latest {:.2}\n\n",
+            sparkline(&return_stds, SPARKLINE_WIDTH),
+            return_stds.last().copied().unwrap_or(0.0),
+        ));
+        md.push_str(&format!("**Return max over updates:** `{}` latest {:.2}\n\n",
+            sparkline(&return_maxes, SPARKLINE_WIDTH),
+            return_maxes.last().copied().unwrap_or(0.0),
+        ));
+
+        let popart_active = popart_sigma_series.iter().any(|&s| (s - 1.0).abs() > 1e-4)
+            || popart_mu_series.iter().any(|&m| m.abs() > 1e-4);
+        if popart_active {
+            md.push_str(&format!("**PopArt µ:** `{}` latest {:.2}\n\n",
+                sparkline(&popart_mu_series, SPARKLINE_WIDTH),
+                popart_mu_series.last().copied().unwrap_or(0.0),
+            ));
+            md.push_str(&format!("**PopArt σ:** `{}` latest {:.2}\n\n",
+                sparkline(&popart_sigma_series, SPARKLINE_WIDTH),
+                popart_sigma_series.last().copied().unwrap_or(0.0),
+            ));
+
+            // Tracking check: is PopArt's µ close to the current return mean?
+            let latest_mu = popart_mu_series.last().copied().unwrap_or(0.0);
+            let latest_return_mean = return_means.last().copied().unwrap_or(0.0);
+            let mu_tracking_error = (latest_mu - latest_return_mean).abs();
+            let tracking_ok = mu_tracking_error < return_stds.last().copied().unwrap_or(1.0) * 0.5;
+            md.push_str(&format!(
+                "> **Takeaway:** PopArt active. µ tracking error = {:.2} ({}).\n\n",
+                mu_tracking_error,
+                if tracking_ok { "within 0.5σ — healthy" } else { "> 0.5σ — β may be too low" },
+            ));
+        } else {
+            let earliest_mean = return_means.first().copied().unwrap_or(0.0);
+            let latest_mean = return_means.last().copied().unwrap_or(0.0);
+            let growth = if earliest_mean.abs() > 1e-3 { latest_mean / earliest_mean } else { 0.0 };
+            md.push_str(&format!(
+                "> **Takeaway:** PopArt disabled (µ=0, σ=1 throughout). Returns grew from {:.1} to {:.1} ({:.1}× over training). Without PopArt, the critic must absorb this scale change via weight growth.\n\n",
+                earliest_mean, latest_mean, growth,
+            ));
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 14. Critic Prediction Quality (round-2 diagnostic)
+    // ════════════════════════════════════════════════════════════════════
+    md.push_str("## 14. Critic Prediction Quality\n\n");
+    if tracker.ppo_updates.is_empty() || tracker.episodes.is_empty() {
+        md.push_str("No PPO updates or episodes recorded.\n\n");
+    } else {
+        // Explained variance timeseries (already captured per update).
+        let ev_series: Vec<f32> = tracker.ppo_updates.iter().map(|u| u.explained_variance).collect();
+        md.push_str(&format!(
+            "**Explained variance over updates:** `{}` latest {:.3}\n\n",
+            sparkline(&ev_series, SPARKLINE_WIDTH),
+            ev_series.last().copied().unwrap_or(0.0),
+        ));
+
+        // Standardised residual histogram from trace data — value_prediction
+        // vs eventual return (approximated via the episode's total reward for
+        // traces that reach the end of their episode).
+        let mut residuals: Vec<f32> = Vec::new();
+        for trace in &tracker.episode_traces {
+            let total_return: f32 = trace.ticks.iter().map(|t| t.reward).sum();
+            if let Some(first) = trace.ticks.first() {
+                if let Some(predicted) = first.value_prediction {
+                    // Predicted is for "from here on" → compare to full total return.
+                    residuals.push(predicted - total_return);
+                }
+            }
+        }
+        if !residuals.is_empty() {
+            let mean_resid = residuals.iter().sum::<f32>() / residuals.len() as f32;
+            let var_resid = residuals.iter()
+                .map(|r| (r - mean_resid).powi(2))
+                .sum::<f32>() / residuals.len() as f32;
+            let std_resid = var_resid.max(1e-6).sqrt();
+            let mut buckets = [0u32; 7];
+            for r in &residuals {
+                let z = (r - mean_resid) / std_resid;
+                let b = if z < -2.0 { 0 }
+                    else if z < -1.0 { 1 }
+                    else if z < -0.5 { 2 }
+                    else if z < 0.5 { 3 }
+                    else if z < 1.0 { 4 }
+                    else if z < 2.0 { 5 }
+                    else { 6 };
+                buckets[b] = buckets[b].saturating_add(1);
+            }
+            let labels = [" < -2σ ", "-2 — -1", "-1 — -½", "-½ — +½", "+½ — +1 ", "+1 — +2 ", "  > +2σ"];
+            let max_count = buckets.iter().max().copied().unwrap_or(1) as f32;
+
+            md.push_str("**Standardised prediction residuals** (episode-start value vs actual return):\n\n");
+            md.push_str("```text\n");
+            for (label, &count) in labels.iter().zip(buckets.iter()) {
+                md.push_str(&format!(
+                    "{label}  {} {}\n",
+                    ascii_bar(count as f32, max_count, BAR_WIDTH),
+                    count,
+                ));
+            }
+            md.push_str(&format!(
+                "\nresidual μ = {:+.2}    σ = {:.2}    n = {}\n",
+                mean_resid, std_resid, residuals.len(),
+            ));
+            md.push_str("```\n\n");
+
+            let calibration_ok = mean_resid.abs() < 0.2 * std_resid;
+            md.push_str(&format!(
+                "> **Takeaway:** {}\n\n",
+                if calibration_ok {
+                    "Critic is well-calibrated — residual mean near zero."
+                } else if mean_resid > 0.0 {
+                    "Critic is biased HIGH — predicts higher values than actual returns deliver."
+                } else {
+                    "Critic is biased LOW — predicts lower values than actual returns deliver."
+                },
+            ));
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 15. Fleet Variance (round-2 diagnostic)
+    // ════════════════════════════════════════════════════════════════════
+    md.push_str("## 15. Fleet Variance\n\n");
+    if tracker.episodes.is_empty() {
+        md.push_str("No episodes recorded.\n\n");
+    } else {
+        // Aggregate per-car.
+        use std::collections::HashMap;
+        struct FleetStats {
+            episodes: u32,
+            max_progress: f32,
+            mean_life_s: f32,
+            mean_reward: f32,
+            crash_count: u32,
+        }
+        let mut fleet: HashMap<u32, FleetStats> = HashMap::new();
+        for ep in &tracker.episodes {
+            let entry = fleet.entry(ep.env_id).or_insert(FleetStats {
+                episodes: 0,
+                max_progress: 0.0,
+                mean_life_s: 0.0,
+                mean_reward: 0.0,
+                crash_count: 0,
+            });
+            entry.episodes = entry.episodes.saturating_add(1);
+            if ep.progress > entry.max_progress {
+                entry.max_progress = ep.progress;
+            }
+            entry.mean_life_s += ep.ticks as f32 / 60.0;
+            entry.mean_reward += ep.reward;
+            if ep.end_reason.contains("Crash") {
+                entry.crash_count = entry.crash_count.saturating_add(1);
+            }
+        }
+        // Finalise means.
+        for entry in fleet.values_mut() {
+            let n = entry.episodes as f32;
+            if n > 0.0 {
+                entry.mean_life_s /= n;
+                entry.mean_reward /= n;
+            }
+        }
+        let mut fleet_vec: Vec<(u32, FleetStats)> = fleet.into_iter().collect();
+        fleet_vec.sort_by_key(|(env_id, _)| *env_id);
+
+        md.push_str("| Car | Episodes | Max Progress | Mean Life (s) | Mean Reward | Crashes | Crash % |\n");
+        md.push_str("|----:|---------:|-------------:|--------------:|------------:|--------:|--------:|\n");
+        for (env_id, stats) in &fleet_vec {
+            let crash_pct = if stats.episodes > 0 {
+                stats.crash_count as f32 / stats.episodes as f32 * 100.0
+            } else { 0.0 };
+            md.push_str(&format!(
+                "| {} | {} | {:.1}% | {:.2} | {:.2} | {} | {:.0}% |\n",
+                env_id, stats.episodes, stats.max_progress * 100.0,
+                stats.mean_life_s, stats.mean_reward, stats.crash_count, crash_pct,
+            ));
+        }
+        md.push('\n');
+
+        // Convergence check — is the fleet clustered on similar max-progress?
+        let progresses: Vec<f32> = fleet_vec.iter().map(|(_, s)| s.max_progress).collect();
+        let cars_over_50 = progresses.iter().filter(|&&p| p > 0.5).count();
+        let cars_over_100 = progresses.iter().filter(|&&p| p >= 1.0).count();
+        let mean_max_progress = if progresses.is_empty() { 0.0 }
+            else { progresses.iter().sum::<f32>() / progresses.len() as f32 };
+        let progress_spread = if progresses.len() >= 2 {
+            let mut sorted = progresses.clone();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            sorted.last().copied().unwrap_or(0.0) - sorted.first().copied().unwrap_or(0.0)
+        } else { 0.0 };
+
+        md.push_str(&format!(
+            "> **Takeaway:** {} of {} cars have reached >50% progress; {} reached full loop. Mean best progress = {:.1}%, fleet spread = {:.1}%. {}\n\n",
+            cars_over_50, fleet_vec.len(), cars_over_100,
+            mean_max_progress * 100.0,
+            progress_spread * 100.0,
+            if cars_over_50 == fleet_vec.len() {
+                "Fleet has fully converged."
+            } else if cars_over_50 >= fleet_vec.len() * 3 / 4 {
+                "Fleet is mostly converging — stragglers remain."
+            } else if cars_over_50 <= 1 {
+                "Only one or no cars lead — the 'lucky car' pattern. Aggregate metrics are dominated by a small fraction of the fleet."
+            } else {
+                "Fleet is partially converging."
+            },
+        ));
     }
 
     let _ = fs::write(filepath, md);
