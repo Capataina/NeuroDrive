@@ -60,13 +60,17 @@ NeuroDrive/
 │   │   ├── plugin.rs                    # BrainPlugin: AgentMode toggle (F4), PPO buffer reset on switch
 │   │   ├── types.rs                     # AgentMode enum, PolicyOutput component
 │   │   ├── ppo/
-│   │   │   ├── mod.rs                   # PpoBrain, PpoPlugin, PpoUpdateState, PolicyOutput component, act/collect/epoch/flush systems
-│   │   │   ├── model.rs                 # ActorCritic: asymmetric MLP (actor 2×64, critic 2×128), BatchScratch pre-allocation, forward_actor/forward_critic/forward
-│   │   │   ├── buffer.rs               # TrainerRolloutBuffer: env_id-tagged transitions + old_log_probs, per-env GAE
+│   │   │   ├── mod.rs                   # PpoBrain (with act_entity_buffer scratch), PpoPlugin, PpoUpdateState, ppo_act_all_cars_system (3-pass batched), collect/epoch/flush systems
+│   │   │   ├── model.rs                 # ActorCritic: asymmetric MLP (actor 2×64, critic 2×128), BatchIo + BatchScratch + SampleScratch (critic-only), forward_actor_batch/forward_critic_batch/forward_critic
+│   │   │   ├── buffer.rs               # TrainerRolloutBuffer: env_id-tagged transitions + old_log_probs, per-env GAE via reusable EnvGrouping (Vec-indexed by env_id, deterministic iteration)
 │   │   │   └── update.rs               # PreparedUpdate, ppo_process_chunk/ppo_finish_epoch, PPO clipped surrogate
 │   │   ├── common/
 │   │   │   ├── mod.rs
-│   │   │   ├── mlp.rs                   # Handwritten Linear (flat weight storage), Tanh, orthogonal init, forward/backward + batched variants
+│   │   │   ├── gemm_backend.rs          # GEMM dispatch module — selects scalar/matrixmultiply/accelerate at compile time; backend_name() for profiling reports
+│   │   │   ├── gemm_scalar.rs           # Naive nested-loop reference backend (force-scalar)
+│   │   │   ├── gemm_matrixmultiply.rs   # Pure-Rust BLIS-style NEON microkernel via matrixmultiply crate
+│   │   │   ├── gemm_accelerate.rs       # Apple Accelerate via cblas_sgemm (macOS; dispatches to AMX)
+│   │   │   ├── mlp.rs                   # Handwritten Linear (flat weight storage) + Tanh; forward_batch/backward_batch route through gemm_backend; forward_into single-sample scalar path
 │   │   │   ├── math.rs                  # Gaussian sampling, log-prob, tanh correction, orthogonal init utilities
 │   │   │   └── optim.rs                # AdamW optimiser with per-layer state and decoupled weight decay
 │   │   └── ranking.rs                   # TrainerLiveRanking resource, car colour-based visual roles, best-car highlighting
@@ -119,8 +123,12 @@ NeuroDrive/
 │   ├── json/performance/                # JSON performance profiling exports
 │   ├── analytics/                       # Markdown analytics reports
 │   └── performance/                     # Markdown performance reports
-├── Cargo.toml                           # Workspace root, bevy 0.18 + rand + serde dependencies
-└── README.md                            # Project intent, brain-inspired learning vision, milestone roadmap
+├── tests/                               # Integration tests (unblocked by the 2026-04-18 [lib] target)
+│   ├── gemm_correctness.rs              # Cross-validates active GEMM backend against inline scalar reference on every shape PPO uses
+│   └── ppo_pipeline.rs                  # End-to-end forward+backward+optimiser pipeline; finite gradients, Adam step, varying batch sizes
+├── Cargo.toml                           # bevy 0.18 + rand + serde + matrixmultiply; Accelerate (blas-src + cblas) gated on target_os = "macos"; feature flags: profiling / force-scalar / force-matrixmultiply / force-accelerate
+├── src/lib.rs                           # Library target mirroring the binary module tree — enables integration tests in tests/*.rs
+└── README.md                            # Project intent, brain-inspired learning vision, milestone roadmap, Building and Running command reference
 ```
 
 ## Subsystem Responsibilities
@@ -199,7 +207,7 @@ frame_start_system                        (profiling, feature-gated — captures
 
 SimSet::Input
 ├── keyboard_action_input_system          (agent — mode-gated, writes ActionState.desired)
-├── ppo_act_all_cars_system               (brain — mode-gated, writes ActionState.desired for all cars, writes PolicyOutput component, appends to rollout buffer with env_id + old log-prob)
+├── ppo_act_all_cars_system               (brain — mode-gated; 3-pass batched: stacks obs into batch_io → single mat-mat actor + critic batched forwards → per-car sampling + PolicyOutput writes + rollout buffer push)
 └── action_smoothing_system               (agent — copies or smooths desired → applied)
 
 input_end_system                          (profiling, feature-gated — marks Input→Physics boundary)
@@ -224,7 +232,7 @@ SimSet::Measurement
 ├── snapshot_completed_episode_trace_system     (analytics)
 ├── snapshot_completed_episode_action_stats_system  (analytics)
 ├── ppo_collect_rewards_all_cars_system   (brain — appends reward/done for all cars, prepares PPO update at horizon)
-├── ppo_epoch_system                     (brain — processes 64-sample chunk from prepared update, advances epoch state)
+├── ppo_epoch_system                     (brain — processes one samples_per_tick chunk (default 32) from prepared update via active GEMM backend, advances epoch state)
 ├── update_driving_hud_stats_system       (debug — updates live HUD values)
 └── capture_driving_hud_episode_metrics_system  (debug — captures episode-end data for quarter summaries)
 
@@ -258,7 +266,8 @@ auto_exit_system                          (profiling, feature-gated — exits ap
 ### Key Data Flow Contracts
 
 - The environment contract is **fixed-tick and order-sensitive**. PPO action selection (which also writes `PolicyOutput`) must happen before smoothing, reward collection must happen after episode truth is computed, and analytics trace capture (which reads `PolicyOutput` for policy confidence metrics) sits between observation rebuild and PPO reward collection.
-- The PPO update is **amortised across ticks** via `PreparedUpdate` and `ppo_epoch_system`. GAE is computed once at prepare time; samples are processed in 64-sample chunks across subsequent ticks. New transitions collect into a fresh buffer during the update.
+- The PPO update is **amortised across ticks** via `PreparedUpdate` and `ppo_epoch_system`. GAE is computed once at prepare time; samples are processed in `samples_per_tick`-sized chunks (default 32 as of 2026-04-18) across subsequent ticks. New transitions collect into a fresh buffer during the update.
+- All mat-mat work in `Linear::forward_batch` / `Linear::backward_batch` and in `forward_actor_batch` / `forward_critic_batch` routes through the active **GEMM backend** selected at compile time by the `force-*` Cargo features (default: Accelerate on macOS via cblas_sgemm → AMX, matrixmultiply elsewhere via pure-Rust BLIS-style NEON microkernel). The backend name is recorded in every profiling report under the Run Context's `### Build` section.
 - The `agent` boundary is stable: observations go from environment to controller, and actions go from controller to physics through `ActionState`.
 - The analytics path is **append-only** during runtime and flushes only on app exit.
 
@@ -312,11 +321,14 @@ Step  Owner / System                                  Reads                     
 ────  ──────────────────────────────────────────────  ──────────────────────────  ──────────────────────────────
  1    profiling::frame_start_system (feature-gated)   —                           FrameRecord.frame_start
  2    agent::keyboard_action_input_system             AgentMode, KeyCode          — (exits early in Ai mode)
- 3    brain::ppo_act_all_cars_system                  ObservationVector per car,  ActionState.desired (per car),
-                                                      model (forward_actor),      PolicyOutput (per car),
-                                                      PpoBrain.rng                TrainerRolloutBuffer push
-                                                                                  (state + latent_action + action
-                                                                                  + old_log_prob + env_id)
+ 3    brain::ppo_act_all_cars_system                  ObservationVector per car,  batch_io.obs_batch stacked,
+                                                      model (3-pass batched:      scratch.a_out (batched means),
+                                                      forward_actor_batch then    scratch.c_out (batched values),
+                                                      forward_critic_batch),      ActionState.desired (per car),
+                                                      PpoBrain.rng                PolicyOutput (per car),
+                                                                                  TrainerRolloutBuffer push (state +
+                                                                                  latent_action + action + old_log_prob
+                                                                                  + env_id)
  4    agent::action_smoothing_system                  ActionState.desired         ActionState.applied (per car)
  5    profiling::input_end_system                     —                           FrameRecord.input_end
  6    game::car_physics_system                        ActionState.applied, Car    Car.velocity, Transform
@@ -405,12 +417,14 @@ This section is explicit about where this upkeep pass relied on direct code insp
 - **Physics**: `rotation_speed` is 8.0 rad/s. The throttle axis is `[0, 1]` — 0 coasts (drag decelerates naturally), 1 is full thrust. Braking was tried and reverted because the policy converged to "mostly brake" as a safe local optimum.
 - **Reward**: per-tick velocity projection reward — `dot(velocity, tangent) / speed_reference × velocity_reward_scale` — plus a centreline proximity reward (`centreline_reward_coef`, `centreline_reward_max_distance`). Crash penalty is 0.0. `EpisodeConfig` carries `velocity_reward_scale`, `centreline_reward_coef`, `centreline_reward_max_distance` (not `progress_reward_scale`).
 - **Observations** (43 dimensions): rays (11), v_forward + v_lateral, speed_delta, centreline offset/heading/curvature, 12-point lookahead (heading deltas + curvatures, 30–650 units, dense near / sparse far), previous_steering, previous_throttle.
-- The brain uses **PPO** (upgraded from A2C): clipped surrogate objective (ε=0.2), 4 epochs per update. The network is an **asymmetric actor-critic** — actor 2×64, critic 2×128 — with **tanh activations**, **orthogonal weight initialisation** (√2 hidden, 0.01× policy head, 1.0× value head), and **per-minibatch advantage normalisation** with sample shuffling. The actor uses standard Adam (LR 3e-4); the critic uses **AdamW with weight decay λ=3e-4** (LR 5e-4) to prevent unbounded weight growth. `log_std` is floored at -1.0 (minimum σ ≈ 0.37). Steering uses full `[-1, 1]` tanh output; throttle uses `0.5×(tanh+1)` remapping to `[0, 1]`. The model exposes split forward paths: `forward_actor` (action selection), `forward_critic` (bootstrap values), and `forward` (full pass). Updates are **amortised across ticks** via `PreparedUpdate` and `ppo_epoch_system` — GAE is computed once, then 64 samples are processed per tick to avoid frame stutter. Training uses **batched forward/backward passes** with **pre-allocated scratch buffers** and **flat `Vec<f32>` weight storage** for cache-friendly traversal. Blocking flush on exit handles residual data.
+- The brain uses **PPO** (upgraded from A2C): clipped surrogate objective (ε=0.2), 4 epochs per update. The network is an **asymmetric actor-critic** — actor 2×64, critic 2×128 — with **tanh activations**, **orthogonal weight initialisation** (√2 hidden, 0.01× policy head, 1.0× value head), and **per-minibatch advantage normalisation** with sample shuffling. The actor uses standard Adam (LR 3e-4); the critic uses **AdamW with weight decay λ=3e-4** (LR 5e-4) to prevent unbounded weight growth. `log_std` is floored at -1.0 (minimum σ ≈ 0.37). Steering uses full `[-1, 1]` tanh output; throttle uses `0.5×(tanh+1)` remapping to `[0, 1]`. The model exposes two batched inference paths (`forward_actor_batch`, `forward_critic_batch`) both reading from the shared `BatchIo::obs_batch`, plus a `forward_critic` single-sample path for bootstrap values on the reward-collection and exit-flush paths. Action selection is **fully batched across all cars** — one mat-mat through the actor followed by one mat-mat through the critic, no per-car sequential forward. Training updates are **amortised across ticks** via `PreparedUpdate` and `ppo_epoch_system` — GAE is computed once, then `samples_per_tick` (default 32) samples are processed per tick. All mat-mat work routes through the active **GEMM backend** (scalar / matrixmultiply / accelerate, selected at compile time) via `src/brain/common/gemm_backend.rs`. Training uses **pre-allocated scratch buffers** (`BatchIo` for inputs + gradient seeds, `BatchScratch` for forward/backward intermediates, `SampleScratch` for critic-only single-sample forward) and **flat `Vec<f32>` weight storage** for cache-friendly traversal. Blocking flush on exit handles residual data.
 - **PolicyOutput** component: written by `ppo_act_all_cars_system` each tick, exposes `value_prediction`, `steering_mean`/`steering_std`, `throttle_mean`/`throttle_std`. Read by the analytics trace capture system for policy confidence metrics.
 - **Analytics** has been comprehensively expanded: 16 tick-level trace fields (position, velocity decomposition, drift angle, min ray, velocity projection, centreline reward, policy confidence), 25 episode-level aggregates, a **crash classification system** (`CrashKind`: Slide, HeadOn, Overshoot, Spin, Stall), and a 10-section Markdown report with auto-generated takeaways.
 - The brain layer now owns **ranking logic** (`src/brain/ranking.rs`) in addition to PPO. A seeded `StdRng` lives in `PpoBrain` for deterministic policy sampling.
 - **Debug overlays default to off** — geometry (F1), sensors (F2), and telemetry HUD (F3) all start disabled. The HUD is a compact 440px panel with blue accent palette, 72% opacity, condensed text lines (no wrapping), PPO-specific metrics (clip %, KL divergence), six-column quarter table, no legend. Leaderboard panel matches the updated colour scheme.
-- **Profiling** is feature-gated behind `--features profiling`. When the feature is off, all profiling code is compiled out entirely — zero runtime cost. When enabled, the app auto-exits after a configurable duration (default 30s) and exports JSON + Markdown performance reports to `reports/json/performance/` and `reports/performance/` respectively. Both include a `RunContext` snapshot (same as analytics reports). Per-system timing covers all 17 FixedUpdate systems via an `instrument!()` macro. Reports have retention limits (3 reports per directory; oldest auto-deleted).
+- **Profiling** is feature-gated behind `--features profiling`. When the feature is off, all profiling code is compiled out entirely — zero runtime cost. When enabled, the app auto-exits after a configurable duration (default 30s) and exports JSON + Markdown performance reports to `reports/json/performance/` and `reports/performance/` respectively. Both include a `RunContext` snapshot which records the active **GEMM backend** under a `### Build` section (so every perf artefact is self-documenting about what produced it). Per-system timing covers all 17 FixedUpdate systems via an `instrument!()` macro. Reports have retention limits (3 reports per directory; oldest auto-deleted).
+- **GEMM backend** selection is compile-time via Cargo features. Default: Accelerate on macOS (via `cblas_sgemm`, dispatches to AMX coprocessor), `matrixmultiply` (pure-Rust BLIS NEON microkernel) elsewhere. `--features force-scalar` forces the naive reference kernel; `--features force-matrixmultiply` forces the portable Rust kernel on any platform; `--features force-accelerate` forces Apple Accelerate (macOS-only, compile-error elsewhere). Mutually exclusive — compile-error if two are set. macOS `main.rs` pins `VECLIB_MAXIMUM_THREADS=1` at startup to prevent Accelerate's internal thread pool from fighting Bevy for cores at our small matrix sizes.
+- **Performance is no longer the constraint**. Post-2026-04-18 dual-backend + batched-actor work, mean frame time dropped from 15.7 ms to 0.735 ms (21× overall), PPO Epoch from 13.5 ms to 0.446 ms (30×), action selection from 1.98 ms to 0.126 ms (16×). Budget utilisation went from 94% to 4.4%. Zero stutters, 0% frames over budget. See `notes/performance-tuning-lessons.md` for the contributing factors.
 - The project is in a **transitional architecture state**:
   - The repository intent targets brain-inspired local plasticity (Milestones 2–9).
   - The implemented learning path is a handwritten PPO baseline used to validate the environment and observation contract (Milestone 1). Cars are confirmed to learn — drifting corners observed.

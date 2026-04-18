@@ -19,10 +19,12 @@
 ## Launch Command
 
 ```bash
-cargo run --features profiling
+cargo run --release --features profiling
 ```
 
-The profiling feature is additive — it does not disable any existing subsystem. The app runs normally with timing instrumentation layered in.
+`--release` is strongly recommended for profiling — debug-mode numbers are ~10× slower than optimised code and don't represent the real hot-path cost. The profiling feature is additive — it does not disable any existing subsystem. The app runs normally with timing instrumentation layered in.
+
+Feature flags compose freely: `--features "profiling,force-scalar"` profiles the scalar GEMM backend, `--features "profiling,force-matrixmultiply"` profiles the matrixmultiply backend, and so on. Every exported report records the active backend in its Run Context `### Build` section, so benchmarks across different feature combinations are directly comparable.
 
 ## Architecture
 

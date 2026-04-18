@@ -1,43 +1,33 @@
 # Performance Optimisation — Remaining Work
 
-## Vision
+## Status — 2026-04-18
 
-Smooth 60 FPS with 16+ cars and all debug overlays enabled. Stuttering breaks the "watchable learning" promise of the project.
+**The PPO hot path is effectively done.** After the dual-backend GEMM + batched actor + `samples_per_tick=32` work:
 
-## Status
+- Mean frame time 15.7 ms → 0.735 ms (21×)
+- PPO Epoch 13.5 ms → 0.45 ms (30×)
+- Action selection 1.98 ms → 0.13 ms (16×)
+- Budget utilisation 94% → 4.4%
+- 0 stutters, 0% frames over budget
 
-PPO hot-path work is largely done. Prior audits closed the expensive wins: flat weight storage, pre-allocated `SampleScratch` + `BatchScratch`, batched forward/backward, cache-friendly loop order, per-sample `Vec` allocation removal, `HashMap` → `Vec` on GAE env grouping, `unsafe` eliminated via borrow split. Profiling is live behind `--features profiling`, producing per-system timings and auto-exit reports.
+The simulation now uses ~5% of the 16.67 ms frame budget. See `notes/performance-tuning-lessons.md` for the contributing factors and `reports/performance/perf_1776539216.md` for the latest measured profile.
 
-Car count is 8. The last benchmarked run moved mean frame time from ~17 ms to ~9 ms with the batched critic path and dropped stutters from 426 to 2. Those numbers predate the 2026-04-18 `SampleScratch` refactor — a fresh profiling pass would confirm the current baseline.
+**Performance is no longer the dominant constraint.** Further work should be driven by concrete bottleneck measurements, not speculation.
 
-The remaining bottlenecks are **outside the PPO hot path**.
+## Remaining Work — Only If Measured Need Appears
 
-## Remaining Work
+### Sensor raycasting spatial index
+Current cost: 0.168 ms / tick (11 rays × 8 cars, adaptive marching against flat grid). A precomputed spatial index would halve this at best. Not worth the structural change while we have ~15 ms of headroom.
 
-### Raycasting / Observations
-- 11 rays × per-step marching × 8 cars × 60 Hz remains the next-largest per-tick cost
-- `is_road_at` queries the grid every step; cache locality may still be poor despite the adaptive step win
-- Sensor system runs every tick even when readings barely change (temporal coherence unused)
-- **Candidates:** precomputed boundary-cell spatial index; conditional rebuild only when a car has moved more than ε
+### Analytics trace-capture sampling
+Current cost: ~0.19 ms / tick combined across Trace Capture + Trace Snapshot + PPO Reward Collection. Could gate per-tick capture behind a sampling rate or switch to fixed-capacity ring buffers. Not worth touching while we have headroom.
 
-### Rendering / Debug
-- Gizmo drawing runs every frame regardless of overlay visibility
-- Leaderboard + HUD text updates every frame even when state is unchanged
-- **Candidates:** skip draw passes when overlays are toggled off; dirty-flag HUD text so only changed fields rebuild
+### Bevy ECS parallelism audit
+Some FixedUpdate systems could theoretically run in parallel (analytics snapshots don't depend on HUD updates, etc.). But every candidate pair is sub-millisecond. Expected gain <0.3 ms. Defer until something in the pipeline grows by an order of magnitude.
 
-### Analytics capture
-- Per-tick trace allocates and pushes to vectors every tick
-- Episode tracker folds every frame in Update
-- **Candidates:** fixed-capacity ring buffers; fold only on episode boundary, not every frame
-
-### ECS scheduling
-- Some FixedUpdate systems could potentially run in parallel but are sequenced by `SimSet` membership
-- **Candidates:** audit which systems genuinely need strict ordering (physics → collision → measurement) vs which were sequenced defensively
-
-### Memory / allocation
-- `obs_stack` `Vec` in `ppo_act_all_cars_system` is allocated fresh each tick — could be a resource
-- Rollout buffer capacity is lost on `std::mem::take` rotation; a double-buffered pattern would preserve it
+### Accelerate rectangular-shape rounding
+Apple Accelerate's AMX peaks at matrix sizes that are multiples of 8. Our 64×43 layer (obs → actor hidden) hits tile-quantisation overhead. Padding `in_dim` to 48 or 64 at layer construction would claw back a few percent at worst. Only worth it if a specific benchmark shows the 0.45 ms PPO Epoch needs to be ~0.4 ms for some reason.
 
 ## Priority Order
 
-Profile first, then optimise. Run `cargo run --features profiling`, inspect the generated report, and tackle whichever subsystem dominates. Without a fresh profiling pass after the 2026-04-18 PPO work, any guess at the current top bottleneck is stale.
+**Profile first, then optimise.** If a `cargo run --release --features profiling` report shows a new dominant bottleneck (>2 ms mean), investigate that. Otherwise leave performance alone — the project now has ample headroom for Milestone 2+ work (brain-inspired plasticity, structural growth, replay systems) without further tuning.

@@ -46,7 +46,7 @@ const MEASUREMENT_SYSTEMS: &[(&str, &str)] = &[
     ("Trace Snapshot", "Snapshots the accumulated tick trace when an episode completes"),
     ("Action Stats Snapshot", "Snapshots the accumulated action statistics when an episode completes"),
     ("PPO Reward Collection", "Appends reward and done flag to the rollout buffer for all cars"),
-    ("PPO Epoch (Training)", "Processes a 128-sample chunk of the prepared PPO update (gradient step)"),
+    ("PPO Epoch (Training)", "Processes one `samples_per_tick` chunk of the prepared PPO update (gradient step) through the active GEMM backend"),
     ("HUD Stats", "Updates the live debug HUD with current per-car metrics"),
     ("HUD Episode Capture", "Captures episode-end metrics for the HUD quarter-summary tables"),
 ];
@@ -797,13 +797,15 @@ fn interpret_stutters(
     if avg_ppo_stutter > avg_ppo_normal * 2.0 {
         text.push_str(
             "Stutters are **strongly correlated with PPO training**. The PPO Epoch system \
-             runs a gradient update on a 128-sample chunk from the rollout buffer, which \
-             involves forward and backward passes through the actor-critic network. ",
+             runs a gradient update on one `samples_per_tick` chunk from the rollout buffer \
+             (see the Run Context above), involving batched forward and backward passes \
+             through the actor-critic network via the active GEMM backend. ",
         );
         text.push_str(
-            "Consider: (a) reducing chunk size to spread the work across more ticks, \
-             (b) profiling the matrix multiplication hot path for SIMD opportunities, \
-             or (c) accepting the stutters since they only affect visual smoothness during training.\n",
+            "Consider: (a) reducing `samples_per_tick` to spread the work across more ticks, \
+             (b) switching GEMM backend (default auto-selects Accelerate on macOS, \
+             matrixmultiply elsewhere — see `force-*` Cargo features), \
+             (c) accepting the stutters since they only affect visual smoothness during training.\n",
         );
     } else {
         // Identify the dominant system during stutters

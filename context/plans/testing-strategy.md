@@ -1,166 +1,75 @@
 # Plan — Testing Strategy
 
-## Goal
+## Status — 2026-04-18
 
-Establish a test suite that catches mathematical errors, contract violations, and integration regressions before they reach a training run. The existing 31 tests cover analytics sparklines, phase detection, physics determinism, GAE correctness, and HUD assessment — they do not verify the reward computation, neural network math, PPO update correctness, observation contract, or random-spawn logic.
+**Most of this plan is implemented.** The suite went from 31 tests to 99 in the 2026-04-18 expansion, covering every category originally scoped except the reward-computation unit tests (which require Bevy ECS plumbing) and a long-running training-convergence integration test.
 
-Every time we change a reward term, activation function, or initialisation scheme, we should know immediately if the math is wrong rather than discovering it 20 minutes into a confusing run.
+Remaining work is narrow and non-urgent — see the Remaining Work section at the bottom.
 
-The 2026-04-18 audit added a `[lib]` target to the crate — integration tests under `tests/*.rs` can now `use neurodrive::brain::...`, which unblocks the higher-leverage test categories below (category 7 especially).
+## What's Already in Place (2026-04-18)
 
-## What We're NOT Doing
+### Unit tests
 
-- No mocking frameworks or heavy test infrastructure
-- No end-to-end simulation tests (too slow, too fragile)
-- No snapshot/golden-file tests for reports (format changes too often)
-- No coverage targets — just the tests that actually catch bugs
+| File | Tests covering |
+|------|----------------|
+| `src/brain/common/mlp.rs` | Linear forward batch (shape, bias, handcrafted oracle, cache, finite-difference gradient check, zero_grad, L2 norm); Tanh forward/backward including gradient check and range bounds |
+| `src/brain/common/math.rs` | `orthogonal_init` (row norms, scale, shape, seed variance); `normal_log_prob` (peak, symmetry, finiteness); `sample_normal` (empirical mean/std recovery over 5k samples, determinism); `normal_entropy` (positivity, monotonic in std) |
+| `src/brain/common/optim.rs` | Adam convergence on quadratic loss; zero-grad noop; AdamW weight decay shrink; `weight_decay=0` equivalence to pure Adam |
+| `src/brain/common/gemm_backend.rs` | Handcrafted 2×2 GEMM oracle; alpha/beta accumulate; sgemm_nt / sgemm_tn transposition semantics; overwrite-vs-accumulate; rectangular shapes; backend name validity |
+| `src/brain/ppo/buffer.rs` | Original GAE tests retained; extensions for empty buffer, returns = adv + value identity, single-step episode, terminal-state bootstrap guard, `EnvGrouping` capacity preservation, deterministic iteration order |
+| `src/brain/ppo/update.rs` | `squashed_gaussian_log_prob` finite + symmetric for steering; `clip_linear_gradients` scale/noop/zero-max; PPO ratio clip bounds; Huber loss quadratic/linear regions |
+| `src/game/episode.rs` | `time_penalty_per_tick == 0.0` and `crash_penalty == 0.0` regression guards (policy-locked defaults per `notes/reward-and-entertainment.md`); other default-value guards; `push_with_limit` + `mean` helper behaviours |
 
----
+### Integration tests (tests/*.rs, enabled by the [lib] target)
 
-## Test Categories
+| File | Tests covering |
+|------|----------------|
+| `tests/gemm_correctness.rs` | Cross-validates whichever GEMM backend is active against an inline scalar reference for every matrix shape PPO uses in production — actor hidden SGEMM, forward_batch NT, backward weight-grad TN, critic training shape (128×128), alpha/beta accumulate, rectangular shapes. Tolerance 5e-3 accommodates f32 ULP drift between backend summation orders. |
+| `tests/ppo_pipeline.rs` | Linear forward+backward produces finite non-zero gradients; Linear→Tanh chain is stable; Adam step after backward moves weights; varying batch sizes across calls don't corrupt state; Tanh preserves sign at non-zero inputs. |
 
-### 1. Unit Tests — Neural Network Primitives
+### Verified across all backend variants
 
-**Location:** `src/brain/common/mlp.rs`, `src/brain/common/math.rs`, `src/brain/common/optim.rs`
-
-Pure functions with known mathematical properties. Easy to test, high value.
-
-| Test | What it verifies |
-|------|-----------------|
-| `tanh_forward_output_range` | Outputs ∈ (−1, 1) for arbitrary inputs |
-| `tanh_forward_zero_is_zero` | tanh(0) = 0 |
-| `tanh_backward_gradient_check` | Numerical ≈ analytical gradient at several x |
-| `linear_forward_into_shape_and_zero` | `forward_into` writes `out_dim` values, with zero input producing bias |
-| `linear_backward_batch_gradient_check` | Numerical vs analytical for a small (3→2) layer |
-| `linear_zero_grad_clears_all` | After `zero_grad()`, all grad values are 0.0 |
-| `orthogonal_init_columns_unit_norm` | Column norms ≈ 1 before scale |
-| `orthogonal_init_columns_orthogonal` | Dot products between distinct columns ≈ 0 |
-| `orthogonal_init_scale_applied` | Column norms ≈ scale |
-| `adam_step_reduces_loss_on_quadratic` | Several Adam steps converge toward target on `(w − target)²` |
-
-### 2. Unit Tests — Reward Computation
-
-**Location:** `src/game/episode.rs`
-
-The reward logic is the most frequently changed code and the most consequential if wrong. Use a helper that constructs minimal state and calls the reward computation directly.
-
-| Test | What it verifies |
-|------|-----------------|
-| `velocity_projection_aligned_with_tangent_is_max` | `dot(velocity, tangent) / speed_reference × scale` hits expected peak when velocity is parallel to the tangent at `speed_reference` |
-| `velocity_projection_perpendicular_is_zero` | Velocity perpendicular to tangent → projection = 0 → reward component = 0 |
-| `velocity_projection_reverse_is_negative` | Moving backward along the tangent → negative reward (no clamp to 0) |
-| `centreline_reward_at_zero_distance_is_coef` | On-centreline → reward = `centreline_reward_coef` |
-| `centreline_reward_at_max_distance_is_zero` | At `centreline_reward_max_distance` → reward = 0 |
-| `centreline_reward_monotone_decreasing` | Further from centreline → smaller reward |
-| `time_penalty_default_is_zero` | Regression guard — `time_penalty_per_tick == 0.0` in `EpisodeConfig::default()` |
-| `crash_penalty_default_is_zero` | Regression guard — `crash_penalty == 0.0` in `EpisodeConfig::default()` |
-| `total_reward_is_sum_of_components` | `tick.reward == velocity_projection + centreline + time_penalty + terminal` |
-
-### 3. Unit Tests — PPO Update Math
-
-**Location:** `src/brain/ppo/update.rs`
-
-| Test | What it verifies |
-|------|-----------------|
-| `squashed_gaussian_log_prob_finite` | No NaN/Inf for reasonable inputs |
-| `squashed_gaussian_log_prob_symmetry` | log_prob(x, mean) ≈ log_prob(−x, −mean) for steering component |
-| `ppo_ratio_no_clip_when_small_change` | ratio ≈ 1 when new ≈ old log_prob |
-| `ppo_ratio_clips_when_large_change` | Far-from-1 ratio gets clipped to [1−ε, 1+ε] |
-| `advantage_normalisation_per_chunk` | Per-chunk mean ≈ 0, std ≈ 1 after normalisation |
-| `shuffled_indices_are_permutation` | Every index present exactly once after Fisher-Yates |
-| `saturated_tanh_detection` | Outputs with |value| > 0.99 counted as saturated |
-| `value_huber_loss_quadratic_region` | Error < δ → loss = 0.5 × error² |
-| `value_huber_loss_linear_region` | Error > δ → loss = δ × (|error| − 0.5δ) |
-| `gradient_clip_scales_correctly` | norm > max → all grads scaled by max/norm |
-| `gradient_clip_noop_when_small` | norm ≤ max → grads unchanged |
-
-### 4. Unit Tests — GAE Computation
-
-**Location:** `src/brain/ppo/buffer.rs`
-
-Already has 2 tests. Extend with:
-
-| Test | What it verifies |
-|------|-----------------|
-| `gae_terminal_state_zero_bootstrap` | `done == true` → no value bootstrap leaks through |
-| `gae_returns_equal_advantages_plus_values` | `returns[i] == advantages[i] + values[i]` |
-| `gae_single_step_episode` | One transition with done → advantage = reward − value |
-| `env_grouping_capacity_reused_across_calls` | Buckets' capacity does not regrow when `compute_gae_per_env` runs twice in sequence |
-
-### 5. Unit Tests — Observation Contract
-
-**Location:** `src/agent/observation.rs`
-
-| Test | What it verifies |
-|------|-----------------|
-| `observation_dim_matches_constant` | `OBSERVATION_DIM = 43` and matches the field-count sum |
-| `ray_normalisation_in_range` | Ray features ∈ [0, 1] |
-| `v_forward_v_lateral_normalisation` | Both components ∈ [−1, 1] (using `speed_reward_reference` as the normaliser) |
-| `lateral_offset_normalisation_in_range` | Centreline lateral offset ∈ [−1, 1] |
-| `heading_error_normalisation_in_range` | Heading error ∈ [−1, 1] |
-| `previous_action_recorded` | `previous_steering` / `previous_throttle` propagated correctly between ticks |
-
-### 6. Unit Tests — Random Spawn
-
-**Location:** `src/game/plugin.rs`, `src/game/episode.rs`
-
-| Test | What it verifies |
-|------|-----------------|
-| `random_spawn_position_on_track` | Sampled position via `point_at_s` is inside the drivable grid |
-| `random_spawn_heading_matches_tangent` | Spawn rotation = `atan2(tangent.y, tangent.x)` |
-| `random_spawn_covers_full_track` | 100 samples cover at least 80% of the track length in 10%-buckets |
-
-### 7. Integration Tests — Reward + PPO Pipeline
-
-Now unblocked by the `[lib]` target (`tests/*.rs` can import `neurodrive::brain::...`).
-
-| Test | What it verifies |
-|------|-----------------|
-| `one_episode_produces_nonzero_gradients` | After one rollout + PPO update, at least some weight gradients are non-zero |
-| `positive_advantage_increases_action_probability` | Sample with positive advantage → gradient direction increases log-prob |
-| `reward_scale_affects_gradient_magnitude` | Doubling `velocity_reward_scale` roughly doubles gradient norms |
-| `forward_actor_allocation_free` | Instrumented allocator sees 0 heap allocs across 1000 `forward_actor` calls (2026-04-18 `SampleScratch` regression guard) |
-
-### 8. Regression Guards
-
-| Test | Motivated by |
-|------|-------------|
-| `no_dead_relu_fields_in_analytics` | ReLU → tanh migration left stale references in the past |
-| `no_unsafe_in_ppo_update` | 2026-04-18 audit removed three `unsafe` blocks via borrow split; regression guard prevents reintroduction |
-| `episode_config_defaults_match_reward_philosophy` | `time_penalty_per_tick == 0.0` and `crash_penalty == 0.0` are policy-locked per `notes/reward-and-entertainment.md` |
-
----
-
-## Implementation Priority
-
-```text
-High value, low effort (do first)
-  ├── Reward computation unit tests (category 2)
-  ├── Tanh forward/backward gradient checks (category 1)
-  ├── PPO ratio and clipping tests (category 3)
-  └── GAE extensions (category 4)
-
-Medium value, low effort
-  ├── Orthogonal init property tests (category 1)
-  ├── Observation range tests (category 5)
-  └── Regression guards (category 8)
-
-Medium value, medium effort
-  ├── Random spawn tests (category 6)
-  └── Linear backward gradient check (category 1)
-
-High value, higher effort (do later)
-  └── Integration tests (category 7)
+```
+cargo test                                                   →  99 passed, 0 warnings
+cargo test --no-default-features --features force-scalar     →  99 passed
+cargo test --no-default-features --features force-matrixmultiply →  99 passed
+cargo test --no-default-features --features force-accelerate →  99 passed
+cargo check --release                                        →  clean
+cargo check --features profiling                             →  clean
 ```
 
-## Conventions
+## Conventions in Use
 
-- Unit tests live next to the code they test (`#[cfg(test)] mod tests`) — not in a separate directory
-- Integration tests live in `tests/*.rs` (newly possible since the 2026-04-18 `[lib]` target)
-- Test names describe the property being verified, not the method
-- Use `assert!((actual - expected).abs() < epsilon)` for float comparisons; `epsilon = 1e-4` unless tighter precision is needed
-- Gradient checks use `epsilon = 1e-3` for the finite-difference step and `tolerance = 1e-2` for the comparison (f32 precision limits)
+- Unit tests live next to the code they test (`#[cfg(test)] mod tests` in each file) — not in a separate directory.
+- Integration tests live in `tests/*.rs` and import the crate via `use neurodrive::...`.
+- Test names describe the property being verified, not the method.
+- Float comparisons use `assert!((actual - expected).abs() < epsilon)` with `epsilon = 1e-4` by default.
+- Gradient checks use `epsilon = 1e-3` for the finite-difference step and `tolerance = 1e-2` for the comparison (f32 precision limits).
 
-## Status
+## Remaining Work
 
-Plan stage. None of the tests in this plan have been implemented. The existing 31 tests remain unchanged.
+### Reward-computation unit tests (not yet written)
+
+The reward logic inside `episode_loop_system` runs against Bevy ECS state (`Query`, `Res`, components). Pure unit tests would require extracting the reward computation into free functions that take plain arguments — a refactor, not a test. **Status:** deferred until the reward logic needs to change again, at which point the extract-then-test path becomes worth it.
+
+Default-value regression guards ARE in place (`default_time_penalty_is_zero`, `default_crash_penalty_is_zero`, `default_reward_weights_match_documented_values`) — they catch the kind of policy-drift that actually occurred in the 2026-04-18 audit.
+
+### Random-spawn unit tests (not yet written)
+
+Same story — `spawn_car` is tied into Bevy ECS. Could be unit-tested after extracting the geometry calculation (sampled arc-length → spawn position + heading) into a free function. **Status:** deferred; the existing `deterministic_replay_same_seed_same_actions_identical_trajectory` test in `src/game/physics.rs` covers the most important spawn-path property indirectly.
+
+### Long-running training-convergence integration test
+
+Would run ~10k training steps and assert final policy quality (mean progress, crash rate) is within some tolerance of a known-good reference. Catches silent regressions in training behaviour — e.g. if someone changes a gradient-clipping threshold and the policy stops converging.
+
+**Status:** not implemented. Cost: 30-60 seconds per run, which is too slow for regular `cargo test`. Would be marked `#[ignore]` and run manually or in a nightly CI pass.
+
+### Cross-backend numerical-drift test over multiple optimiser steps
+
+Would run N Adam steps on a synthetic loss with each backend, verify the final weight vectors are within ULP tolerance of each other. Deeper than the single-step correctness test in `tests/gemm_correctness.rs`. **Status:** not urgent — single-step equivalence is verified, and the rest of the test suite passing on all backends gives us strong empirical evidence that multi-step drift is within bounds.
+
+## Guiding Principle
+
+The test suite's job is to catch real regressions, not chase coverage metrics. Every test added in 2026-04-18 can be traced to a specific concrete risk: either the 2026-04-18 refactor broke something subtle (backend swap, GAE env_grouping capacity), or a prior drift mattered (time_penalty policy-lock regression guards), or a known failure mode wasn't previously guarded (Adam convergence on quadratic).
+
+Future additions should pass the same test: "what concrete bug does this test prevent, and is that bug realistic given the code as it stands?"

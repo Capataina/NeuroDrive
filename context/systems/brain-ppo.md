@@ -12,9 +12,9 @@
 |-------|------|-------------|
 | `src/brain/plugin.rs` | `BrainPlugin`, `AgentMode` toggle (F4), registers `TrainerLiveRanking`, wires ranking and visual-role systems, rollout-buffer reset on mode switch | Policy implementation details |
 | `src/brain/types.rs` | `AgentMode` enum (`Keyboard` / `Ai`), `PolicyOutput` component | Observation or reward production |
-| `src/brain/ppo/` | `PpoBrain` (model + hyperparams + seeded RNG, **no buffer**), `TrainerRolloutBuffer` (separate resource with env_id tagging + old log-probs), `PpoUpdateState` (staged update resource), `PpoPlugin`, vectorised act/collect/epoch/flush systems, per-env GAE, `ActorCritic` model (asymmetric: actor 2×64, critic 2×128), `BatchScratch` pre-allocation, PPO clipped update logic, `PpoTrainingStats`, `PpoLayerHealth` | Environment truth, observation construction |
+| `src/brain/ppo/` | `PpoBrain` (model + hyperparams + seeded RNG + `act_entity_buffer` reusable scratch, **no buffer**), `TrainerRolloutBuffer` (separate resource with env_id tagging + old log-probs + reusable `EnvGrouping` scratch), `PpoUpdateState` (staged update resource), `PpoPlugin`, vectorised act/collect/epoch/flush systems, per-env GAE, `ActorCritic` model (asymmetric: actor 2×64, critic 2×128, with `BatchIo`+`BatchScratch`+`SampleScratch` pre-allocation), PPO clipped update logic, `PpoTrainingStats`, `PpoLayerHealth` | Environment truth, observation construction |
 | `src/brain/ranking.rs` | `TrainerLiveRanking` resource, ranking computation, `update_car_visual_roles_system` (best-car highlighting via alpha + z-order), `CarColour`-aware sprite updates | Policy, observation, reward |
-| `src/brain/common/` | Reusable handwritten ML primitives: `Linear` (flat `Vec<f32>` weight storage, batched forward/backward), `Tanh` (with saturation tracking), `AdamOptimizer` (AdamW-style with decoupled weight decay, precomputed bias correction, ε=1e-5), Gaussian math, orthogonal init | Algorithm-specific logic |
+| `src/brain/common/` | Reusable handwritten ML primitives: `Linear` (flat `Vec<f32>` weight storage, batched forward/backward routed through `gemm_backend`), `Tanh` (with saturation tracking), `AdamOptimizer` (AdamW-style with decoupled weight decay, precomputed bias correction, ε=1e-5), Gaussian math, orthogonal init, `gemm_backend` (three-way GEMM dispatch: scalar / matrixmultiply / accelerate) | Algorithm-specific logic |
 
 ## Current Implemented Reality
 
@@ -40,16 +40,24 @@ obs (43) → Linear(43,64)  → Tanh     obs (43) → Linear(43,128) → Tanh
 - `log_std` initialised to `[0.0, 0.0]` (initial σ = 1.0). **Floor clamped at -1.0** (minimum σ ≈ 0.37) to prevent throttle exploration collapse.
 - Actor LR: 3e-4 (standard Adam, weight decay 0.0). Critic LR: 5e-4 (**AdamW with weight decay λ=3e-4**) to prevent unbounded weight growth that drives tanh saturation.
 - Activation: Tanh throughout (switched from ReLU — eliminates dead-neuron capacity loss that was starving the actor at 34–57% dead neurons).
-- The model exposes three forward paths: `forward_actor` (action selection only, skips critic — saves ~50% forward cost), `forward_critic` (bootstrap values only), and `forward` (full actor + critic pass for training).
+- The model exposes three forward paths, all **batched**:
+  - `forward_actor_batch(batch_size)` — actor-only batched forward for multi-car action selection. Reads observations from `self.batch_io.obs_batch`, writes means into `self.scratch.a_out`. Does not cache intermediates (inference only).
+  - `forward_critic_batch(batch_size)` — critic-only batched forward for multi-car bootstrap values. Reads from `batch_io.obs_batch`, writes values into `scratch.c_out`. Does not cache intermediates.
+  - `forward_critic(obs)` — single-sample critic forward using `SampleScratch`. Used only on the reward-collection bootstrap path (per non-terminal car at update prepare time) and the exit-flush bootstrap path.
+- `forward_batch(batch_size)` (full actor + critic) and `backward_batch_actor(batch_size)` / `backward_batch_critic(batch_size)` are the training-path entry points. All read from `batch_io` and write into `scratch`; the mat-mat work routes through the active GEMM backend.
 
 ### Performance Optimisations
 
 - **Flat `Vec<f32>` weight storage** — `Linear.weights` is a single contiguous vector in row-major order (`weights[i * in_dim + j]`), enabling cache-friendly traversal and LLVM auto-vectorisation. Previously used `Vec<Vec<f32>>`.
-- **Pre-allocated scratch buffers** — `BatchScratch` allocates all intermediate buffers once at construction (sized for max batch of 512). Reused for every batched forward/backward pass, eliminating per-chunk allocation.
-- **Batched forward/backward passes** — `forward_batch` and `backward_batch` process entire training chunks as matrix operations rather than sample-by-sample loops.
-- **Iterator-based inner loops** — dot products and gradient accumulation use iterator chains for LLVM optimisation.
+- **Three-backend GEMM dispatch** (2026-04-18) — every mat-mat in `Linear::forward_batch` / `Linear::backward_batch` routes through `src/brain/common/gemm_backend.rs`, which selects one of three implementations at compile time: scalar naive loops, `matrixmultiply` (pure-Rust BLIS-style NEON microkernel), or Apple Accelerate (`cblas_sgemm`, macOS-only, dispatches to AMX). Default auto-selects Accelerate on macOS, matrixmultiply elsewhere. Opt-in overrides via `force-scalar` / `force-matrixmultiply` / `force-accelerate` Cargo features. Delivered a 30× speedup on PPO Epoch (13.5 ms → 0.45 ms).
+- **Batched multi-car action selection** (2026-04-18) — `ppo_act_all_cars_system` stacks all N cars' observations into `batch_io.obs_batch` in one pass, then runs a single batched actor forward + single batched critic forward (one mat-mat each) rather than N sequential per-car mat-vec pairs. Delivered a 16× speedup on action selection (1.98 ms → 0.13 ms). Per-car Gaussian sampling remains sequential to preserve the shared-RNG determinism contract.
+- **Pre-allocated scratch buffers** — `BatchIo` (obs_batch + grad_seed_values + grad_seed_means — all the input sides), `BatchScratch` (forward/backward intermediates for the training path), `SampleScratch` (critic-only intermediates for single-sample forward). Kept as sibling fields on `ActorCritic` so Rust's disjoint-field borrow inference lets `forward_batch` mutably borrow `scratch` while reading `batch_io` — replaces three previous `unsafe { slice::from_raw_parts }` blocks.
+- **Reusable `act_entity_buffer`** on `PpoBrain` carries `(Entity, env_id)` pairs from Pass 1 (stack observations) to Pass 3 (sample + write components + push buffer) of `ppo_act_all_cars_system` without per-frame heap allocation.
+- **Reusable `EnvGrouping`** on `TrainerRolloutBuffer` — replaces a per-call `HashMap<u32, Vec<usize>>` allocation in `compute_gae_per_env` with a `Vec<Vec<usize>>` indexed by `env_id as usize`. Faster (no hashing, no probing) and deterministic iteration order (was HashMap-order-dependent).
+- **Iterator-based inner loops** — dot products and gradient accumulation use iterator chains for LLVM optimisation in the scalar backend.
 - **Swap instead of clone for frozen buffer** — `PreparedUpdate` takes ownership of buffer data via swap rather than cloning.
 - **Adam precomputed bias correction** — `1/(1-β^t)` computed once per step rather than per-parameter.
+- **Accelerate thread pin** — `main.rs` sets `VECLIB_MAXIMUM_THREADS=1` on macOS at startup to prevent Accelerate's default thread pool from fighting Bevy's render pipeline at our small matrix sizes.
 
 ### PolicyOutput Component
 
@@ -67,12 +75,15 @@ obs (43) → Linear(43,64)  → Tanh     obs (43) → Linear(43,128) → Tanh
 
 ### Rollout Collection
 
-- `ppo_act_all_cars_system` runs in `SimSet::Input` after keyboard input and before action smoothing. Iterates **all** cars, calls `model.forward_actor()` for each (skipping critic for action selection), samples stochastic actions via the seeded RNG, writes per-car `ActionState` and `PolicyOutput`, computes old log-prob (sum of squashed-Gaussian log-probs across action dimensions), and pushes transitions tagged with `env_id` and `old_log_prob` to `TrainerRolloutBuffer`.
+- `ppo_act_all_cars_system` runs in `SimSet::Input` after keyboard input and before action smoothing. Structured as three passes:
+  1. **Stack observations:** iterate all cars, copy each `ObservationVector` into `brain.model.batch_io.obs_batch`, record `(Entity, env_id)` in `brain.act_entity_buffer`. No heap allocation on the hot path.
+  2. **Batched forward:** one `forward_actor_batch(car_count)` call (writes means into `scratch.a_out`), then one `forward_critic_batch(car_count)` call (writes values into `scratch.c_out`). Two mat-mats total, regardless of car count.
+  3. **Per-car sample + write:** for each car, read mean from `scratch.a_out[i*act_dim..i*act_dim+2]`, sample Gaussian latent via the seeded RNG, tanh-squash, remap throttle, compute old_log_prob, write `ActionState.desired` + `PolicyOutput`, push to `TrainerRolloutBuffer` with `env_id` + `old_log_prob`. Sequential by design to preserve shared-RNG determinism.
 - `ppo_collect_rewards_all_cars_system` runs in `SimSet::Measurement` after episode truth and observation rebuild. Pushes per-car reward and done flag for all cars. When the buffer reaches the horizon and no update is in progress, calls `ppo_prepare_update` to compute per-env GAE, freeze the buffer into a `PreparedUpdate` (via swap, not clone), and clear the live buffer.
-- `ppo_epoch_system` runs in `SimSet::Measurement` after the collect system. Processes a chunk of `samples_per_tick` (default 64) samples from the `PreparedUpdate` per tick using batched forward/backward passes. When an epoch's samples are exhausted, calls `ppo_finish_epoch` (clip gradients, step optimiser). Advances to the next epoch or clears the update state when all epochs are done.
-- `TrainerRolloutBuffer` stores: `states`, `actions`, `latent_actions`, `safety_clamp_hits`, `old_log_probs`, `rewards`, `values`, `dones`, `env_ids`.
-- GAE is computed **per-env** to prevent cross-env value leakage. Transitions are grouped by `env_id`; GAE runs within each group independently. Advantages are normalised **per-minibatch** (per-chunk) rather than globally. Sample indices are shuffled at the start of each epoch via Fisher-Yates shuffle to ensure diverse gradient updates.
-- Bootstrap values are computed per-env at prepare time: non-terminal envs get a fresh `model.forward()` value; terminal envs get 0.
+- `ppo_epoch_system` runs in `SimSet::Measurement` after the collect system. Processes a chunk of `samples_per_tick` (default 32 as of 2026-04-18) samples from the `PreparedUpdate` per tick using batched forward/backward passes through the active GEMM backend. When an epoch's samples are exhausted, calls `ppo_finish_epoch` (clip gradients, step optimiser). Advances to the next epoch or clears the update state when all epochs are done.
+- `TrainerRolloutBuffer` stores: `states`, `actions`, `latent_actions`, `safety_clamp_hits`, `old_log_probs`, `rewards`, `values`, `dones`, `env_ids`, plus a reusable `env_grouping: EnvGrouping` scratch for per-env GAE without per-call allocation.
+- GAE is computed **per-env** to prevent cross-env value leakage. Transitions are grouped by `env_id` via `EnvGrouping` (a `Vec<Vec<usize>>` indexed by `env_id as usize` — dense small integers make this a better fit than the previous `HashMap<u32, Vec<usize>>`). GAE runs within each group independently. Iteration order is deterministic (ascending env_id). Advantages are normalised **per-minibatch** (per-chunk) rather than globally. Sample indices are shuffled at the start of each epoch via Fisher-Yates shuffle to ensure diverse gradient updates.
+- Bootstrap values are computed per-env at prepare time: non-terminal envs get a fresh `forward_critic()` single-sample pass; terminal envs get 0.
 
 ### Update Triggering
 
