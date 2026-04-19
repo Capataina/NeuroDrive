@@ -28,6 +28,9 @@
 | Controller boundary | **Strong** | `CarAction`/`ActionState` insulates physics from controller implementation |
 | Centreline projection | **Strong** | Purely geometric, no RNG |
 | Observation production | **Strong** | Grid raycasts and math are deterministic given car state and track |
+| Observation normalisation (round-2) | **Session-deterministic** | `ObservationNormalizer` Welford stats accumulate across a session; given the same action/observation stream, two session replays produce the same normalised observations. Cross-session non-determinism comes from the stats-accumulation order, which depends on spawn positions (seeded by init RNG) |
+| PopArt value normalisation (round-2) | **Session-deterministic** | Same story as observation normalisation — `ValueNorm { mu, sigma }` is EMA-updated from `returns`; given the same rollout stream, the same `mu`/`sigma` trajectory results |
+| Target-KL early stop (round-2) | **Session-deterministic** | Fires deterministically based on `approx_kl` accumulator state, which is itself downstream of the PPO RNG chain |
 | PPO action sampling | **Improved** | Uses a seeded `StdRng` stored in `PpoBrain` — deterministic given the same seed |
 | PPO model initialisation | **Weak** | Uses `rand::rng()` once at startup for init, then seeds a `StdRng` for runtime — init seed not yet user-controllable |
 | Analytics export filenames | **Weak** | Timestamp-based, naturally non-deterministic (acceptable) |

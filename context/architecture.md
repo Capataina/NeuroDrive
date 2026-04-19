@@ -323,12 +323,13 @@ Step  Owner / System                                  Reads                     
  2    agent::keyboard_action_input_system             AgentMode, KeyCode          — (exits early in Ai mode)
  3    brain::ppo_act_all_cars_system                  ObservationVector per car,  batch_io.obs_batch stacked,
                                                       model (3-pass batched:      scratch.a_out (batched means),
-                                                      forward_actor_batch then    scratch.c_out (batched values),
-                                                      forward_critic_batch),      ActionState.desired (per car),
-                                                      PpoBrain.rng                PolicyOutput (per car),
+                                                      forward_actor_batch then    scratch.c_out (RAW normalised values),
+                                                      forward_critic_batch),      PolicyOutput.value_prediction
+                                                      PpoBrain.rng,               (DENORMALISED via value_norm.σ·z+µ),
+                                                      PpoBrain.value_norm         ActionState.desired (per car),
                                                                                   TrainerRolloutBuffer push (state +
                                                                                   latent_action + action + old_log_prob
-                                                                                  + env_id)
+                                                                                  + denormalised value + env_id)
  4    agent::action_smoothing_system                  ActionState.desired         ActionState.applied (per car)
  5    profiling::input_end_system                     —                           FrameRecord.input_end
  6    game::car_physics_system                        ActionState.applied, Car    Car.velocity, Transform
@@ -343,18 +344,26 @@ Step  Owner / System                                  Reads                     
                                                                                   reset, Car velocity reset
 13    agent::update_sensor_readings_system            Transform, TrackGrid,       SensorReadings (per car, now
                                                       TrackCenterline             reflects post-reset state)
-14    agent::build_observation_vector_system          SensorReadings              ObservationVector (per car)
+14    agent::build_observation_vector_system          SensorReadings,             ObservationVector (per car —
+                                                      ObservationNormalizer         centred/scaled/clipped after warmup,
+                                                                                    identity pass-through during first
+                                                                                    1000 samples; stats updated in-place)
 15    analytics::capture_episode_tick_trace_system    EpisodeState, PolicyOutput, PerCarTraceAccumulators push
                                                       SensorReadings, Transform
 16    analytics::snapshot_completed_episode_*_system  PerCar*Accumulators,        EpisodeTracker.pending_episodes /
                                                       EpisodeState (terminal)     pending_traces on terminal
 17    brain::ppo_collect_rewards_all_cars_system      EpisodeState.current_tick_* TrainerRolloutBuffer
-                                                      (per car)                    reward + done push;
-                                                                                  may call ppo_prepare_update()
-                                                                                  at horizon → PreparedUpdate
+                                                      (per car),                   reward + done push;
+                                                      PpoBrain.value_norm         may call ppo_prepare_update()
+                                                      (for bootstrap              at horizon → PreparedUpdate;
+                                                      denormalisation)             popart_absorb_batch runs here, before
+                                                                                  first training chunk, and applies the
+                                                                                  POP rescale to c_value weights
 18    brain::ppo_epoch_system                         PreparedUpdate,             model weights + Adam state
-                                                      model (forward_batch +      PpoTrainingStats
-                                                      backward_batch)             (on epoch end)
+                                                      model (forward_batch +      PpoTrainingStats (on epoch end),
+                                                      backward_batch),            early_stopped flag (when
+                                                      PpoConfig.target_kl          approx_kl > 1.5 × target_kl halts
+                                                                                  remaining epochs)
 19    debug::update_driving_hud_stats_system          TrackProgress, Collided     DrivingHudStats
 20    debug::capture_driving_hud_episode_metrics      EpisodeState (terminal)     DrivingHudHistory
 21    profiling::frame_end_system + auto_exit         SystemTimers.durations_us   FrameRecord completed
@@ -365,43 +374,56 @@ Step  Owner / System                                  Reads                     
 - **Step 3 → Step 17 alignment.** The PPO buffer push in step 3 records (state, action, old_log_prob). Step 17 pushes the matching (reward, done). Any step between them that mutates `EpisodeState` out of order or runs in the wrong `SimSet` desynchronises reward from its generating action — silent training corruption. This is why `sim::SimSet` is structural rather than decorative.
 - **Step 12 reset ordering.** Episode reset happens in `episode_loop_system` (step 12), **before** sensor readings rebuild (step 13). This is deliberate: if the order were reversed, the first observation of a new episode would be built from pre-reset crash state and the PPO rollout would bootstrap from a lie.
 - **Step 11 before Step 12.** Progress projection must run before episode logic because crash classification and velocity-projection reward both read `TrackProgress`. Swapping them gives a zero reward on the terminal tick.
-- **Step 18 amortisation.** `ppo_epoch_system` processes only `samples_per_tick` (default 64) samples of the prepared update per tick. A full 4-epoch update over a 512-sample rollout takes `4 × 512 / 64 = 32` ticks. During these 32 ticks, a new rollout buffer is collecting — PPO is **not on-policy in the strict sense** during amortised updates, but the `old_log_prob` captured at step 3 protects ratio calculation regardless.
+- **Step 18 amortisation.** `ppo_epoch_system` processes only `samples_per_tick` (default 32 as of 2026-04-18) samples of the prepared update per tick. A full 4-epoch update over a 512-sample rollout takes `4 × 512 / 32 = 64` ticks. During these 64 ticks, a new rollout buffer is collecting — PPO is **not on-policy in the strict sense** during amortised updates, but the `old_log_prob` captured at step 3 protects ratio calculation regardless.
+- **Step 17 PopArt placement.** `popart_absorb_batch` runs inside `ppo_prepare_update`, **after** GAE computes `returns` but **before** any training chunk touches `c_value`. This ordering matters: the POP rescale must complete before the first forward pass sees the updated `c_value` weights, otherwise early chunks train against the old scale and the subsequent ones against the new scale — corrupting the update.
+- **Step 3 denormalisation asymmetry.** Inside `brain::ppo_act_all_cars_system`, the critic's `c_out[i]` is raw (normalised) but the `value` written to `PolicyOutput` and pushed to the buffer is denormalised via `value_norm.σ·z + µ`. This asymmetry is load-bearing: GAE in step 17 consumes buffer values in reward units, and analytics in steps 15–16 read `PolicyOutput.value_prediction` in reward units. If either callsite forgot to denormalise, GAE would compute advantages against normalised-scale bootstrap values (silent training corruption) or the analytics report would show values bounded to ~(-3, +3) (meaningless).
 - **Step 9 Collided as a marker not an event.** The environment never fires Bevy events for collisions; `Collided` is added as a component marker and read by the episode system two steps later. Any system that needs to react to collisions must be placed **in `SimSet::Measurement` after `episode_loop_system`** to see it before it is cleared on reset.
 
-## Coverage (Knowledge Gaps from this 2026-04-18 Pass)
+## Coverage (Knowledge Gaps from this 2026-04-19 Pass)
 
 This section is explicit about where this upkeep pass relied on direct code inspection versus inference from existing documentation and the scan-tool output, so the next session knows what still needs verification.
 
 **Directly inspected this session:**
 
-- `src/main.rs` (plugin registration order — verified it matches architecture.md).
-- `src/brain/ppo/update.rs` lines 140–300 (the two `unsafe` aliasing blocks — verified and captured as rationale).
-- `src/brain/ppo/mod.rs` lines 25–100 (`PpoConfig` struct — verified Phase 4 consolidation).
-- `src/game/car.rs` imports + `SpawnRng`, `EnvInstanceId`, `TrainerConfig` struct signatures.
-- `src/agent/observation.rs` header through `OBSERVATION_DIM` constant — verified 43-dim layout matches the docs.
-- `src/analytics/exporters/context.rs` full `RunContext` struct signature.
-- `src/analytics/exporters/cleanup.rs` in full (tiny file).
-- Grep for `unsafe`, `WHY/NOTE/HACK/IMPORTANT/TODO/FIXME/SAFETY`, `EventWriter|EventReader`, `StdRng|seed_from|rand::rng|ThreadRng`, `debug_assert`, `#[cfg(feature`, `EpisodeConfig|TrainerConfig|PpoConfig|AnalyticsConfig|ProfilingConfig|RunContext|EnvInstanceId` across all of `src/`.
+- `src/brain/ppo/model.rs` in full — `ActorCritic`, `BatchIo`, `BatchScratch`, `SampleScratch`, the asymmetric actor/critic layout, and the denormalisation call sites.
+- `src/brain/ppo/update.rs` in full — PopArt `popart_absorb_batch` implementation, the loss computation with normalised target, target-KL early stop integration path, `return_distribution` helper.
+- `src/brain/ppo/mod.rs` in full — `PpoConfig` (with new `target_kl`, `popart_*` fields), `ValueNorm` struct + methods, `ppo_epoch_system` with KL early-stop branch, `ppo_act_all_cars_system` denormalisation, bootstrap denormalisation paths.
+- `src/brain/ppo/buffer.rs` in full — no round-2 changes here; GAE computation unchanged.
+- `src/agent/observation.rs` in full — `ObservationNormalizer` Welford state, integration into `build_observation_vector_system`, warmup + clip + disable flag.
+- `src/agent/plugin.rs` in full — verified `ObservationNormalizer` resource registration.
+- `src/analytics/models.rs` in full — `PpoUpdateRecord` with round-2 fields and `#[serde(default)]` back-compat.
+- `src/analytics/trackers/episode.rs` in full — stats → record mapping wiring for new fields.
+- `src/analytics/exporters/markdown.rs` — the five new Markdown sections (11–15) for round-2 diagnostics.
+- `src/analytics/metrics/pre_crash.rs` in full (new module).
+- `src/analytics/metrics/diagnostics.rs` (test-fixture construction — relevant to the back-compat story).
+- `src/brain/common/mlp.rs` (first 80 lines — the `Linear` layer definition relevant to POP rescale).
+- Grep passes: `WHY|HACK|IMPORTANT|SAFETY|FIXME`, `TODO|NOTE:`, `unsafe`, `debug_assert|StdRng|seed_from|EventWriter|EventReader|#[cfg(feature` across all of `src/`.
+- Full context/ inventory: 30 context files scanned; 7 system files spot-checked; 10 references catalogued.
 
-**Inspected through the scan tool output only** (file existence + import regex, not code bodies read):
+**Trusted from recent commits without re-inspection (commits `a0b2cb6`, `e86e737`):**
 
-- All 67 Rust files were listed by `scripts/scan_repo.py`. Import regex output was consumed for roughly the first 20 files to establish dependency-direction consistency with architecture.md, then trusted by sampling.
-- `src/analytics/metrics/` 10 modules — only `chunking.rs`, `consistency.rs`, `diagnostics.rs`, `phases.rs` headers were glanced at via the scan; internal logic was trusted against `systems/analytics.md`.
-- `src/profiling/*` — the timer instrumentation structure was trusted against `systems/profiling.md` without re-reading every file body.
+- `systems/brain-ppo.md` — updated in `a0b2cb6` to reflect PopArt + target-KL; hyperparameters table now shows γ=0.995, `target_kl=Some(0.03)`, `popart_*` fields. Verified freshness via grep; content stands.
+- `systems/analytics.md` — updated in `a0b2cb6` with sections 11–15 and the `PpoUpdateRecord` field expansion subsection. Verified; content stands.
+- `systems/agent-interface.md` — updated in `a0b2cb6` with the `ObservationNormalizer` paragraph. Verified.
+- `systems/determinism.md` — updated in this pass to add the three round-2 session-deterministic surfaces (observation normaliser, PopArt, target-KL early stop).
+- `systems/environment.md`, `systems/debug.md`, `systems/profiling.md` — no round-2 impact on these subsystems; trusted from the 2026-04-18 pass.
+- `reports/analytics/run_1776556719.md` — the 2,271-episode validation run — trusted from conversation-level inspection without re-reading the file during upkeep; all headline claims are already in the Structural Notes above.
 
-**Described from existing context only, not re-verified this pass:**
+**Not inspected this pass:**
 
-- Exact HUD layout (`src/debug/hud.rs` — trusted against `systems/debug.md`).
-- Centreline binary-search projection implementation (`src/maps/centerline.rs` — trusted against `systems/environment.md` and the Phase 2 audit note).
-- The 25 episode-level aggregates enumerated in `systems/analytics.md` — counted in the scan but field-by-field accuracy is from the previous session.
-- Analytics markdown exporter structure — architecture and systems both agree; not re-read this pass.
+- `src/analytics/metrics/chunking.rs`, `consistency.rs`, `sectors.rs`, `trajectory.rs`, `turns.rs`, `phases.rs`, `sparkline.rs`, `stats.rs`, `timeseries.rs` — trusted from prior passes; no round-2 changes to these modules.
+- `src/profiling/*` — unchanged since the 2026-04-18 performance work.
+- `src/maps/*` — no round-2 changes; trusted from prior passes.
+- `src/debug/*` — no round-2 changes; trusted.
+- `src/game/car.rs`, `physics.rs`, `episode.rs`, `collision.rs`, `progress.rs` — no round-2 changes; trusted.
+- `src/sim/*` — unchanged.
 
-**Known gap items re-surfaced by this pass:**
+**Known gap items still outstanding:**
 
-- `unsafe` in `src/brain/ppo/update.rs` — now inspected and verified. SAFETY comments describe read-only aliasing of scratch buffers (`obs_batch` and `grad_seed_{values,means}`) while the model takes `&mut self`. The aliased slices are distinct from all `&mut` scratch fields used by `forward_batch`/`backward_batch`. This is a borrow-checker workaround, not an unsound pattern. The `notes/session-2026-04-15.md` checkbox for this item can be ticked.
 - User-controllable PPO seed — still not implemented; `systems/determinism.md` flags this correctly.
-- Headless training mode — still missing; flagged in `systems/environment.md` and `systems/brain-ppo.md`.
-- Analytics/profiling parallel evolution hazard — now documented under Shared Infrastructure above.
+- Headless training mode — still missing; flagged in `systems/environment.md` and `systems/brain-ppo.md`. Becomes more valuable as the brain-inspired phase begins (longer experiments, model comparison).
+- Analytics/profiling parallel evolution hazard — documented under Shared Infrastructure; this remains a live coupling to watch.
+- ECS-level replay harness — still missing; listed as "Future Work" in determinism.md.
 
 ## Structural Notes / Current Reality
 
@@ -418,7 +440,7 @@ This section is explicit about where this upkeep pass relied on direct code insp
 - **Reward**: per-tick velocity projection reward — `dot(velocity, tangent) / speed_reference × velocity_reward_scale` — plus a centreline proximity reward (`centreline_reward_coef`, `centreline_reward_max_distance`). Crash penalty is 0.0. `EpisodeConfig` carries `velocity_reward_scale`, `centreline_reward_coef`, `centreline_reward_max_distance` (not `progress_reward_scale`).
 - **Observations** (43 dimensions): rays (11), v_forward + v_lateral, speed_delta, centreline offset/heading/curvature, 12-point lookahead (heading deltas + curvatures, 30–650 units, dense near / sparse far), previous_steering, previous_throttle.
 - The brain uses **PPO** (upgraded from A2C): clipped surrogate objective (ε=0.2), 4 epochs per update (with **target-KL early stop** — halts epochs when `approx_kl > 1.5 × target_kl`, default 0.03). The network is an **asymmetric actor-critic** — actor 2×64, critic 2×128 — with **tanh activations**, **orthogonal weight initialisation** (√2 hidden, 0.01× policy head, 1.0× value head), and **per-minibatch advantage normalisation** with sample shuffling. The actor uses standard Adam (LR 3e-4); the critic uses **AdamW with weight decay λ=3e-4** (LR 5e-4). `log_std` is floored at -1.0 (minimum σ ≈ 0.37). **γ = 0.995** (round-2 2026-04-19; was 0.99), giving a credit horizon of ~3.3 s to match the observation lookahead's ~2.6 s reach. Steering uses full `[-1, 1]` tanh output; throttle uses `0.5×(tanh+1)` remapping to `[0, 1]`. The model exposes two batched inference paths (`forward_actor_batch`, `forward_critic_batch`) both reading from the shared `BatchIo::obs_batch`, plus a `forward_critic` single-sample path for bootstrap values on the reward-collection and exit-flush paths. Action selection is **fully batched across all cars** — one mat-mat through the actor followed by one mat-mat through the critic, no per-car sequential forward. Training updates are **amortised across ticks** via `PreparedUpdate` and `ppo_epoch_system` — GAE is computed once, then `samples_per_tick` (default 32) samples are processed per tick. All mat-mat work routes through the active **GEMM backend** (scalar / matrixmultiply / accelerate, selected at compile time) via `src/brain/common/gemm_backend.rs`. Training uses **pre-allocated scratch buffers** (`BatchIo` for inputs + gradient seeds, `BatchScratch` for forward/backward intermediates, `SampleScratch` for critic-only single-sample forward) and **flat `Vec<f32>` weight storage** for cache-friendly traversal. Blocking flush on exit handles residual data.
-- **PopArt value-target normalisation** (round-2, 2026-04-19). `PpoBrain` holds a `ValueNorm { mu, sigma }` state updated once per PPO update before any training chunk: batch mean/variance of GAE returns is blended into `(mu, sigma)` via EMA (β = 1e-4), then the POP rescale is applied to `c_value` weights and bias so externally-observed predictions `σ·z + µ` are preserved across the statistics change. The training loss regresses `c_value`'s raw output against the normalised target `(ret − µ) / σ`, so the critic targets a stationary ~N(0, 1) distribution regardless of return scale. Denormalisation `σ·raw + µ` happens at inference call sites (bootstrap `forward_critic`, action-selection `forward_critic_batch` value reads, on-exit flush). When `config.popart_enabled = false`, `ValueNorm` stays at `(0, 1)` and the pipeline is numerically equivalent to the pre-PopArt path. See `context/references/value-target-normalisation.md` for derivation.
+- **PopArt value-target normalisation** (round-2, 2026-04-19). `PpoBrain` holds a `ValueNorm { mu, sigma }` state updated once per PPO update before any training chunk: batch mean/variance of GAE returns is blended into `(mu, sigma)` via EMA (β = 3e-2 after the 2026-04-19 hotfix — initial 1e-4 retained 85% of the zero-initial state after 1,500 updates and left the critic biased low), then the POP rescale is applied to `c_value` weights and bias so externally-observed predictions `σ·z + µ` are preserved across the statistics change. The training loss regresses `c_value`'s raw output against the normalised target `(ret − µ) / σ`, so the critic targets a stationary ~N(0, 1) distribution regardless of return scale. Denormalisation `σ·raw + µ` happens at inference call sites (bootstrap `forward_critic`, action-selection `forward_critic_batch` value reads, on-exit flush). When `config.popart_enabled = false`, `ValueNorm` stays at `(0, 1)` and the pipeline is numerically equivalent to the pre-PopArt path. See `context/references/value-target-normalisation.md` for derivation.
 - **Observation running mean/var normaliser** (round-2). `ObservationNormalizer` Resource applies Welford online per-dim mean/variance tracking in `build_observation_vector_system` after raw feature assembly. Pass-through during `warmup_samples = 1000`; afterwards centres and scales each of the 43 dims and clips to `[-10, 10]` (SB3 `VecNormalize.clip_obs` convention). Stats persist across episodes. When `enabled = false`, identity pass-through.
 - **PolicyOutput** component: written by `ppo_act_all_cars_system` each tick, exposes `value_prediction`, `steering_mean`/`steering_std`, `throttle_mean`/`throttle_std`. Read by the analytics trace capture system for policy confidence metrics.
 - **Analytics** has been comprehensively expanded: 16 tick-level trace fields (position, velocity decomposition, drift angle, min ray, velocity projection, centreline reward, policy confidence), 25 episode-level aggregates, a **crash classification system** (`CrashKind`: Slide, HeadOn, Overshoot, Spin, Stall), and a **15-section Markdown report** (sections 11–15 added 2026-04-19 for the round-2 diagnostic pass — pre-crash forensics, layer-health timeseries, PopArt µ/σ tracker, critic prediction-quality histogram, fleet variance). `PpoUpdateRecord` gained `return_min/mean/max/std`, `value_norm_mu/sigma`, `epochs_completed`, `early_stopped` (backwards-compatible via `#[serde(default)]`).
@@ -427,8 +449,9 @@ This section is explicit about where this upkeep pass relied on direct code insp
 - **Profiling** is feature-gated behind `--features profiling`. When the feature is off, all profiling code is compiled out entirely — zero runtime cost. When enabled, the app auto-exits after a configurable duration (default 30s) and exports JSON + Markdown performance reports to `reports/json/performance/` and `reports/performance/` respectively. Both include a `RunContext` snapshot which records the active **GEMM backend** under a `### Build` section (so every perf artefact is self-documenting about what produced it). Per-system timing covers all 17 FixedUpdate systems via an `instrument!()` macro. Reports have retention limits (3 reports per directory; oldest auto-deleted).
 - **GEMM backend** selection is compile-time via Cargo features. Default: Accelerate on macOS (via `cblas_sgemm`, dispatches to AMX coprocessor), `matrixmultiply` (pure-Rust BLIS NEON microkernel) elsewhere. `--features force-scalar` forces the naive reference kernel; `--features force-matrixmultiply` forces the portable Rust kernel on any platform; `--features force-accelerate` forces Apple Accelerate (macOS-only, compile-error elsewhere). Mutually exclusive — compile-error if two are set. macOS `main.rs` pins `VECLIB_MAXIMUM_THREADS=1` at startup to prevent Accelerate's internal thread pool from fighting Bevy for cores at our small matrix sizes.
 - **Performance is no longer the constraint**. Post-2026-04-18 dual-backend + batched-actor work, mean frame time dropped from 15.7 ms to 0.735 ms (21× overall), PPO Epoch from 13.5 ms to 0.446 ms (30×), action selection from 1.98 ms to 0.126 ms (16×). Budget utilisation went from 94% to 4.4%. Zero stutters, 0% frames over budget. See `notes/performance-tuning-lessons.md` for the contributing factors.
-- The project is in a **transitional architecture state**:
-  - The repository intent targets brain-inspired local plasticity (Milestones 2–9).
-  - The implemented learning path is a handwritten PPO baseline used to validate the environment and observation contract (Milestone 1). Cars are confirmed to learn — drifting corners observed.
-- `README.md` is directionally accurate but its Milestone 1 checklist understates implementation reality — PPO, debug HUD, analytics export, velocity-projection reward, expanded observations, and crash classification are all live.
-- The finish-line removal, random-spawn paradigm, velocity-projection reward, expanded observations, and analytics overhaul have all been **implemented**. The system is now in a coherent post-paradigm-shift state.
+- The project is in a **transitional architecture state, with Milestone 1 (baseline validation) confirmed complete**:
+  - Round-2 training run `reports/analytics/run_1776556719.md` — 2,271 episodes, 1,582 PPO updates — showed **all 8 cars completing the full track loop**, fleet max-progress spread 1.1%, crash rate falling from 100% to 56% in the best chunk, mean speed rising monotonically, and pre-crash analytics confirming the policy anticipates (96% of crashes had throttle released > 0.25 s before impact). The environment, observation contract, and reward shaping are confirmed learnable.
+  - The repository intent targets brain-inspired local plasticity (Milestones 2–9). That transition is the next active work area.
+  - PPO becomes **stable reference machinery** from here forward. See `notes/baseline-to-brain-inspired.md` for the full transition framing and what carries forward to the next phase.
+- `README.md` is directionally accurate but its Milestone 1 checklist understates implementation reality — PPO, debug HUD, analytics export, velocity-projection reward, expanded observations, crash classification, PopArt, observation normalisation, and target-KL early stop are all live.
+- The finish-line removal, random-spawn paradigm, velocity-projection reward, expanded observations, analytics overhaul, and round-2 critic target-scaling interventions have all been **implemented**. The system is now in a coherent post-baseline state.

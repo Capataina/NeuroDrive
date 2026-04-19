@@ -162,7 +162,7 @@ The Markdown report is designed to be readable by someone unfamiliar with the co
 
 ## Partial / In Progress
 
-- No live TUI viewer yet — only post-run reports. The performance-optimisation plan describes the vision for a real-time TUI.
+- No live TUI viewer yet — only post-run reports. `plans/analytics-tui.md` describes the future vision for a real-time analytics+performance TUI.
 
 ## Planned / Missing / Likely Changes
 

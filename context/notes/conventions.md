@@ -2,7 +2,7 @@
 
 Recurring patterns that appear in three or more locations across the codebase and are **not** enforced by `rustfmt`, `clippy`, or the type system. A new contributor (human or agent) would not discover these from the code alone — they are de facto standards that should be maintained for consistency.
 
-Captured during the 2026-04-18 upkeep pass after source-level scans.
+Captured during the 2026-04-18 upkeep pass after source-level scans; refreshed 2026-04-19 after the round-2 critic target-scaling work landed (PopArt + observation normaliser + target-KL early stop).
 
 ## Current Understanding
 
@@ -93,10 +93,26 @@ These conventions collectively enable:
 - **Zero-cost feature gating** for profiling, keeping the release binary small.
 - **Shared export infrastructure** (`RunContext`, `enforce_retention`), preventing parallel evolution of run metadata formats.
 
+### 10. Normalisation state lives on the Brain or its own Resource, never on the Model
+
+Running statistics that change during training — `ValueNorm { mu, sigma }` on `PpoBrain` for PopArt, `ObservationNormalizer` as a standalone Bevy `Resource` — are kept outside the `ActorCritic` network. The network struct stays focused on weights, gradients, and scratch; the running stats sit alongside it. Denormalisation then happens at well-defined boundary call sites (`forward_critic` bootstrap, the value read in `ppo_act_all_cars_system`, the exit flush) rather than baked into the forward pass.
+
+Reason: normalisation state has a different lifecycle than network parameters (never reset between episodes, updated on different cadences, serialised differently if we ever save models) and blending it into the network struct creates coupling that makes ablations painful.
+
+### 11. Disable flags for every normaliser, for ablations
+
+Each training-time normaliser exposes an explicit off-switch:
+
+- `PpoConfig.popart_enabled: bool` — when false, `ValueNorm` stays at `(µ=0, σ=1)` and the POP rescale is skipped; the training pipeline is numerically equivalent to pre-PopArt.
+- `ObservationNormalizer.enabled: bool` — when false, the normaliser is an identity pass-through regardless of warmup state.
+- `PpoConfig.target_kl: Option<f32>` — `None` disables the target-KL early-stop guardrail entirely.
+
+Advantage normalisation is the exception — it is inherent to `ppo_process_chunk` and has no disable flag. Any future training-time transform should follow the same pattern so ablation experiments are one-line config edits, not refactors. See `notes/normalisation-layers.md` for the full picture of how the three normalisations compose.
+
 ## What Was Tried
 
 - **Earlier singleton `ActionState` / `EpisodeState` as Resources** — removed as part of the multi-car vectorised trainer work. Reverting would re-introduce first-car shims throughout analytics.
-- **Per-tick unsafe raw-pointer aliasing in `update.rs`** — kept because the scratch buffers it aliases are disjoint from the `&mut self` borrow's actual writes; removing it would require a major refactor of `ActorCritic::scratch` field layout. SAFETY comments document the aliasing contract (see `src/brain/ppo/update.rs:159-162` and `289-292`).
+- **Per-tick unsafe raw-pointer aliasing in `update.rs`** — fully removed in 2026-04-18 by splitting `ActorCritic` scratch into sibling `BatchIo` (inputs + gradient seeds) and `BatchScratch` (forward/backward intermediates) fields. Rust's disjoint-field borrow inference now accepts `&mut self.scratch` and `&self.batch_io.*` simultaneously without any raw-pointer aliasing. All `unsafe` blocks in `src/brain/common/gemm_*.rs` are FFI entry points into Apple Accelerate or `matrixmultiply`, not a Rust-internal workaround.
 - **Per-feature runtime toggles** — never used; profiling is compile-time gated only.
 
 ## Guiding Principles

@@ -137,7 +137,7 @@ The compact JSON is typically kilobytes; the full trace JSON can be tens of mega
 
 ### Markdown Report Structure
 
-The report is organised around **diagnostic questions** across 15 sections, each with auto-generated takeaway sentences. Sections 11–15 were added in round-2 (2026-04-19) to support the critic target-scaling measurement — see `context/plans/analytics-round2.md` and `context/plans/critic-target-scaling.md`.
+The report is organised around **diagnostic questions** across 15 sections, each with auto-generated takeaway sentences. Sections 11–15 were added in round-2 (2026-04-19) to support the critic target-scaling measurement. Those round-2 plan files have been pruned after completion; durable rationale lives in commit messages `c80d2ca` (analytics) and `3bed996` (fixes).
 
 | Section | Answers |
 |---------|---------|

@@ -128,7 +128,7 @@ Each epoch:
 
 The critic target-scaling round landed four orthogonal changes against the
 anticipatory-value failure diagnosed from `reports/analytics/run_1776543971.md`.
-See `context/plans/critic-target-scaling.md` for the plan and the three
+The round-2 plan file (`context/plans/critic-target-scaling.md`) has been pruned after its completion criteria were fully met; its durable content lives in commit messages `c80d2ca`, `3bed996`, `a0b2cb6`, `e86e737` and in this file. The three
 research references under `context/references/` for derivation.
 
 **γ = 0.995.** Credit horizon 1.67s → 3.33s. Previously, a wall-at-2s signal

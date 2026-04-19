@@ -42,4 +42,4 @@ This lets a future session run ablations cleanly — flip one switch, re-run, co
 
 - `context/references/value-target-normalisation.md` — PopArt derivation and Rust implementation sketch.
 - `context/references/ppo-critic-architecture.md` — saturation diagnosis; includes the steelman section explaining when advantage norm is incorrectly blamed for critic issues.
-- `context/plans/critic-target-scaling.md` — the shipping plan that landed PopArt + observation norm in the same commit batch.
+- Commit `3bed996` — the single integrated change that landed PopArt + observation normaliser + γ=0.995 + target-KL early stop together. Its message contains the full per-intervention rationale.
