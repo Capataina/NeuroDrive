@@ -1,4 +1,8 @@
-use crate::game::car::{SpawnConfig, SpawnRng, TrainerConfig, spawn_car};
+use crate::brain::types::Controller;
+use crate::game::car::{
+    Car, CarColour, SpawnConfig, SpawnRng, TrainerConfig, TrainerLayout, car_colour_cool,
+    car_colour_for_env, car_colour_warm, spawn_car,
+};
 use crate::game::collision::collision_detection_system;
 use crate::game::episode::EpisodeConfig;
 use crate::game::physics::car_physics_system;
@@ -46,7 +50,7 @@ impl Plugin for GamePlugin {
     }
 }
 
-/// Initial game setup: camera and multi-car spawn.
+/// Initial game setup: camera and multi-car spawn for the default layout.
 /// All cars spawn at random centreline positions — no privileged car 0.
 fn setup_game(
     mut commands: Commands,
@@ -62,26 +66,90 @@ fn setup_game(
         return;
     };
 
-    let num_envs = trainer_config.num_envs;
     info!(
-        "Track ready. Spawning {} cars at random centreline positions.",
-        num_envs
+        "Track ready. Spawning cars for layout {:?}.",
+        trainer_config.layout
     );
 
-    for i in 0..num_envs {
-        let s = spawn_rng.0.random::<f32>() * track.centerline.total_length();
+    spawn_cars_for_layout(
+        &mut commands,
+        &trainer_config,
+        track,
+        &mut spawn_rng,
+    );
+}
+
+/// Spawns the set of cars described by `trainer_config.layout`. Idempotent
+/// on an empty world — existing cars should be despawned by the caller
+/// beforehand (see the F4 toggle in `brain::plugin`).
+pub fn spawn_cars_for_layout(
+    commands: &mut Commands,
+    trainer_config: &TrainerConfig,
+    track: &Track,
+    spawn_rng: &mut SpawnRng,
+) {
+    let layout = trainer_config.layout;
+    let total = layout.total_cars();
+
+    let mut env_id_counter: u32 = 0;
+    let mut emit_car = |commands: &mut Commands,
+                        rng: &mut SpawnRng,
+                        controller: Controller,
+                        palette_index: u32| {
+        let s = rng.0.random::<f32>() * track.centerline.total_length();
         let position = track.centerline.point_at_s(s);
         let tangent = track.centerline.tangent_at_s(s);
         let rotation = tangent.y.atan2(tangent.x);
         let spawn_config = SpawnConfig { position, rotation };
 
-        // First car gets full alpha as default best until ranking kicks in.
-        let alpha = if i == 0 {
+        let colour = match (layout, controller) {
+            (TrainerLayout::SideBySide { .. }, Controller::Ppo) => car_colour_warm(palette_index),
+            (TrainerLayout::SideBySide { .. }, Controller::Brain) => car_colour_cool(palette_index),
+            _ => car_colour_for_env(env_id_counter),
+        };
+
+        let alpha = if env_id_counter == 0 {
             trainer_config.best_car_alpha
         } else {
             trainer_config.default_car_alpha
         };
 
-        spawn_car(&mut commands, i as u32, spawn_config, alpha, s);
+        spawn_car(
+            commands,
+            env_id_counter,
+            spawn_config,
+            alpha,
+            s,
+            colour,
+            controller,
+        );
+        env_id_counter += 1;
+    };
+
+    match layout {
+        TrainerLayout::Keyboard => {
+            emit_car(commands, spawn_rng, Controller::Keyboard, 0);
+        }
+        TrainerLayout::AllPpo { count } => {
+            for i in 0..count {
+                emit_car(commands, spawn_rng, Controller::Ppo, i as u32);
+            }
+        }
+        TrainerLayout::AllBrain { count } => {
+            for i in 0..count {
+                emit_car(commands, spawn_rng, Controller::Brain, i as u32);
+            }
+        }
+        TrainerLayout::SideBySide { ppo, brain } => {
+            for i in 0..ppo {
+                emit_car(commands, spawn_rng, Controller::Ppo, i as u32);
+            }
+            for i in 0..brain {
+                emit_car(commands, spawn_rng, Controller::Brain, i as u32);
+            }
+        }
     }
+
+    debug_assert_eq!(env_id_counter as usize, total);
+    let _ = (Car::default(), CarColour { r: 0.0, g: 0.0, b: 0.0 }); // keep imports live
 }

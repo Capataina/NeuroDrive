@@ -6,7 +6,7 @@ use crate::agent::action::ActionState;
 use crate::agent::observation::{ObservationConfig, SensorReadings};
 use crate::analytics::metrics::turns::compute_trace_metrics;
 use crate::analytics::models::{EpisodeTrace, TickTraceRecord};
-use crate::brain::types::{AgentMode, PolicyOutput};
+use crate::brain::types::{BrainCar, PolicyOutput, PpoCar};
 use crate::game::car::{Car, EnvInstanceId};
 use crate::game::episode::{EpisodeEndReason, EpisodeState};
 use crate::maps::track::Track;
@@ -85,17 +85,31 @@ impl PerCarTraceAccumulators {
 }
 
 /// Captures per-tick trajectory data for every car's active episode.
+///
+/// `Option<&PpoCar>` and `Option<&BrainCar>` markers discriminate which
+/// controller drives this car so we know whether `PolicyOutput` fields
+/// represent a Gaussian policy (PPO) or raw output-neuron activations
+/// (brain-inspired) — both paths populate the `policy_*` fields, but the
+/// semantics differ and analytics downstream needs to distinguish.
 pub fn capture_episode_tick_trace_system(
-    mode: Res<AgentMode>,
     observation_config: Res<ObservationConfig>,
     car_query: Query<
-        (&EnvInstanceId, &EpisodeState, &ActionState, &SensorReadings, &Transform, &PolicyOutput),
+        (
+            &EnvInstanceId,
+            &EpisodeState,
+            &ActionState,
+            &SensorReadings,
+            &Transform,
+            &PolicyOutput,
+            Option<&PpoCar>,
+            Option<&BrainCar>,
+        ),
         With<Car>,
     >,
     track_query: Query<&Track>,
     mut accumulators: ResMut<PerCarTraceAccumulators>,
 ) {
-    for (env_id, episode_state, action_state, sensors, transform, policy_output) in car_query.iter() {
+    for (env_id, episode_state, action_state, sensors, transform, policy_output, is_ppo, is_brain) in car_query.iter() {
         let done = episode_state.tick.end_reason.is_some();
         let target_episode_id = if done {
             episode_state.current_episode.saturating_sub(1)
@@ -119,13 +133,17 @@ pub fn capture_episode_tick_trace_system(
                 ([0.0f32; 12], [0.0f32; 12])
             };
 
-        let value_prediction = if *mode == AgentMode::Ai {
+        // Both PPO (value prediction) and brain-inspired (modulator M, per S2)
+        // write `value_prediction` into `PolicyOutput`. Keyboard-driven cars
+        // leave it untouched so we suppress it rather than record a stale value.
+        let controller_active = is_ppo.is_some() || is_brain.is_some();
+        let value_prediction = if controller_active {
             Some(policy_output.value_prediction)
         } else {
             None
         };
 
-        let is_ai = *mode == AgentMode::Ai;
+        let is_ai = controller_active;
 
         let tick_index = accumulator.ticks.len() as u32 + 1;
         accumulator.ticks.push(TickTraceRecord {

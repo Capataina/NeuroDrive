@@ -15,7 +15,7 @@ use crate::agent::action::{
     ActionState, CarAction, action_smoothing_system, keyboard_action_input_system,
 };
 use crate::agent::observation::{OBSERVATION_DIM, ObservationVector};
-use crate::brain::types::{AgentMode, PolicyOutput};
+use crate::brain::types::{PolicyOutput, PpoCar};
 use crate::game::car::{Car, EnvInstanceId};
 use crate::game::episode::EpisodeState;
 
@@ -312,15 +312,13 @@ impl Plugin for PpoPlugin {
 /// The Gaussian sampling in pass 3 must stay sequential to preserve the
 /// shared-RNG determinism contract (same seed → same action stream).
 pub fn ppo_act_all_cars_system(
-    mode: Res<AgentMode>,
-    mut car_query: Query<(bevy::ecs::entity::Entity, &EnvInstanceId, &ObservationVector, &mut ActionState, &mut PolicyOutput), With<Car>>,
+    mut car_query: Query<
+        (bevy::ecs::entity::Entity, &EnvInstanceId, &ObservationVector, &mut ActionState, &mut PolicyOutput),
+        (With<Car>, With<PpoCar>),
+    >,
     mut brain: ResMut<PpoBrain>,
     mut buffer: ResMut<TrainerRolloutBuffer>,
 ) {
-    if *mode != AgentMode::Ai {
-        return;
-    }
-
     let obs_dim = brain.model.scratch.obs_dim;
     let act_dim = brain.model.scratch.act_dim;
 
@@ -434,16 +432,11 @@ pub fn ppo_act_all_cars_system(
 /// horizon, prepares a PPO update (GAE + frozen buffer) for the epoch system
 /// to process one epoch per tick.
 pub fn ppo_collect_rewards_all_cars_system(
-    mode: Res<AgentMode>,
-    car_query: Query<(&EnvInstanceId, &ObservationVector, &EpisodeState), With<Car>>,
+    car_query: Query<(&EnvInstanceId, &ObservationVector, &EpisodeState), (With<Car>, With<PpoCar>)>,
     mut brain: ResMut<PpoBrain>,
     mut buffer: ResMut<TrainerRolloutBuffer>,
     mut update_state: ResMut<PpoUpdateState>,
 ) {
-    if *mode != AgentMode::Ai {
-        return;
-    }
-
     if buffer.pending_rewards() == 0 {
         return;
     }
@@ -503,15 +496,10 @@ pub fn ppo_collect_rewards_all_cars_system(
 /// one — remaining scheduled epochs are skipped and `stats.early_stopped`
 /// is set. See `context/references/ppo-tuning-knobs-racing.md` Section B.
 pub fn ppo_epoch_system(
-    mode: Res<AgentMode>,
     mut brain: ResMut<PpoBrain>,
     mut update_state: ResMut<PpoUpdateState>,
     mut stats: ResMut<PpoTrainingStats>,
 ) {
-    if *mode != AgentMode::Ai {
-        return;
-    }
-
     let Some(prepared) = update_state.prepared.as_mut() else {
         return;
     };
@@ -565,8 +553,7 @@ pub fn ppo_epoch_system(
 /// Runs synchronously since frame budget does not matter at shutdown.
 pub fn ppo_flush_on_exit_system(
     mut exit_events: MessageReader<AppExit>,
-    mode: Res<AgentMode>,
-    car_query: Query<(&EnvInstanceId, &ObservationVector, &EpisodeState), With<Car>>,
+    car_query: Query<(&EnvInstanceId, &ObservationVector, &EpisodeState), (With<Car>, With<PpoCar>)>,
     mut brain: ResMut<PpoBrain>,
     mut buffer: ResMut<TrainerRolloutBuffer>,
     mut update_state: ResMut<PpoUpdateState>,
@@ -576,7 +563,9 @@ pub fn ppo_flush_on_exit_system(
         return;
     }
 
-    if *mode != AgentMode::Ai {
+    // If no PPO cars exist (layout = Keyboard / AllBrain), nothing to flush;
+    // make sure any stale state is cleared rather than processed.
+    if car_query.iter().next().is_none() {
         buffer.clear();
         update_state.prepared = None;
         return;

@@ -1,31 +1,52 @@
 use bevy::prelude::*;
 
-/// The active mode of the agent.
-#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AgentMode {
+/// Identifies which controller drives a given car.
+///
+/// Carried as a per-car component so the runtime can mix controllers in the
+/// same simulation (the side-by-side layout in Milestone 6 runs 8 PPO cars
+/// and 8 brain-inspired cars at once). Also used by analytics and HUD to
+/// discriminate which fields apply per car.
+///
+/// ZST marker components (`PpoCar`, `BrainCar`, `KeyboardCar`) are attached
+/// alongside this enum so systems can filter via `With<PpoCar>` — idiomatic
+/// Bevy and faster than matching on the enum value in every system.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Controller {
     Keyboard,
-    Ai,
+    Ppo,
+    Brain,
 }
 
-impl Default for AgentMode {
-    fn default() -> Self {
-        Self::Ai // Default to AI for Milestone 1
-    }
-}
+/// Marker component: PPO drives this car.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct PpoCar;
 
-/// Per-car component exposing the brain's internal predictions for analytics.
-/// Written by the act system each tick when in AI mode.
+/// Marker component: the brain-inspired learner drives this car.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct BrainCar;
+
+/// Marker component: WASD input drives this car.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct KeyboardCar;
+
+/// Per-car component exposing controller internals for analytics and HUD.
+///
+/// Field semantics depend on the active controller on this car:
+///
+/// - In PPO (`PpoCar`): fields carry the Gaussian-policy mean and std for
+///   each action dimension and the critic's value prediction.
+/// - In brain-inspired (`BrainCar`): `steering_mean` / `throttle_mean` carry
+///   the raw output-neuron activations, `*_std` are 0.0 (the brain is
+///   deterministic given observations), and `value_prediction` carries the
+///   per-tick modulator M starting in Stage 2.
+///
+/// Analytics reads this component unconditionally; semantics are
+/// discriminated downstream by the per-car `PpoCar` / `BrainCar` marker.
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct PolicyOutput {
-    /// Critic's estimate of the current state value.
     pub value_prediction: f32,
-    /// Policy distribution mean for steering.
     pub steering_mean: f32,
-    /// Policy distribution std for steering.
     pub steering_std: f32,
-    /// Policy distribution mean for throttle.
     pub throttle_mean: f32,
-    /// Policy distribution std for throttle.
     pub throttle_std: f32,
 }
-

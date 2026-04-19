@@ -1,7 +1,5 @@
 use bevy::prelude::*;
 
-use crate::game::car::EnvInstanceId;
-
 /// Continuous action interface for the car.
 ///
 /// This is the stable control surface used by all controllers (keyboard,
@@ -64,20 +62,16 @@ impl Default for ActionSmoothing {
     }
 }
 
-/// Latches keyboard input into the fixed-tick `ActionState.desired`.
+/// Latches keyboard input into the fixed-tick `ActionState.desired` for every
+/// car marked with the `KeyboardCar` component.
 ///
-/// In multi-car mode, keyboard controls `EnvInstanceId(0)` as a stable target.
+/// Keyboard mode spawns a single car, so in practice this writes one desired
+/// action per tick. In theory (e.g. for debugging) multiple `KeyboardCar`s
+/// all receive the same WASD input.
 pub fn keyboard_action_input_system(
-    mode: Option<Res<crate::brain::types::AgentMode>>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut car_query: Query<(&EnvInstanceId, &mut ActionState)>,
+    mut car_query: Query<&mut ActionState, With<crate::brain::types::KeyboardCar>>,
 ) {
-    if let Some(m) = mode {
-        if *m != crate::brain::types::AgentMode::Keyboard {
-            return;
-        }
-    }
-
     let mut steering = 0.0;
     if keyboard.pressed(KeyCode::KeyA) {
         steering -= 1.0;
@@ -93,11 +87,8 @@ pub fn keyboard_action_input_system(
     };
 
     let desired = CarAction { steering, throttle }.clamped();
-    for (env_id, mut action_state) in car_query.iter_mut() {
-        if env_id.0 == 0 {
-            action_state.desired = desired;
-            break;
-        }
+    for mut action_state in car_query.iter_mut() {
+        action_state.desired = desired;
     }
 }
 
