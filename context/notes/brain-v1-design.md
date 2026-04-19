@@ -64,11 +64,11 @@ Both are slow compared to the per-tick plasticity updates — they kick in over 
 
 Per `structural-plasticity-neuroevolution.md` research, the chosen technique is **continual backprop** (Dohare et al. 2024) — the only published structural-plasticity technique with demonstrated PPO + continuous-control + continual-training results. Adapted to our graph topology:
 
-- **Per-neuron utility metric:** track each neuron's contribution (mean absolute output × mean absolute sum of outgoing weights, or similar). Low-utility neurons get replaced.
-- **Neuron replacement:** zero out the neuron's outgoing synapses, resample its incoming synapses. Behaviour-preserving at the moment of replacement.
-- **Plateau-triggered neurogenesis:** when the running reward stops improving for N episodes, add a new neuron with random connections. Net2Wider-style width growth, adapted to graph form.
-- **Synapse pruning:** below-threshold magnitude synapses get removed entirely.
-- **Synapse sprouting:** occasionally, two highly-correlated but unconnected neurons get a new random edge (biological "sprouting" analog).
+- **Per-neuron utility metric:** track each neuron's contribution (mean absolute output × mean absolute sum of outgoing weights, or similar). Low-utility neurons get recycled.
+- **Apoptosis + neurogenesis (slot-based):** low-utility neurons effectively "die" — outgoing synapses zeroed, incoming synapses resampled — and a fresh neuron takes the slot. Mechanically this is one operation; biologically it is two (cell death + new-neuron formation). Behaviour-preserving at the moment of replacement. See the "Known Biological Simplifications" section in `README.md` for rationale — real biology does not have slot-reuse, but at our scale the bookkeeping simplification is reasonable.
+- **Plateau-triggered neurogenesis:** when the running reward stops improving for N episodes, add a new neuron with random connections. Net2Wider-style width growth, adapted to graph form. Location-unrestricted (see Known Simplifications — real neurogenesis is localised).
+- **Synapse pruning:** below-threshold magnitude synapses get removed entirely from the graph.
+- **Synapse sprouting:** occasionally, two highly-correlated but unconnected neurons get a new random edge (biological "sprouting" analog). No spatial-proximity constraint (see Known Simplifications — real synaptogenesis requires axonal growth to physical neighbours).
 
 **Depth is fixed, width is variable.** Net2DeeperNet's identity-preserving depth growth requires ReLU and fails with tanh. We are staying on tanh per the PPO baseline's hard-learned lesson, so we grow the graph's *width* (neuron count + synaptic density) but not its *depth*. In graph terms, "depth" is the typical path length from input to output — we constrain it by limiting per-hop distances rather than explicit layer count.
 

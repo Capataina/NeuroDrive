@@ -274,8 +274,8 @@ The result is a synaptic web that continuously rewires itself: strengthening use
 
 Beyond synaptic dynamics, the graph itself grows and reshapes. The v1 brain implements continual-backprop-style structural plasticity (Dohare et al., Nature 2024), adapted to graph topology:
 
-- **Neuron replacement**: low-utility neurons get their outgoing edges zeroed and incoming edges resampled. Behaviour-preserving at the moment of replacement — the neuron's slot is reused with a fresh random identity.
-- **Neurogenesis**: when learning plateaus, new neurons appear with random connections to existing neurons.
+- **Apoptosis + neurogenesis (slot-based)**: low-utility neurons effectively "die" — their outgoing edges zero out and their incoming edges get resampled — and a fresh neuron takes the same slot. Mechanically this is one operation; biologically it is two (cell death plus new-neuron formation). Behaviour-preserving at the moment of replacement.
+- **Plateau-triggered neurogenesis**: when learning stalls, the graph grows — a new neuron appears with random connections to existing neurons.
 
 Depth is fixed (tanh activations are incompatible with identity-preserving depth growth). Width and synaptic density grow freely. The brain literally reshapes itself during training — neurons appear and get recycled, synapses sprout and prune — while the I/O contract (43 input neurons, 2 output neurons) stays stable.
 
@@ -432,19 +432,38 @@ Different connectivity biases, different plasticity rules.
 
 ---
 
+## Known Biological Simplifications
+
+There is a third category distinct from Long-Term Plan and Research Frontier: things NeuroDrive **deliberately does less biologically than reality**, with explicit rationale. These are not "we will add this later" and not "this is out of reach" — they are acknowledged compromises inherent to the v1 scope, captured so they do not pass quietly into the design.
+
+| Simplification | Biological reality | Why we simplify |
+|----------------|--------------------|-----------------|
+| **Unrestricted neurogenesis location** | Adult neurogenesis is highly localised in real brains (dentate gyrus, possibly olfactory bulb). Motor cortex does not grow new neurons. | At our scale (~500 neurons, no regional differentiation), "where" a new neuron appears is not meaningful. We accept free-location neurogenesis as a scale abstraction. |
+| **Slot-recycling neuron replacement** | Real neurons die (apoptosis) and are not replaced in the same "slot" outside the restricted neurogenesis regions. There is no biological mechanism for "a new neuron with random initial connections takes over the dead one's position." | Reframed in the design as "apoptosis + neurogenesis in one step" — mechanically identical, biologically more honest. Real biology would have the dead neuron's slot simply empty out; we reuse it to keep graph-size bookkeeping simple. |
+| **No spatial constraints on synapse formation** | Synaptogenesis in real brains requires physical proximity — axons must physically grow to their targets. Neurons whose processes cannot reach each other cannot connect. | NeuroDrive's graph has no spatial layout, so there is no "proximity" to constrain. Any co-active unconnected pair can sprout an edge. Adding spatial layout would be a large architectural addition for small biological gain at our scale. |
+| **Uniform global neuromodulator broadcast** | Real neuromodulators have specific spatial projection patterns (dopamine from VTA projects to striatum and prefrontal cortex, not uniformly). | Until multi-region architecture lands (Research Frontier), there are no regions to project to. v1 broadcasts M uniformly to all synapses. |
+| **One universal learning rule** | Real brain regions use genuinely different plasticity rules — hippocampus uses STDP, cerebellum uses climbing-fibre error signals, basal ganglia uses dopamine-RPE, cortex uses three-factor-ish rules. | v1 applies the same three-factor rule everywhere. Without multi-region architecture, there is nothing to vary across. |
+| **Compressed homeostatic timescales** | Real synaptic scaling takes on the order of 24 hours; intrinsic excitability adjusts over hours. | Our in-game time is compressed — a 30-second episode maps to hours of biological-equivalent learning. Homeostatic mechanisms run in the range of seconds to minutes of game time. We do not attempt to replicate the wall-clock timescales. |
+| **Random seed wiring** | Real brains come pre-wired with hundreds of millions of years of evolutionary priors — specific connectivity patterns, cell-type layouts, and computational templates are inherited, not learned. | NeuroDrive's seed graph is random. Adding evolutionary priors would be a form of evolution, which the project explicitly rules out. Random init is a deliberate scope choice. |
+| **Full biological scale** | Human brain: ~86 billion neurons, ~100 trillion synapses. | NeuroDrive v1 starts at ~60 neurons and may grow to a few thousand. Eight orders of magnitude smaller than a brain. Out of reach computationally and not necessary for a 2D racing task. |
+
+These simplifications are all consistent with "brain-inspired learning at small scale for a single task" — they are the things we give up to make the project tractable while preserving the core principles (local plasticity, neuromodulation, structural adaptation, homeostasis).
+
+---
+
 ## Research Frontier — Not Forgotten, Out of Scope
 
-Things we have considered and explicitly chosen not to roadmap, because they either require too-deep architectural rewrites, cross into speculative neuroscience territory, or don't earn their keep for a 2D racing task. **Captured here so they are not forgotten** — each has a concrete reason for being out of scope, and each would be promoted into the roadmap if that reason changed.
+Things NeuroDrive has considered and explicitly chosen not to roadmap, because they either require too-deep architectural rewrites, cross into speculative neuroscience territory, or don't earn their keep for a 2D racing task. **Captured here so they are not forgotten** — each has a concrete reason for being out of scope, and each would be promoted into the roadmap if that reason changed.
+
+Unlike the Known Simplifications above (which are "we do this differently on purpose"), these are "we genuinely cannot do this yet or should not try."
 
 | Feature | Reason out of scope |
 |---------|---------------------|
 | **Dendritic compartments** | Each neuron as a tree with local computations on branches (Guerguiev 2017, Larkum). Research frontier. Requires a fundamental redesign of the neuron model. |
 | **Glial cells** (astrocytes, oligodendrocytes, microglia) | Participate in biological learning in ways still being discovered. Almost no computational models exist. Research frontier. |
-| **Multi-region brain architecture** | Cortex, thalamus, basal ganglia, cerebellum, hippocampus, amygdala in their specific loops. Each is a research project in itself. |
+| **Multi-region brain architecture** | Cortex, thalamus, basal ganglia, cerebellum, hippocampus, amygdala in their specific loops. Each is a research project in itself. Adding this would also unlock several Known Simplifications (region-specific learning rules, spatial neuromodulator projection). |
 | **Developmental programs / critical periods** | The 2-year arc of infant brain development. Fundamentally incompatible with our "start from seed, learn immediately" framing. |
 | **Embodied proprioception** | Real motor learning has muscle-spindle, joint, and skin feedback. Our 43-dim observation is comparatively sparse. Would require a fundamentally richer sensor model. |
-| **Evolutionary priors** | Real brains come pre-wired with hundreds of millions of years of evolutionary biases. Our seed graph is random. Adding priors would be a form of evolution, which is ruled out. |
-| **Full biological scale** | 86 billion neurons, 100 trillion synapses. Out of reach computationally and conceptually out of scope for a 2D racing task. |
 
 These are **not permanently off-limits**. If a future research breakthrough changes the tractability of any of them, or if a specific pathology in the Long-Term Plan is only fixable by reaching further, they get promoted. The discipline is: every step into deeper biological territory must solve a real pathology, not just add biological vocabulary.
 

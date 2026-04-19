@@ -71,10 +71,13 @@ The seven papers converged on a single consistent design. Every paper independen
 │                     homeostat. Both slow compared to plasticity.     │
 │                                                                      │
 │   Structure change: Continual-backprop adapted to graph —            │
-│                     • Low-utility neurons replaced (edges rewired)   │
+│                     • Apoptosis + neurogenesis (slot-based) for      │
+│                       low-utility neurons                            │
 │                     • Plateau-triggered neurogenesis (Net2Wider)     │
 │                     • Below-threshold synapses pruned                │
 │                     • Co-active unconnected neurons sprout edges     │
+│                     (See README §Known Biological Simplifications    │
+│                      for what this abstracts away from biology.)     │
 │                                                                      │
 │   Activation:       tanh throughout. ReLU rejected from PPO-era      │
 │                     experience (34–57% dead neurons).                │
