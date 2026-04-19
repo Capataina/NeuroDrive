@@ -262,7 +262,7 @@ Both prevent the pathologies plasticity can introduce (weight explosion, neuron 
 
 ### Structural Plasticity — the "Brain That Grows" Feature
 
-Your intuition about watching a neural web grow and evolve is preserved intact. The v1 brain implements continual-backprop-style structural plasticity (Dohare et al., Nature 2024), adapted to graph topology:
+The vision of watching a neural web grow and evolve over time is preserved intact. The v1 brain implements continual-backprop-style structural plasticity (Dohare et al., Nature 2024), adapted to graph topology:
 
 - **Neuron replacement**: low-utility neurons get their outgoing edges zeroed and incoming edges resampled. Behaviour-preserving at the moment of replacement.
 - **Neurogenesis**: when learning plateaus, new neurons appear with random connections to existing neurons.
