@@ -11,6 +11,7 @@
 
 use neurodrive::brain::inspired::config::BrainInspiredConfig;
 use neurodrive::brain::inspired::graph::{BrainGraph, NeuronRole};
+use neurodrive::brain::inspired::plasticity::{CarLearnSample, apply_plasticity_tick};
 use neurodrive::brain::inspired::{NeuronActivations, forward_tick};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -131,4 +132,209 @@ fn forward_pass_output_is_in_action_range() {
         saw_nonzero,
         "forward pass returned identical zero-activation output on every tick"
     );
+}
+
+// ── S2: Three-factor plasticity ──────────────────────────────────────────
+
+/// Builds a small graph, writes synthetic activations, applies one tick of
+/// plasticity, and asserts eligibility decays toward zero when `M = 0` and
+/// `pre·post = 0`.
+#[test]
+fn eligibility_trace_decays_to_zero_with_m_zero() {
+    let mut config = BrainInspiredConfig::default();
+    config.obs_dim = 2;
+    config.action_dim = 1;
+    config.initial_hidden_neurons = 2;
+    config.initial_edge_density = 1.0; // Fully connect so we have plenty of synapses.
+
+    let mut rng = StdRng::seed_from_u64(21);
+    let mut graph = BrainGraph::seed(&config, 1, &mut rng);
+
+    // Seed eligibility with known non-zero values.
+    for syn in graph.synapses.iter_mut() {
+        syn.eligibility[0] = 1.0;
+    }
+
+    // Run 500 ticks with zero pre/post activations and M = 0 so eligibility
+    // just decays by λ each tick without any Hebbian accumulation.
+    let zeros = vec![0.0; graph.neurons.len()];
+    for _ in 0..500 {
+        let sample = CarLearnSample {
+            env_id: 0,
+            modulator: 0.0,
+            episode_done: false,
+            prev: &zeros,
+            curr: &zeros,
+        };
+        apply_plasticity_tick(&mut graph, &[sample], config.lambda, config.eta, true);
+    }
+
+    // After 500 ticks at λ=0.992, 1.0 → 0.992^500 ≈ 0.018. Accept a generous
+    // ceiling of 0.05 to stay above floating-point noise.
+    for syn in graph.synapses.iter() {
+        if syn.alive {
+            assert!(
+                syn.eligibility[0].abs() < 0.05,
+                "eligibility did not decay: {}",
+                syn.eligibility[0],
+            );
+        }
+    }
+}
+
+/// Weight delta is linear in η for fixed (eligibility, M). Verify by doubling η.
+#[test]
+fn weight_update_magnitude_scales_with_eta() {
+    let mut config = BrainInspiredConfig::default();
+    config.obs_dim = 2;
+    config.action_dim = 1;
+    config.initial_hidden_neurons = 2;
+    config.initial_edge_density = 0.8;
+
+    let mut rng_a = StdRng::seed_from_u64(99);
+    let mut graph_a = BrainGraph::seed(&config, 1, &mut rng_a);
+    let mut rng_b = StdRng::seed_from_u64(99);
+    let mut graph_b = BrainGraph::seed(&config, 1, &mut rng_b);
+
+    // Seed identical eligibility on both graphs.
+    for (a, b) in graph_a.synapses.iter_mut().zip(graph_b.synapses.iter_mut()) {
+        a.eligibility[0] = 0.5;
+        b.eligibility[0] = 0.5;
+    }
+    // Snapshot weights before update.
+    let weights_before: Vec<f32> = graph_a.synapses.iter().map(|s| s.weight).collect();
+
+    // Apply one tick with η and 2η. The activations are zero-filled, so the
+    // eligibility update itself is a no-op (λ decay only) — but the weight
+    // step uses the seeded eligibility, which is what we're testing.
+    let zeros = vec![0.0; graph_a.neurons.len()];
+    let sample = CarLearnSample {
+        env_id: 0,
+        modulator: 1.0,
+        episode_done: false,
+        prev: &zeros,
+        curr: &zeros,
+    };
+    apply_plasticity_tick(&mut graph_a, &[sample], config.lambda, config.eta, true);
+    apply_plasticity_tick(&mut graph_b, &[sample], config.lambda, 2.0 * config.eta, true);
+
+    // Each aligned pair of live synapses: Δb / Δa ≈ 2 (within f32 rounding).
+    for (i, (a, b)) in graph_a.synapses.iter().zip(graph_b.synapses.iter()).enumerate() {
+        if !a.alive || !b.alive {
+            continue;
+        }
+        let delta_a = a.weight - weights_before[i];
+        let delta_b = b.weight - weights_before[i];
+        if delta_a.abs() < 1e-8 {
+            continue;
+        }
+        let ratio = delta_b / delta_a;
+        assert!(
+            (ratio - 2.0).abs() < 1e-3,
+            "ratio Δb/Δa = {}, expected ≈ 2",
+            ratio
+        );
+    }
+}
+
+/// Run forward + plasticity for many ticks with adversarial inputs and
+/// assert no weight, eligibility, or activation goes NaN/Inf.
+#[test]
+fn plasticity_preserves_no_nan_no_inf_over_10k_ticks() {
+    let config = BrainInspiredConfig::default();
+    let mut rng = StdRng::seed_from_u64(314);
+    let mut graph = BrainGraph::seed(&config, 1, &mut rng);
+    let mut activations = NeuronActivations::default();
+
+    for t in 0..10_000 {
+        // Adversarial observation: oscillate between hard saturations.
+        let obs: Vec<f32> = (0..config.obs_dim)
+            .map(|i| if (t + i) % 2 == 0 { 5.0 } else { -5.0 })
+            .collect();
+        let (s, th) = forward_tick(&graph, &mut activations, &obs);
+        assert!(s.is_finite(), "steering non-finite at tick {}", t);
+        assert!(th.is_finite(), "throttle non-finite at tick {}", t);
+
+        // Modulator swings with hemispheric-sign flips.
+        let m = if t % 100 < 50 { 1.0 } else { -1.0 };
+        let sample = CarLearnSample {
+            env_id: 0,
+            modulator: m,
+            episode_done: t % 500 == 499,
+            prev: &activations.prev,
+            curr: &activations.curr,
+        };
+        apply_plasticity_tick(&mut graph, &[sample], config.lambda, config.eta, true);
+    }
+
+    for syn in graph.synapses.iter() {
+        assert!(syn.weight.is_finite(), "weight non-finite: {}", syn.weight);
+        for &e in syn.eligibility.iter() {
+            assert!(e.is_finite(), "eligibility non-finite: {}", e);
+        }
+    }
+    for n in graph.neurons.iter() {
+        assert!(n.bias.is_finite(), "bias non-finite");
+        assert!(n.mean_rate.is_finite(), "mean_rate non-finite");
+    }
+}
+
+/// After an episode terminal, that car's eligibility on every synapse must
+/// be zero; other cars' eligibility is unaffected.
+#[test]
+fn terminal_episode_zeros_eligibility() {
+    let config = BrainInspiredConfig::default();
+    let mut rng = StdRng::seed_from_u64(77);
+    let mut graph = BrainGraph::seed(&config, 3, &mut rng);
+
+    // Seed distinguishable eligibility values per car.
+    for syn in graph.synapses.iter_mut() {
+        syn.eligibility[0] = 0.9;
+        syn.eligibility[1] = 0.5;
+        syn.eligibility[2] = 0.3;
+    }
+
+    let zeros = vec![0.0; graph.neurons.len()];
+    let samples = vec![
+        CarLearnSample {
+            env_id: 0,
+            modulator: 0.0,
+            episode_done: true, // ← only car 0 terminates
+            prev: &zeros,
+            curr: &zeros,
+        },
+        CarLearnSample {
+            env_id: 1,
+            modulator: 0.0,
+            episode_done: false,
+            prev: &zeros,
+            curr: &zeros,
+        },
+        CarLearnSample {
+            env_id: 2,
+            modulator: 0.0,
+            episode_done: false,
+            prev: &zeros,
+            curr: &zeros,
+        },
+    ];
+    apply_plasticity_tick(&mut graph, &samples, config.lambda, config.eta, true);
+
+    for syn in graph.synapses.iter() {
+        if !syn.alive {
+            continue;
+        }
+        assert_eq!(syn.eligibility[0], 0.0, "car 0 eligibility not zeroed");
+        // Cars 1 and 2: decayed by λ but still non-zero.
+        let expected_1 = config.lambda * 0.5;
+        let expected_2 = config.lambda * 0.3;
+        assert!(
+            (syn.eligibility[1] - expected_1).abs() < 1e-5,
+            "car 1 eligibility drifted"
+        );
+        assert!(
+            (syn.eligibility[2] - expected_2).abs() < 1e-5,
+            "car 2 eligibility drifted"
+        );
+    }
 }

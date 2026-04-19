@@ -230,21 +230,84 @@ pub fn brain_act_all_cars_system(
     }
 }
 
-/// Per-tick plasticity system. Implemented in S2.
+/// Per-tick plasticity system (S2).
 ///
-/// S1 stub: no-op. Registered in the plugin so S2 is a one-function swap with
-/// no plugin wiring changes.
+/// Reads every `BrainCar`'s reward as the modulator M, applies the
+/// three-factor rule across all synapses, zeros eligibility on terminal, and
+/// updates running stats.
+///
+/// Two queries on the same entity set:
+/// - `read_query` provides `&EpisodeState` + `&NeuronActivations` (needed to
+///   compute `pre · post` from the activations buffers).
+/// - `write_query` provides `&mut PolicyOutput` so the per-car modulator M
+///   is surfaced in analytics.
+///
+/// The split is required because Bevy cannot borrow `&` and `&mut` on the
+/// same entity from a single query, but it allows two disjoint queries on
+/// the same entity set.
 pub fn brain_learn_all_cars_system(
-    _car_query: Query<
+    read_query: Query<
         (&EnvInstanceId, &EpisodeState, &NeuronActivations),
         (With<Car>, With<BrainCar>),
     >,
-    _brain: ResMut<BrainBrain>,
-    _stats: ResMut<BrainTrainingStats>,
+    mut write_query: Query<(&EnvInstanceId, &mut PolicyOutput), (With<Car>, With<BrainCar>)>,
+    mut brain: ResMut<BrainBrain>,
+    mut stats: ResMut<BrainTrainingStats>,
     _trainer_config: Res<TrainerConfig>,
 ) {
-    // S2 will implement eligibility trace updates + weight updates.
-    // S3 will hook in homeostasis on the structural cadence.
-    // S4 will hook in structural plasticity on the structural cadence.
-    // S5 will drain BrainRunningStats into BrainTrainingStats.
+    use self::plasticity::{CarLearnSample, apply_plasticity_tick, sample_plasticity_health};
+
+    if !brain.config.enable_plasticity {
+        return;
+    }
+
+    // Gather per-car samples. Activations slices borrow from the read_query
+    // iteration; that borrow is released when this block ends.
+    let mut samples: Vec<CarLearnSample> = Vec::with_capacity(8);
+    for (env_id, episode_state, activations) in read_query.iter() {
+        samples.push(CarLearnSample {
+            env_id: env_id.0,
+            modulator: episode_state.tick.reward,
+            episode_done: episode_state.tick.end_reason.is_some(),
+            prev: &activations.prev,
+            curr: &activations.curr,
+        });
+    }
+
+    if samples.is_empty() {
+        return;
+    }
+
+    let lambda = brain.config.lambda;
+    let eta = brain.config.eta;
+    let sum_per_car = brain.config.sum_per_car_updates;
+
+    let applied = apply_plasticity_tick(&mut brain.graph, &samples, lambda, eta, sum_per_car);
+    brain.stats.plasticity_updates = brain.stats.plasticity_updates.saturating_add(applied);
+
+    // Track the modulator and per-car M per PolicyOutput.
+    let m_sum: f32 = samples.iter().map(|s| s.modulator).sum();
+    let mean_m = m_sum / samples.len() as f32;
+    brain.stats.last_mean_m = mean_m;
+
+    // Samples collected read-only; now release that borrow and expose M.
+    let car_m: Vec<(u32, f32)> = samples.iter().map(|s| (s.env_id, s.modulator)).collect();
+    drop(samples);
+    for (env_id, mut policy_output) in write_query.iter_mut() {
+        if let Some((_, m)) = car_m.iter().find(|(id, _)| *id == env_id.0) {
+            policy_output.value_prediction = *m;
+        }
+    }
+
+    // Refresh plasticity-health metrics — cheap scan over synapses. S5 will
+    // gate this behind the structural cadence but for S2 we sample every tick
+    // so `last *_` stats stay live.
+    let health = sample_plasticity_health(&brain.graph);
+    brain.stats.mean_abs_weight = health.mean_abs_weight;
+    brain.stats.mean_abs_eligibility = health.mean_abs_eligibility;
+    brain.stats.dead_neuron_fraction = health.dead_neuron_fraction;
+
+    // S5 wires BrainTrainingStats.total_ticks; for S2 we increment here so
+    // analytics has a tick count to segment by.
+    stats.total_ticks = stats.total_ticks.saturating_add(1);
 }
