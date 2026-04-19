@@ -184,8 +184,14 @@ M2  PPO baseline from scratch                ███████████�
 M3  Multi-car + analytics pipeline           ████████████████████ 100%
 M4  Performance overhaul                     ████████████████████ 100%
 M5  Critic target-scaling                    ████████████████████ 100%
-M6  Brain-inspired v1                        ░░░░░░░░░░░░░░░░░░░░   0%  ← next
+M6  Brain-inspired v1                        ████████████████████ 100%
+M7  Brain visualisation                      ░░░░░░░░░░░░░░░░░░░░   0%  ← next
 ```
+
+Milestone 6 shipped as six staged commits (S1 plumbing → S2 plasticity →
+S3 homeostasis → S4 structural plasticity → S5 analytics → S6 side-by-side
+comparison). Every stage ended `cargo test` green; final suite is 133 tests
+across unit, pipeline, gemm, and brain integration.
 
 This is more than was originally scoped as "Milestone 1". The PPO baseline is not a toy — it is a substantial, optimised, fully-from-scratch implementation that evolved through multiple research rounds:
 
