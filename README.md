@@ -14,6 +14,31 @@ All learning logic, plasticity rules, and structural adaptation mechanisms are i
 
 ---
 
+## Guiding Principle — Biology-First
+
+The single most important design discipline of this project:
+
+> **When we hit a problem, the answer comes from biology, not the machine-learning toolkit.**
+
+Standard ML has a well-worn playbook for every failure mode — dropout for overfitting, batch norm for instability, experience replay for catastrophic forgetting. That playbook is a specific cultural response to the specific failure modes of backprop-trained networks. It is not the only way to solve these problems; it is the way the ML community converged on.
+
+NeuroDrive rejects that playbook entirely. When we encounter a problem:
+
+- Overfitting? Consult biology. (Homeostatic plasticity, sparse coding, neuromodulated consolidation.)
+- Slow learning? Consult biology. (Multi-timescale plasticity, attention, neurogenesis in specific regions.)
+- Network collapse / dead neurons? Consult biology. (Excitatory/inhibitory balance, synaptic homeostasis.)
+- Catastrophic forgetting? Consult biology. (Complementary learning systems, sleep-dependent replay.)
+- Poor generalisation? Consult biology. (Structural plasticity, lateral inhibition.)
+- Exploration collapse? Consult biology. (Noradrenergic arousal, novelty-driven dopamine.)
+
+**If biology does not have a clear answer, we pause and research the biology further. We do not reach for the ML toolkit as a shortcut.**
+
+This is the discipline that makes NeuroDrive different from "an RL agent with Hebbian bits bolted on." Every design decision is traceable to a specific biological mechanism, and every milestone names both a biological feature and the pathology it addresses.
+
+See `context/notes/biology-first-principle.md` for the detailed articulation.
+
+---
+
 ## What Does the Human Brain Actually Do When It Learns?
 
 ### In Simple Terms
@@ -42,35 +67,19 @@ Instead, it:
 - Continually adapts while acting in the world.
 - Slowly reshapes its structure through experience-driven plasticity.
 
-**Hence, the brain is neither a typical reinforcement learning system nor an evolutionary algorithm; rather, it learns through ongoing, local adaptation of its own structure and connections, guided but not dictated by rewards, enabling continuous and flexible learning from experience.**
+**The brain is neither a typical reinforcement learning system nor an evolutionary algorithm; it learns through ongoing, local adaptation of its own structure and connections, guided but not dictated by rewards, enabling continuous and flexible learning from experience.**
 
----
+### In Scientific Terms
 
-### In Scientific Terms (High Signal, Minimal Jargon)
+Biological learning involves a few key mechanisms that compose:
 
-Biological learning is believed to involve a few key mechanisms that compose together:
+- **Hebbian plasticity** — synapses strengthen when presynaptic and postsynaptic activity correlate.
+- **Eligibility traces** — synapses keep a short-lived "memory" of recent correlation, allowing reinforcement to arrive later.
+- **Neuromodulation (dopamine-like signals)** — a broadcast signal gates which recent changes consolidate.
+- **Homeostatic plasticity** — synaptic scaling and intrinsic excitability keep neurons in a healthy operating range.
+- **Structural plasticity** — over longer timescales, synapses form and prune, neurons appear and die, and circuits reorganise to allocate capacity where it matters.
 
-- **Hebbian plasticity**
-  Synapses strengthen when presynaptic and postsynaptic activity are correlated ("fire together, wire together").
-
-- **Spike-Timing Dependent Plasticity (STDP)**
-  The _timing_ of spikes matters: pre-before-post tends to strengthen; post-before-pre tends to weaken.
-
-- **Eligibility traces**
-  Synapses maintain a short-lived "memory" of recent correlation, allowing reinforcement to arrive later.
-
-- **Neuromodulation (dopamine-like signals)**
-  A broadcast signal (reward prediction error) gates consolidation: _which changes should stick_.
-
-- **Structural plasticity**
-  Over longer timescales, synapses form/prune and circuits reorganise to allocate capacity where it matters.
-
-Learning is therefore:
-
-- **Local** (credit assignment is done using synapse-local signals, not global gradients)
-- **Incremental** (continuous updates rather than rare re-training)
-- **Dynamical** (neurons have internal state; behaviour depends on time)
-- **Continual** (weights evolve during interaction, not just between episodes)
+Learning is therefore **local**, **incremental**, **dynamical**, and **continual** — every property that backprop-based training deliberately breaks.
 
 ---
 
@@ -78,22 +87,25 @@ Learning is therefore:
 
 NeuroDrive aims to replicate these principles in an engineered system:
 
-- A **sparse neural graph** with neuron state and synapses
-- **Local plasticity** rules (Hebbian / STDP-family)
-- **Eligibility traces** for delayed credit assignment
-- **Neuromodulation** (dopamine-like reward prediction errors)
-- **Structural plasticity** (growth + pruning under constraints)
-- **Continuous online learning** across episodes ("one brain, one lifetime")
+- A **sparse neural graph** (not a layered MLP) with neuron state and synapses.
+- **Local plasticity rules** (Hebbian / three-factor family).
+- **Eligibility traces** for delayed credit assignment.
+- **Neuromodulation** (dopamine-like teaching signal).
+- **Structural plasticity** (growth and pruning of neurons and synapses within a single brain's lifetime).
+- **Continuous online learning** across episodes ("one brain, one lifetime").
+- **Homeostatic mechanisms** to keep the network operating in a healthy regime.
 
 We do **not** use:
 
 - Genetic Algorithms / NEAT
 - Evolution Strategies
-- TensorFlow / PyTorch / JAX
-- Backpropagation-based training loops
+- TensorFlow / PyTorch / JAX / any external ML library
+- Backpropagation-based training loops in the brain-inspired learner
 
 This is not evolution across generations.
 This is **one persistent "brain"** learning within its lifetime.
+
+The project's permanent diagnostic baseline — the PPO controller that was used to validate the environment — is the one exception: it uses backprop, because it exists specifically to prove the environment is learnable under a known-working ML paradigm. PPO is not being replaced; it coexists permanently as a reference. The brain-inspired learner is **additive**.
 
 ---
 
@@ -101,34 +113,33 @@ This is **one persistent "brain"** learning within its lifetime.
 
 The environment is intentionally minimal yet non-trivial:
 
-- **Deterministic 60 Hz fixed-timestep** 2D top-down car physics
-- **Steering** `[-1, 1]` + **throttle** `[0, 1]` control (coast to full thrust — no braking, drag is the sole deceleration mechanism)
-- **Track boundaries** + corner-based collision detection
-- **Cumulative forward progress** measured as arc-length along the centreline from spawn
-- **Random spawn positions** — all cars spawn at random centreline positions, re-randomised on each episode reset
-- **Episode boundaries**: crash or 30-second timeout only — there is no finish line, no lap concept
+- **Deterministic 60 Hz fixed-timestep** 2D top-down car physics.
+- **Steering** `[-1, 1]` + **throttle** `[0, 1]` control (coast to full thrust — no braking, drag is the sole deceleration mechanism).
+- **Track boundaries** + corner-based collision detection.
+- **Cumulative forward progress** measured as arc-length along the centreline from spawn.
+- **Random spawn positions** — all cars spawn at random centreline positions, re-randomised on each episode reset.
+- **Episode boundaries**: crash or 30-second timeout only — there is no finish line, no lap concept.
+- **Multi-car vectorised trainer**: 8 cars run simultaneously (configurable via `TrainerConfig`), each with its own `env_id`, colour, and per-car state.
 
 The car must learn to:
 
-- Stay on track
-- Maximise forward progress along the centreline
-- Drive as fast as possible without crashing
-- Survive corners at speed
+- Stay on track.
+- Maximise forward progress along the centreline.
+- Drive as fast as possible without crashing.
+- Survive corners at speed.
 
-The environment is designed to provide **dense, interpretable learning signals** without turning the task into scripted control.
+The environment provides **dense, interpretable learning signals** without turning the task into scripted control.
 
-### Design Decisions
-
-Several environment design decisions were made through experimentation and are documented here because they are non-obvious:
+### Design Decisions (With Biology-First Justification)
 
 | Decision | Why | What We Tried First |
 |----------|-----|---------------------|
-| **No braking** (throttle `[0, 1]`) | Braking creates a safe local optimum — the policy converges to "mostly brake" every time | `[-1, 1]` throttle with `brake_force = 400`; policy mean converged to -0.60 |
-| **No finish line or laps** | With random spawns, a finish line creates perverse incentives (cars spawned near the line get easy completion bonuses) | Lap detection + lap completion bonus; removed entirely |
-| **Random spawn positions** | Fixed spawn creates a privileged starting experience; random spawn forces generalisation across all track sections | Car 0 at canonical start, ghost cars random; now all cars fully random |
-| **Crash penalty = 0** | Any crash penalty incentivises not moving; episode termination is already the cost of dying | Crash penalty of -5; cars learned to stay still or brake constantly |
-| **No survival bonus** | A per-tick bonus for staying alive incentivises the policy to play safe, producing boring behaviour | Considered but rejected based on reward philosophy |
-| **`rotation_speed = 8.0`** | The car needs to be physically capable of turning at speed; 4.0 was insufficient for tight corners | `rotation_speed = 4.0`; max turn rate was 3.8 degrees/tick, insufficient for U-turns |
+| **No braking** (throttle `[0, 1]`) | Braking creates a safe local optimum — the policy converges to "mostly brake" every time. Drag-only deceleration forces the agent to plan throttle release in advance, which is what biological drivers actually do. | `[-1, 1]` throttle with `brake_force = 400`; policy mean converged to -0.60 |
+| **No finish line or laps** | With random spawns, a finish line creates perverse incentives (cars spawned near the line get easy completion bonuses). Cumulative arc-length is a cleaner progress signal. | Lap detection + lap completion bonus; removed entirely |
+| **Random spawn positions** | Fixed spawn creates a privileged starting experience; random spawn forces generalisation across all track sections. Biological learners do not get to always start in the same state. | Car 0 at canonical start, ghost cars random; now all cars fully random |
+| **Crash penalty = 0** | Any crash penalty incentivises not moving; episode termination is already the cost of dying. Biological learners learn from episode termination, not from explicit punishment signals. | Crash penalty of -5; cars learned to stay still or brake constantly |
+| **No survival bonus** | A per-tick bonus for staying alive incentivises the policy to play safe, producing boring behaviour. Our entertainment-first reward philosophy rules this out. | Considered but rejected based on reward philosophy |
+| **`rotation_speed = 8.0`** | The car needs to be physically capable of turning at speed; 4.0 was insufficient for tight corners. | `rotation_speed = 4.0`; max turn rate was insufficient for U-turns |
 
 ---
 
@@ -142,8 +153,8 @@ The primary design constraint is **entertainment**: the simulation must be enter
 
 | Component | Formula | Purpose |
 |-----------|---------|---------|
-| **Velocity projection** | `dot(velocity, centreline_tangent) / speed_reference * velocity_reward_scale` | Rewards speed along the track direction — makes cars go fast |
-| **Centreline proximity** | `centreline_reward_coef * (1 - (dist / max_dist)^2)` | Gentle shaping signal to keep cars near the racing line |
+| **Velocity projection** | `dot(velocity, centreline_tangent) / speed_reference × velocity_reward_scale` | Rewards speed along the track direction — makes cars go fast |
+| **Centreline proximity** | `centreline_reward_coef × (1 − (dist / max_dist)²)` | Gentle shaping signal to keep cars near the racing line |
 | **Crash penalty** | `0.0` | Episode termination is the cost; no explicit penalty |
 | **Survival bonus** | None | Would incentivise safe, boring play |
 
@@ -151,166 +162,283 @@ The primary design constraint is **entertainment**: the simulation must be enter
 
 When the policy is not learning the right behaviour, the fix is **never** reward penalties or bonuses that would make safe play optimal. Instead:
 
-1. **Fix the critic** — if the critic cannot distinguish "about to crash" from "driving safely", the advantage signal for crash-avoidance actions is too weak.
-2. **Fix exploration** — if an action dimension collapses (e.g., throttle std approaches zero), the policy can never discover better strategies. Prevent premature collapse through entropy bonuses, log-std floors, or wider initial distributions.
-3. **Fix observations** — if the car does not have enough lookahead or the right features to anticipate corners, it cannot learn to prepare for them.
+1. **Fix the critic / value predictor** — if the value estimator cannot distinguish "about to crash" from "driving safely", the learning signal for crash-avoidance actions is too weak.
+2. **Fix exploration** — if an action dimension collapses, the policy can never discover better strategies.
+3. **Fix observations** — if the car does not have enough lookahead or the right features to anticipate corners, no learning rule will fix it.
+4. **Consult biology** — if none of the above work, the answer is in neuroscience, not in reward engineering.
 
 > In biology, reward signals guide plasticity but do not dictate behaviour directly.
 > NeuroDrive uses reward to gate learning, not to define a brittle objective function.
 
+The same reward design feeds both the PPO baseline and the brain-inspired learner. The brain-inspired learner consumes it via a three-factor plasticity rule that uses reward as the `M` modulator gating weight updates.
+
 ---
 
-## Current Implementation State
+## Current State — Milestones 1–5 Complete
 
-NeuroDrive is in a **transitional architecture state**. The long-term goal is brain-inspired local plasticity (Milestones 2–9). The current implementation is a handwritten **PPO baseline** used to validate that the environment, observation space, and reward structure are learnable before transitioning to biological learning rules.
-
-### What Is Live Today
+NeuroDrive has completed its **environment validation and baseline arc**. The PPO controller has been built from scratch in Rust, optimised for the M2 MacBook Air target platform, instrumented with comprehensive analytics, and validated to learn the task — all 8 cars now complete the full track loop within ~2,000 training episodes.
 
 ```
-Environment (Milestone 0)          ████████████████████ Complete
-PPO Baseline (Milestone 1)         ████████████████░░░░ ~90%
-Brain-Inspired Learning (M2+)      ░░░░░░░░░░░░░░░░░░░░ Not started
+M1  Environment + keyboard controller        ████████████████████ 100%
+M2  PPO baseline from scratch                ████████████████████ 100%
+M3  Multi-car + analytics pipeline           ████████████████████ 100%
+M4  Performance overhaul                     ████████████████████ 100%
+M5  Critic target-scaling                    ████████████████████ 100%
+M6  Brain-inspired v1                        ░░░░░░░░░░░░░░░░░░░░   0%  ← next
 ```
 
-The PPO baseline is not a toy. It is a substantial, optimised, from-scratch implementation:
+This is more than was originally scoped as "Milestone 1". The PPO baseline is not a toy — it is a substantial, optimised, fully-from-scratch implementation that evolved through multiple research rounds:
 
-| Component | Details |
-|-----------|---------|
-| **Algorithm** | PPO with clipped surrogate objective (epsilon = 0.2), 4 epochs per update |
-| **Architecture** | Asymmetric actor-critic — actor 2x64, critic 2x128, tanh activations |
-| **Initialisation** | Orthogonal (sqrt(2) hidden, 0.01x policy head, 1.0x value head) |
-| **Optimiser** | Actor: Adam (LR 3e-4). Critic: AdamW with weight decay lambda = 3e-4 (LR 5e-4) |
-| **Exploration** | Log-std floored at -1.0 (minimum sigma ~0.37), per-minibatch advantage normalisation, Fisher-Yates sample shuffling |
-| **Training** | Multi-car vectorised: 8 cars, shared rollout buffer with env_id tagging, per-env GAE (no cross-env value leakage) |
-| **Performance** | Amortised updates across ticks (64 samples/tick to avoid frame stutter), batched forward/backward passes, pre-allocated scratch buffers, flat `Vec<f32>` weight storage for cache-friendly traversal |
-| **Observations** | 43 dimensions (see below) |
-| **Actions** | Steering `[-1, 1]` via full tanh, throttle `[0, 1]` via `0.5*(tanh+1)` remapping |
+| Milestone | What shipped |
+|-----------|--------------|
+| **M1** | Deterministic 2D car physics (60 Hz), track + collision detection, raycast sensors, 43-dim observation contract, debug overlays. |
+| **M2** | PPO with clipped surrogate objective, asymmetric actor-critic (2×64 + 2×128), tanh activations, orthogonal init, AdamW weight decay on critic, log-std floor, per-minibatch advantage normalisation. |
+| **M3** | Multi-car vectorised trainer (8 cars), env-id-tagged rollout buffer, per-env GAE, live leaderboard, comprehensive analytics pipeline (16 tick fields, 25 episode aggregates, 5 crash types, 15-section Markdown reports). |
+| **M4** | Dual GEMM backend (Apple Accelerate → AMX + `matrixmultiply` portable fallback), batched multi-car action selection, flat weight storage, pre-allocated scratch buffers. **21× frame-time improvement**, budget utilisation 94% → 4.4%. |
+| **M5** | PopArt critic target normalisation, γ=0.995 (raised for credit horizon), Welford observation normaliser, target-KL early stop. Validated: all 8 cars complete the loop, fleet max-progress spread 1.1%. |
+
+The PPO controller is the project's **permanent diagnostic baseline** — it will not be retired when the brain-inspired learner ships. Both controllers coexist via a three-way `AgentMode` toggle (Keyboard / PPO / Brain-Inspired).
 
 ### Observation Space (43 Dimensions)
 
 ```
-Rays (11)
-├── 11 normalised raycast distances
-
-Kinematics (3)
-├── v_forward      car-local forward velocity component
-├── v_lateral      car-local lateral velocity component
-└── speed_delta    frame-over-frame acceleration signal
-
-Centreline (3)
-├── offset         signed lateral distance from centreline
-├── heading        heading error relative to centreline tangent
-└── curvature      local centreline curvature
-
-Lookahead (24)
-├── 12 heading deltas    (upcoming heading changes at 30–650 units)
-└── 12 curvatures        (upcoming curvature at 30–650 units)
-    Spacing: dense near (~30 unit gaps) for steering, sparser far (~80 unit gaps) for anticipation
-    650 units = ~2.17s warning at terminal velocity — enough to coast down through drag alone
-
-Previous Actions (2)
-├── previous_steering
-└── previous_throttle
+Rays (11)                11 normalised raycast distances
+Kinematics (3)           v_forward, v_lateral, speed_delta
+Centreline (3)           signed offset, heading error, local curvature
+Lookahead (24)           12 heading deltas + 12 curvatures (30–650 units, dense-near / sparse-far)
+Previous actions (2)     previous_steering, previous_throttle
 ```
 
-The observation space evolved significantly through experimentation:
+This contract is **stable** and consumed identically by PPO and by the upcoming brain-inspired learner.
 
-| Version | Dims | What Changed | Why |
-|---------|------|-------------|-----|
-| Initial | ~15 | Basic rays + speed + heading | Starting point |
-| + velocity decomposition | 23 | Replaced scalar speed with v_forward/v_lateral, added speed_delta | Car needs to know if it is sliding laterally vs moving forward |
-| + previous actions | 25 | Added previous_steering, previous_throttle | One-step action memory helps policy learn momentum-aware control |
-| + expanded lookahead | 43 | 4 samples (260 units) to 12 samples (650 units) | 4 points could not distinguish turn shapes (L vs C vs U vs S bends produce ambiguous patterns); 12 give an unambiguous sketch of road geometry |
+### Action Space
 
-### Multi-Car Vectorised Training
+```
+steering: [-1, 1]   via full tanh
+throttle: [ 0, 1]   via 0.5 · (tanh + 1)
+```
 
-The runtime is not a single-car simulation. It is a **multi-car vectorised trainer**:
-
-- **8 cars** run simultaneously (configurable via `TrainerConfig`)
-- All cars spawn at **random centreline positions**, re-randomised on each episode reset
-- Each car has its own colour from a 25-colour palette
-- Per-car components: `EnvInstanceId`, `CarColour`, `ActionState`, `EpisodeState`, `EpisodeMovingAverages`, `PolicyOutput`
-- One shared `TrainerRolloutBuffer` collects transitions from all cars with `env_id` tagging
-- GAE is computed per-env (no cross-env value leakage)
-- A `TrainerLiveRanking` resource tracks best/worst car with hysteresis
-- A live leaderboard panel shows per-car performance with colour swatches
-
-Running 8 cars produces ~2.5x more episodes per unit time than 3 cars, significantly accelerating learning.
+Also stable. Also consumed identically by both controllers.
 
 ---
 
-## Brain Architecture
+## Milestone 6 — Brain-Inspired v1 (Next)
 
-### Current: PPO Baseline
+The transition from PPO baseline to brain-inspired learner is grounded in a seven-paper research round dispatched 2026-04-19 on Opus. All seven research artefacts live in `context/references/brain-inspired-learning/`; `overview.md` in that folder synthesises the full design.
 
-The current brain is a handwritten PPO implementation used for environment validation. It is intentionally gradient-based — the goal is to prove learnability before replacing it with biological learning rules.
+### What v1 Is
 
-```
-Observation (43 dims) ──► Actor MLP (2x64, tanh) ──► Action means + log-stds ──► Gaussian sample ──► Action
-                     └──► Critic MLP (2x128, tanh) ──► Value estimate ──► GAE advantage ──► PPO update
-```
+A **sparse directed graph of rate-coded tanh neurons**, trained by local plasticity. No layers, no matrices, no backprop. The network literally grows and prunes itself as it learns.
 
-The actor and critic are **asymmetric** — the critic is wider because value estimation is harder than action selection in this domain. The critic needs to distinguish "about to crash at a corner" from "driving safely on a straight" using the same observations, which requires more representational capacity.
+- **Structure**: graph, not layered. Cyclic connections allowed. One-step propagation per tick (each neuron reads previous-tick activations of its inputs).
+- **Input**: 43 reserved neurons bound to the observation contract.
+- **Output**: 2 reserved neurons bound to steering + throttle.
+- **Hidden**: starts at ~15 neurons, grows to a few hundred over training via structural plasticity.
+- **Synapses**: sparse edges (~10% initial density). Each synapse has weight + eligibility trace.
 
-Key design choices:
-- **Tanh activations** throughout (ReLU caused 34–57% dead neurons — permanently zero units that never recovered)
-- **Orthogonal initialisation** preserves gradient norms at init, preventing early training instability
-- **AdamW on the critic only** — weight decay prevents unbounded weight growth in the wider network
-- **Log-std floor at -1.0** — prevents exploration collapse (discovered when throttle std dropped to 0.07, locking the policy at full throttle with no ability to discover deceleration)
-- **Amortised PPO updates** — processing 64 samples per tick across multiple ticks avoids frame stutter during training
+### How v1 Learns
 
-### Future: Brain-Inspired Local Plasticity (Milestone 2+)
-
-The intended long-term architecture replaces the PPO MLP with:
-
-- **Fixed input neurons** (sensor interface — the 43-dim observation)
-- **Fixed output neurons** (motor interface — steering + throttle)
-- A **dynamic sparse hidden graph**
-- Local synapses with **eligibility traces**
-- A global **neuromodulatory signal** (delta)
+Three-factor plasticity with eligibility traces, straight from the neuroscience literature (Frémaux & Gerstner 2015):
 
 ```
-Observation ──► Brain ──► Action
+e_ij ← λ · e_ij + pre_i · post_j          (eligibility trace update, per tick)
+δw_ij = η · M · e_ij                      (weight update, gated by modulator)
 ```
 
-External boundary remains stable. Internal topology may change over time.
+- `e_ij` is the per-synapse eligibility trace (τ ≈ 2 s).
+- `M` is the global neuromodulator — in v1, **raw per-tick reward** directly.
+- `pre_i` and `post_j` are source and target neuron activations.
 
-> A brain can reorganise internally while still receiving sensory input and emitting motor commands.
-> NeuroDrive mirrors this: I/O is fixed; internal structure is plastic.
+No backprop. No global loss. No gradient calculation. Each synapse updates based only on what it can observe locally.
 
-### Learning Mechanism (Future)
+### Homeostasis
 
-**Local Plasticity + Eligibility:**
+Two biological mechanisms running alongside plasticity:
 
-Each synapse maintains:
+- **Synaptic scaling** — per-neuron, slow. Keeps total incoming weight bounded.
+- **Intrinsic excitability homeostat** — per-neuron, slow. Keeps firing rate in a target band.
 
-- Weight `w_ij`
-- Eligibility trace `e_ij`
+Both prevent the pathologies plasticity can introduce (weight explosion, neuron death).
 
-Eligibility accumulates "recent usefulness" locally:
+### Structural Plasticity — the "Brain That Grows" Feature
 
-```
-e_ij <- lambda * e_ij + f(pre_i, post_j)
-```
+Your intuition about watching a neural web grow and evolve is preserved intact. The v1 brain implements continual-backprop-style structural plasticity (Dohare et al., Nature 2024), adapted to graph topology:
 
-**Neuromodulation (Dopamine-like Teaching Signal):**
+- **Neuron replacement**: low-utility neurons get their outgoing edges zeroed and incoming edges resampled. Behaviour-preserving at the moment of replacement.
+- **Neurogenesis**: when learning plateaus, new neurons appear with random connections to existing neurons.
+- **Synapse pruning**: below-threshold synapses get removed.
+- **Synapse sprouting**: occasionally, two highly-correlated unconnected neurons get a new edge.
 
-```
-delta = r + gamma * V(s') - V(s)
-delta_w_ij = eta * delta * e_ij
-```
+Depth is fixed (tanh activations are incompatible with identity-preserving depth growth). Width and synaptic density grow freely. The brain literally reshapes itself during training.
 
-- `e_ij` says "this synapse participated recently"
-- `delta` says "that participation led to better/worse outcomes than expected"
-- Weight change is a gated consolidation mechanism
+### Integration
 
-No gradients. No global loss. No backprop.
+- New `AgentMode::BrainInspired` variant. F4 becomes three-way.
+- New module `src/brain/inspired/` parallel to `src/brain/ppo/`.
+- Consumes `ObservationVector` identically to PPO.
+- Writes `ActionState.desired` identically to PPO.
+- Consumes `EpisodeState.current_tick_reward` directly as the modulator signal.
+- PPO stays permanently live as the diagnostic baseline.
 
-**Structural Plasticity (Topology Updates):**
+### Performance
 
-- **Pruning**: remove synapses with persistently low magnitude and low eligibility contribution
-- **Growth**: add synapses between recently co-active neurons when capacity is available
-- **Constraints**: enforce bounded fan-in / fan-out to prevent graph blow-up
+At v1 scale (500 neurons, 5000 synapses, 8 cars):
+- Forward pass: ~120 µs per tick total. Well under 1 ms.
+- The frame budget headroom from M4's performance overhaul absorbs this trivially.
+
+### Design Rationale
+
+The full design rationale and the seven-paper research round that produced it are documented in:
+
+- `context/notes/brain-v1-design.md` — concrete v1 decisions.
+- `context/references/brain-inspired-learning/overview.md` — research synthesis.
+- The seven deep-dive papers in `context/references/brain-inspired-learning/`.
+
+---
+
+## Milestones After v1
+
+Each milestone names a biological feature and the pathology it addresses. The biology-first principle governs which feature addresses which observed problem.
+
+### Milestone 7 — Brain Visualisation
+
+**What**: Real-time 2D graph render of the brain (Bevy). Neurons as circles (size = firing rate, colour = recent plasticity). Synapses as lines (thickness = weight magnitude, colour = excitatory/inhibitory). Growth and pruning animations. F5 toggle, per-car view.
+
+**Why**: The emotional core of the project. Watching a brain think and grow in real time is the payoff for choosing graph topology over layered matrices.
+
+**Biological motivation**: real brains are graph-structured; visualisation makes that reality tangible.
+
+### Milestone 8 — Brain-Inspired v2: Plastic Value Predictor (Option B)
+
+**What**: A dedicated subgraph within the brain predicts future reward. Trained by the same local plasticity rules — no backprop anywhere. The modulator upgrades from raw per-tick reward to a plasticity-computed TD error: `M = r + γV(s′) − V(s)`. Brain becomes fully self-contained with no dependency on PPO.
+
+**Why**: In biology, the dopamine system is itself learned from experience (ventral tegmental area, substantia nigra circuits). Giving the brain its own value predictor — built via plasticity, not backprop — completes the "one brain, one lifetime" vision.
+
+**Biological motivation**: brains do not get their reward-prediction signal from an oracle; they compute it themselves.
+
+**Pathology it addresses**: if v1's raw-reward modulator is too noisy for delayed credit assignment, a predictor gives the brain its own `V(s)` estimate.
+
+### Milestone 9 — Multi-Neuromodulator Channels
+
+**What**: Extend the neuromodulator from a single scalar to a multi-channel signal:
+
+- Dopamine (already in v1 as the reward channel).
+- Novelty / curiosity — intrinsic motivation signal triggered by unfamiliar states.
+- Salience — attention-like amplification triggered by surprising observations.
+
+**Why**: Real brains use multiple neuromodulators with distinct roles. Dopamine for reward prediction, noradrenaline for arousal and salience, acetylcholine for attention, serotonin for patience. Each has a computational role that a single scalar cannot cover.
+
+**Biological motivation**: settled neuroscience — one channel is an oversimplification.
+
+**Pathology it addresses**: exploration dead-ends (curiosity channel), premature commitment (salience channel).
+
+---
+
+## Long-Term Plan — Biological Realism Arc
+
+Once the core brain-inspired learner works (M6–M9), we push deeper into biological realism. **These are not forgotten items — they are the project's ongoing agenda.** Ordering is flexible and driven by measured pathologies, not a fixed schedule. When we encounter a problem in v1 or v2, the biology-first principle says to consult this list for the next step.
+
+Each item has:
+
+- **Biological motivation** — why the brain does this.
+- **Pathology it addresses** — when we would promote it into the next milestone.
+
+### Dale's Law
+
+**What**: Each neuron flagged excitatory or inhibitory at birth; all outgoing synapses match the sign.
+
+**Biological motivation**: a real neurobiological constraint — neurons release one neurotransmitter type, so they are either excitatory or inhibitory, not both.
+
+**Pathology it addresses**: weight sign-flipping instability, difficulty achieving sharp selectivity.
+
+**Estimated cost**: ~50 LoC.
+
+### Synaptic Delays
+
+**What**: Each synapse has a transmission delay of 1–10 ticks (ring buffer per synapse).
+
+**Biological motivation**: real signals take time to travel (~1 ms/cm). This enables temporal pattern detection — neurons can detect "A fired, then B fired 5 ms later."
+
+**Pathology it addresses**: struggles with temporal dependencies (predicting what is coming from what just happened).
+
+**Estimated cost**: ~100 LoC.
+
+### Short-Term Synaptic Dynamics (Tsodyks-Markram)
+
+**What**: Per-synapse facilitation/depression on millisecond-to-seconds timescale, separate from LTP/LTD. Gives neurons working-memory-like properties.
+
+**Biological motivation**: settled neuroscience (Tsodyks & Markram 1997). Real synapses have fast adaptation distinct from long-term plasticity.
+
+**Pathology it addresses**: inability to handle abrupt state changes cleanly (corner entry vs exit).
+
+**Estimated cost**: ~150 LoC.
+
+### Multiple Neuron Types
+
+**What**: At least two types:
+
+- **Excitatory pyramidal-like** (default, the current v1 neuron).
+- **Fast-spiking inhibitory interneurons** (PV-like) for gain control and timing.
+
+Different connectivity biases, different plasticity rules.
+
+**Biological motivation**: real cortex has specialised cell types. Inhibitory interneurons do specific computational jobs that excitatory cells cannot.
+
+**Pathology it addresses**: runaway excitation, inability to gate signals cleanly, all-or-nothing responses.
+
+**Estimated cost**: ~200 LoC.
+
+### Sleep and Replay Consolidation
+
+**What**: Brief "offline" phase between episodes — replay recent trajectories through the brain at accelerated time with plasticity active. Mini-consolidation of recent learning.
+
+**Biological motivation**: hippocampal replay during sleep is one of the best-documented consolidation mechanisms (Foster & Wilson 2006). Well-studied in ML too (experience replay in DQN, but we are rejecting the ML version in favour of the biological version).
+
+**Pathology it addresses**: unstable within-episode learning, forgetting between episodes.
+
+**Estimated cost**: ~300 LoC.
+
+### Spiking Neurons with Sub-Tick Scheduling
+
+**What**: Replace rate-coded activations with discrete spikes at sub-tick precision. Unlocks true spike-timing-dependent plasticity (STDP) — pre-before-post strengthens, post-before-pre weakens.
+
+**Biological motivation**: real neurons spike. STDP depends on exact spike timing. This is the biggest biological-fidelity step on the Long-Term Plan.
+
+**Pathology it addresses**: none specific — this is the "go full biological" step rather than a problem response. Would be pulled forward if timing-dependent computation becomes important (e.g., if the network needs to detect input correlations at specific lag offsets).
+
+**Estimated cost**: ~1500 LoC and a significant architectural rework (sub-tick scheduling affects the entire FixedUpdate pipeline).
+
+---
+
+## Milestones After the Long-Term Plan
+
+### Milestone 10 — Evaluation (Multi-Track, Transfer, Curriculum)
+
+**What**: Introduce track variation. Measure how the brain-inspired learner transfers across tracks. Compare vs PPO on the same tests. Add curriculum support (easier tracks first) only if measured need justifies it.
+
+**Why deferred**: the transfer-and-curriculum research paper established that this machinery answers questions that do not exist with a single track. Multi-track support changes that — curriculum becomes real when there is a curriculum to order, transfer becomes measurable when there is something to transfer from.
+
+### Milestone 11 — Writeup and Release Preparation
+
+**What**: Paper-grade documentation of the full project. Public release.
+
+---
+
+## Research Frontier — Not Forgotten, Out of Scope
+
+Things we have considered and explicitly chosen not to roadmap, because they either require too-deep architectural rewrites, cross into speculative neuroscience territory, or don't earn their keep for a 2D racing task. **Captured here so they are not forgotten** — each has a concrete reason for being out of scope, and each would be promoted into the roadmap if that reason changed.
+
+| Feature | Reason out of scope |
+|---------|---------------------|
+| **Dendritic compartments** | Each neuron as a tree with local computations on branches (Guerguiev 2017, Larkum). Research frontier. Requires a fundamental redesign of the neuron model. |
+| **Glial cells** (astrocytes, oligodendrocytes, microglia) | Participate in biological learning in ways still being discovered. Almost no computational models exist. Research frontier. |
+| **Multi-region brain architecture** | Cortex, thalamus, basal ganglia, cerebellum, hippocampus, amygdala in their specific loops. Each is a research project in itself. |
+| **Developmental programs / critical periods** | The 2-year arc of infant brain development. Fundamentally incompatible with our "start from seed, learn immediately" framing. |
+| **Embodied proprioception** | Real motor learning has muscle-spindle, joint, and skin feedback. Our 43-dim observation is comparatively sparse. Would require a fundamentally richer sensor model. |
+| **Evolutionary priors** | Real brains come pre-wired with hundreds of millions of years of evolutionary biases. Our seed graph is random. Adding priors would be a form of evolution, which is ruled out. |
+| **Full biological scale** | 86 billion neurons, 100 trillion synapses. Out of reach computationally and conceptually out of scope for a 2D racing task. |
+
+These are **not permanently off-limits**. If a future research breakthrough changes the tractability of any of them, or if a specific pathology in the Long-Term Plan is only fixable by reaching further, they get promoted. The discipline is: every step into deeper biological territory must solve a real pathology, not just add biological vocabulary.
 
 ---
 
@@ -322,11 +450,12 @@ NeuroDrive includes comprehensive observability because "looks like learning" is
 
 | Feature | Toggle | Description |
 |---------|--------|-------------|
-| **Geometry overlays** | F1 | Centreline, tangent vectors, forward vectors, velocity vectors |
-| **Sensor overlays** | F2 | Raycast segments, hit points |
-| **Diagnostics HUD** | F3 | Episode counter, progress metrics, moving averages, reward decomposition, PPO health (clip %, KL divergence), quarter summaries, run assessment |
-| **Live leaderboard** | F3 | Per-car performance ranking with colour swatches, best/worst highlighting |
-| **Agent mode toggle** | F4 | Switch between AI and keyboard control (clears rollout buffer on switch) |
+| Geometry overlays | F1 | Centreline, tangent vectors, forward vectors, velocity vectors |
+| Sensor overlays | F2 | Raycast segments, hit points |
+| Diagnostics HUD | F3 | Episode counter, progress metrics, moving averages, reward decomposition, PPO health, quarter summaries, run assessment |
+| Live leaderboard | F3 | Per-car performance ranking with colour swatches, best/worst highlighting |
+| Agent mode toggle | F4 | Keyboard / PPO / Brain-Inspired (three-way) |
+| Brain inspector | F5 | *Added in M7* — real-time 2D graph render of the brain-inspired learner |
 
 All overlays default to off for clean viewing.
 
@@ -334,32 +463,24 @@ All overlays default to off for clean viewing.
 
 A comprehensive post-run analytics system captures everything needed to diagnose learning:
 
-- **16 tick-level trace fields**: position, velocity decomposition, drift angle, minimum ray distance, velocity projection, centreline reward, policy confidence (value prediction, action means/stds)
-- **25 episode-level aggregates**: speed statistics, action distributions, crash forensics, value function diagnostics, exploration metrics
-- **Crash classification system**: 5 crash types (Slide, HeadOn, Overshoot, Spin, Stall) diagnosed from terminal state kinematics
-- **10-section Markdown report** with sparklines, heatmaps, sector breakdowns, and auto-generated takeaways
-- **Two-tier JSON export**: compact (always) + full trace (opt-in)
-- **Retention-limited cleanup**: auto-deletes oldest reports to prevent unbounded growth
+- **16 tick-level trace fields**: position, velocity decomposition, drift angle, minimum ray distance, velocity projection, centreline reward, policy confidence (value prediction, action means/stds).
+- **25 episode-level aggregates**: speed statistics, action distributions, crash forensics, value function diagnostics, exploration metrics.
+- **Crash classification system**: 5 crash types (Slide, HeadOn, Overshoot, Spin, Stall) diagnosed from terminal state kinematics.
+- **15-section Markdown report** with sparklines, heatmaps, sector breakdowns, pre-crash forensics, per-layer health timeseries, PopArt tracker, fleet variance analysis, and auto-generated takeaways.
+- **Two-tier JSON export**: compact (always) + full trace (opt-in).
+- **Retention-limited cleanup**: auto-deletes oldest reports to prevent unbounded growth.
+
+The analytics pipeline is learner-agnostic — it captures the same signals whether PPO or brain-inspired is driving.
 
 ### Profiling System
 
 Feature-gated behind `--features profiling` (zero runtime cost when disabled):
 
-- Per-system timing for all 17 FixedUpdate systems
-- Per-SimSet breakdown (Input, Physics, Collision, Measurement)
-- Auto-exit after configurable duration (default 30 seconds)
-- Rich Markdown report with interpretation, stutter analysis, and recommendations
-- JSON export with run context snapshot
-
-### Planned (Later-Stage) Telemetry
-
-- Dopamine delta visualisation (raw + smoothed)
-- Weight statistics (mean |w|, histogram bins, clamp hits)
-- Graph statistics (synapse count, sparsity, churn rate)
-- Optional live graph view (nodes/edges)
-- Optional live weight view (matrix/synapse list)
-
-Learning must be measurable, not guessed.
+- Per-system timing for all 17 FixedUpdate systems.
+- Per-SimSet breakdown (Input, Physics, Collision, Measurement).
+- Auto-exit after configurable duration (default 30 seconds).
+- Rich Markdown report with interpretation, stutter analysis, and recommendations.
+- JSON export with run context snapshot.
 
 ---
 
@@ -369,31 +490,18 @@ NeuroDrive is developed on constrained hardware:
 
 | Component | Detail |
 |-----------|--------|
-| **Machine** | MacBook Air M2 (2022) |
-| **Memory** | 8 GB unified (shared CPU/GPU) |
-| **Architecture** | ARM64 (Apple Silicon — NEON SIMD, not SSE/AVX) |
-| **Display** | 60 Hz |
+| Machine | MacBook Air M2 (2022) |
+| Memory | 8 GB unified (shared CPU/GPU) |
+| Architecture | ARM64 (Apple Silicon — NEON SIMD, AMX via Accelerate) |
+| Display | 60 Hz |
 
 This means:
-- No CUDA, no discrete GPU — all computation is CPU-bound
-- The 16.67ms frame budget at 60 Hz is a hard constraint
-- Memory-intensive work (rollout buffers, trace captures) competes with rendering
-- Performance optimisation is not optional — it is a core engineering discipline
 
-### Performance Journey
+- No CUDA, no discrete GPU — all computation is CPU-bound.
+- The 16.67 ms frame budget at 60 Hz is a hard constraint.
+- Performance optimisation is not optional — it is a core engineering discipline.
 
-The PPO implementation went through significant optimisation to run 8 cars within the frame budget:
-
-| Change | Impact |
-|--------|--------|
-| `Vec<Vec<f32>>` to flat `Vec<f32>` weight storage | Eliminated catastrophic cache misses (~43x theoretical improvement) |
-| Pre-allocated scratch buffers | Zero heap allocations in the training loop |
-| Batched forward/backward passes | Mat-mat instead of 128x mat-vec |
-| Iterator-based inner loops | Enabled LLVM auto-vectorisation |
-| Swap instead of clone for frozen rollout buffer | Eliminated full-buffer copy |
-| Amortised PPO updates (64 samples/tick) | Spread training cost across ticks to avoid frame stutter |
-
-Result: **426 stutters to 2**, mean frame time **17.3ms to 9.0ms** with 8 cars.
+After the M4 performance overhaul, the simulation runs in ~4.4% of the frame budget with 8 cars — substantial headroom for the brain-inspired learner and visualisation without re-optimising.
 
 ---
 
@@ -401,29 +509,31 @@ Result: **426 stutters to 2**, mean frame time **17.3ms to 9.0ms** with 8 cars.
 
 NeuroDrive is a standard Cargo project. The only prerequisite is a recent Rust toolchain (edition 2024, tested on stable). On macOS the Apple Accelerate framework is used automatically — it ships with the OS, no separate install. On other platforms a portable pure-Rust backend is used automatically instead.
 
-### Everyday commands
+### Everyday Commands
 
 | Command | What it does |
 |---------|--------------|
-| `cargo run --release` | Start the simulation with all optimisations enabled. Release mode is **strongly recommended** — `cargo run` alone (debug mode) is ~10× slower and misses the actual performance story. |
-| `cargo run` | Fast compile, slow runtime. Useful only when iterating on code changes and you don't care about frame rate. |
-| `cargo test` | Run the full test suite (99 tests as of 2026-04-18). |
-| `cargo test --release` | Tests in release mode — runs more slowly to compile but matches the optimiser flags of production code. |
+| `cargo run --release` | Start the simulation with all optimisations enabled. Release mode is **strongly recommended** — debug mode is ~10× slower. |
+| `cargo run` | Fast compile, slow runtime. Useful only when iterating on code changes. |
+| `cargo test` | Run the full test suite (112 tests as of 2026-04-19). |
+| `cargo test --release` | Tests in release mode. |
 | `cargo check` | Fast syntax/type check without producing a binary. |
-| `cargo check --release` | Same but with release optimisations active (catches some LTO-specific issues). |
+| `cargo check --release` | With release optimisations active. |
 
-### GEMM backend selection
+### GEMM Backend Selection
 
-The PPO hot path (actor + critic forward and backward) spends most of its time in small single-precision matrix multiplications. NeuroDrive provides three interchangeable backends for that single operation, with one chosen automatically per platform:
+The PPO hot path (actor + critic forward and backward) spends most of its time in small single-precision matrix multiplications. NeuroDrive provides three interchangeable backends:
 
-| Command | Backend used | Notes |
-|---------|--------------|-------|
-| `cargo run --release` | **macOS:** Apple Accelerate (cblas_sgemm, AMX-accelerated). **Elsewhere:** `matrixmultiply` (pure Rust, NEON on ARM64). | The default. Picks the fastest available backend for your platform without any flags. |
-| `cargo run --release --no-default-features --features force-accelerate` | Apple Accelerate, forced. **macOS only** — fails to build on other platforms. | Explicit opt-in; same as the macOS default. |
-| `cargo run --release --no-default-features --features force-matrixmultiply` | `matrixmultiply` crate, forced on any platform. | Useful to A/B against Accelerate on macOS, or as the natural default on Linux/Windows. |
-| `cargo run --release --no-default-features --features force-scalar` | Naive nested-loop Rust. Slowest by design. | Used as a **correctness reference** for the other two backends and as a fallback when neither is desired. |
+| Command | Backend | Notes |
+|---------|---------|-------|
+| `cargo run --release` | **macOS:** Apple Accelerate (cblas_sgemm, AMX). **Else:** `matrixmultiply`. | Default. |
+| `cargo run --release --no-default-features --features force-accelerate` | Apple Accelerate, forced. macOS only. | |
+| `cargo run --release --no-default-features --features force-matrixmultiply` | `matrixmultiply`, forced on any platform. | |
+| `cargo run --release --no-default-features --features force-scalar` | Naive nested-loop Rust. | Correctness reference. |
 
-Every performance report (see below) records which backend was active under its new `### Build` section, so benchmarks across different runs are directly comparable.
+Every performance report records which backend was active.
+
+The brain-inspired learner does not use GEMM — sparse graph traversal does not benefit from matrix-multiply acceleration at our scale.
 
 ### Profiling
 
@@ -431,295 +541,31 @@ Every performance report (see below) records which backend was active under its 
 cargo run --release --features profiling
 ```
 
-Enables the per-system frame-timing instrumentation. The app auto-exits after 30 seconds and writes two artefacts:
+Auto-exits after 30 seconds. Writes `reports/performance/perf_<timestamp>.md` + matching JSON.
 
-- `reports/performance/perf_<timestamp>.md` — Markdown report with per-system breakdown, stutter analysis, and auto-generated recommendations.
-- `reports/json/performance/perf_<timestamp>.json` — raw timing data for custom post-processing.
-
-The Markdown report's Run Context section includes the active GEMM backend, so you can tell at a glance whether a given profile was produced by Accelerate, matrixmultiply, or scalar.
-
-### Benchmarking different backends
-
-To compare backends on the same workload:
+### Test Suite
 
 ```bash
-cargo run --release --features profiling
-# → reports/performance/perf_A.md   (Accelerate on macOS by default)
-
-cargo run --release --no-default-features --features "force-matrixmultiply,profiling"
-# → reports/performance/perf_B.md   (matrixmultiply forced)
-
-cargo run --release --no-default-features --features "force-scalar,profiling"
-# → reports/performance/perf_C.md   (scalar reference)
+cargo test                                                             # default backend
+cargo test --no-default-features --features force-scalar               # scalar
+cargo test --no-default-features --features force-matrixmultiply       # matrixmultiply
+cargo test --no-default-features --features force-accelerate           # Accelerate (macOS only)
 ```
 
-Each report's `### Build` section records the backend; the frame-time and PPO Epoch timing tables can be compared directly.
+All four variants pass with zero warnings and 112 tests green (as of 2026-04-19).
 
-### Test suite
-
-```bash
-cargo test                                                             # full suite, default backend
-cargo test --no-default-features --features force-scalar              # scalar backend
-cargo test --no-default-features --features force-matrixmultiply      # matrixmultiply backend
-cargo test --no-default-features --features force-accelerate          # Accelerate backend (macOS only)
-```
-
-The suite includes cross-backend correctness tests in `tests/gemm_correctness.rs` that validate whichever backend is compiled in against an inline scalar reference for every matrix shape PPO actually uses.
-
-### Feature flag reference
+### Feature Flag Reference
 
 ```toml
 # Defined in Cargo.toml [features]
 default = []
-profiling             # Enable per-system timing instrumentation + auto-exit
+profiling             # Per-system timing instrumentation + auto-exit
 force-scalar          # GEMM backend override — naive nested-loop reference
 force-matrixmultiply  # GEMM backend override — portable pure-Rust BLIS kernel
 force-accelerate      # GEMM backend override — Apple Accelerate (macOS only)
 ```
 
-Constraints:
-
-- At most one `force-*` backend flag may be enabled at a time (compile-time error if two or three are set together).
-- `force-accelerate` on non-macOS platforms is a compile-time error (the Accelerate framework does not exist there).
-- `profiling` is orthogonal to the backend flags — any combination is valid.
-
-### Verified build matrix (2026-04-18)
-
-All of the following pass `cargo test` with zero warnings and all 99 tests green:
-
-- Default (Accelerate on this macOS M2 host)
-- `--no-default-features --features force-scalar`
-- `--no-default-features --features force-matrixmultiply`
-- `--no-default-features --features force-accelerate`
-- `--release`
-- `--features profiling`
-
----
-
-## Features and Roadmap
-
-NeuroDrive follows a deliberate sequencing strategy:
-
-1. Build a deterministic, observable environment.
-2. Prove the task is learnable with a lightweight RL baseline.
-3. Transition to brain-inspired local plasticity mechanisms.
-4. Gradually increase biological fidelity and structural complexity.
-
-This reduces debugging ambiguity and isolates representation issues from learning-rule issues.
-
----
-
-## Milestone 0 — Environment Foundation (Complete)
-
-This milestone established a fully deterministic, instrumented control environment before any learning algorithm was introduced.
-
-- [x] Deterministic fixed-timestep 2D car physics (60 Hz)
-- [x] Track representation (centreline polyline + boundaries)
-- [x] Collision detection (corner-based off-road detection) + reset conditions
-- [x] Progress metric via centreline projection (cumulative arc-length from spawn)
-- [x] Raycast sensor system with on-screen debug overlays
-- [x] Stable observation vector (normalised inputs, 43 dimensions)
-- [x] Steering/throttle action interface with optional smoothing
-- [x] Episode loop (crash / 30-second timeout)
-- [x] Telemetry: reward, progress, crash count, moving averages
-- [x] Debug visual overlays:
-  - [x] Raycasts + hit points (F2)
-  - [x] Closest centreline projection point (F1)
-  - [x] Centreline tangent vector visualisation (F1)
-  - [x] Car forward vector and velocity (F1)
-  - [x] Heading error readout
-  - [x] Progress percentage of the track
-  - [x] F1/F2/F3 toggles (geometry, sensors, diagnostics)
-
-**Status: Complete.** The environment is stable, deterministic, observable, and debuggable.
-
----
-
-## Milestone 1 — RL Baseline: Learnability Validation (Active)
-
-This milestone validates that the task is learnable using a from-scratch RL implementation. It began as a minimal A2C baseline and evolved into a substantially optimised PPO system through iterative experimentation.
-
-This is not the final direction of the project. It answers:
-
-> Is the observation space + reward structure sufficient for autonomous learning?
-
-### Evolution
-
-The baseline went through three major phases:
-
-**Phase 1 — A2C Baseline**
-The initial implementation: a minimal actor-critic with a single shared 2x64 MLP, on-policy rollout collection, GAE advantage estimation, and online updates. Cars learned to drive forward but could not reliably navigate corners.
-
-**Phase 2 — PPO Upgrade**
-A2C was replaced with PPO (clipped surrogate objective) for more stable policy updates. The observation space was expanded from ~15 to 43 dimensions. The finish line was removed in favour of cumulative progress. Random spawn positions replaced fixed start. The reward was simplified to velocity projection + centreline proximity with zero crash penalty.
-
-**Phase 3 — Optimisation and Scaling**
-The PPO implementation was heavily optimised for performance on constrained hardware. Weight storage was restructured for cache locality. Training was batched and amortised across ticks. The system was scaled from 1 car to 8 cars. The architecture was made asymmetric (wider critic). A comprehensive analytics pipeline and feature-gated profiling system were built to support data-driven iteration.
-
-### Implementation Status
-
-- [x] PPO with clipped surrogate objective and multi-epoch updates
-- [x] Asymmetric actor-critic (actor 2x64, critic 2x128)
-- [x] Tanh activations with orthogonal initialisation
-- [x] AdamW optimiser with decoupled weight decay on critic
-- [x] On-policy rollout buffer with env_id tagging and old log-probs
-- [x] Per-env GAE (no cross-env value leakage)
-- [x] Per-minibatch advantage normalisation with sample shuffling
-- [x] Log-std floor preventing exploration collapse
-- [x] Multi-car vectorised training (8 cars, random spawns)
-- [x] Amortised PPO updates (64 samples/tick, no frame stutter)
-- [x] Batched forward/backward with pre-allocated scratch buffers
-- [x] Flat weight storage for cache-friendly traversal
-- [x] 43-dimensional observation space (rays, kinematics, lookahead, previous actions)
-- [x] Velocity-projection + centreline proximity reward
-- [x] Entertainment-first reward philosophy (no crash penalties, no survival bonuses)
-- [x] Comprehensive analytics pipeline (16 tick fields, 25 episode aggregates, crash classification, 10-section Markdown reports)
-- [x] Feature-gated profiling system (per-system timing, auto-exit, Markdown + JSON reports)
-- [x] Live diagnostics HUD with PPO metrics, quarter summaries, run assessment
-- [x] Live leaderboard with per-car colour swatches and ranking
-- [x] Real-time learning visualisation (watchable behaviour)
-- [ ] Headless fast-training mode
-- [ ] Policy snapshot + evaluation mode (save/load)
-
-### Success Criteria
-
-- [x] Measurable improvement in forward progress within minutes
-- [x] Reduced crash frequency over time
-- [x] No reward hacking
-- [x] Learning visible in real time
-- [ ] Stable extended driving behaviour (cars currently crash at first major corner)
-
-### Active Learning Challenges
-
-The PPO baseline has confirmed the task is learnable — cars demonstrably learn to steer, accelerate, and navigate gentle curves. The remaining challenge is corner survival at speed:
-
-- Throttle exploration tends to collapse (std drops toward the floor), locking the policy at full throttle
-- The critic must accurately distinguish "about to crash at a corner" from "driving safely on a straight" — this requires sufficient representational capacity
-- The asymmetric architecture (wider critic) and AdamW weight decay were introduced to address this, but the interplay between critic capacity, exploration, and the entertainment constraint (no crash penalties) remains the active research front within Milestone 1
-
-> Milestone 1 proves that the task is learnable.
-> It isolates environment design from biological learning mechanics.
-
----
-
-## Milestone 2 — Brain v1: Rate-Based Local Plasticity + Delta Gating
-
-After learnability is validated, we replace gradient-based learning with biologically inspired mechanisms.
-
-- [ ] Sparse neural graph (fixed I/O, sparse hidden connectivity)
-- [ ] Neuron state dynamics (rate-based activations)
-- [ ] Eligibility traces per synapse
-- [ ] Reward-modulated weight updates (delta-gated plasticity)
-- [ ] No backpropagation
-- [ ] No global gradient computation
-- [ ] Continuous online learning (single persistent brain)
-- [ ] Episode metrics + moving averages
-- [ ] Save/load brain state
-
-**Success criteria:**
-Observable behavioural improvement without gradients.
-
-> This milestone transitions from optimisation to local plasticity.
-
----
-
-## Milestone 3 — Scientific Control: Stability and Ablations
-
-Prevent self-deception. Prove causality.
-
-- [ ] Weight clamping + decay
-- [ ] Learning rate schedules
-- [ ] Deterministic episode replay
-- [ ] First-half vs second-half statistics
-- [ ] Ablations:
-  - [ ] No dopamine gating
-  - [ ] No eligibility traces
-  - [ ] Frozen weights (control baseline)
-- [ ] Training-speed controls (1x, 2x, 4x)
-
-**Success criteria:**
-Clear evidence that improvements arise from the intended mechanisms.
-
----
-
-## Milestone 4 — Spiking Upgrade: SNN + STDP
-
-Upgrade representation to spike-based dynamics.
-
-- [ ] Spiking neuron model (membrane potential, threshold, reset)
-- [ ] Spike encoding of inputs
-- [ ] Spike decoding of outputs
-- [ ] STDP-style eligibility traces
-- [ ] Reward-modulated STDP
-- [ ] Side-by-side comparison with rate-based version
-
-**Success criteria:**
-Comparable or improved learning with greater biological plausibility.
-
----
-
-## Milestone 5 — Structural Plasticity: Growth + Pruning
-
-Introduce constrained topology adaptation.
-
-- [ ] Synapse pruning rules
-- [ ] Synapse growth rules (co-activity driven)
-- [ ] Bounded fan-in / fan-out
-- [ ] Churn metrics (edges added/removed)
-- [ ] Topology visualisation
-
-**Success criteria:**
-Structural adaptation improves efficiency or stability without graph explosion.
-
----
-
-## Milestone 6 — Generalisation and Continual Learning
-
-- [ ] Multiple curated tracks
-- [ ] Interleaved training across tracks
-- [ ] Held-out evaluation track
-- [ ] Forgetting metrics
-- [ ] Curriculum progression
-
-**Success criteria:**
-Skill transfers across tracks without catastrophic forgetting.
-
----
-
-## Milestone 7 — Replay and Consolidation
-
-- [ ] Trajectory buffer
-- [ ] Offline replay ("sleep phase")
-- [ ] Consolidation rules
-- [ ] Sample efficiency analysis
-
-**Success criteria:**
-Replay improves learning speed or stability.
-
----
-
-## Milestone 8 — Robustness and Perturbation Testing
-
-- [ ] Sensor noise
-- [ ] Physics randomisation
-- [ ] Track perturbations
-- [ ] Long-run stability testing
-- [ ] Regression test suite
-
-**Success criteria:**
-Learning remains stable under controlled noise.
-
----
-
-## Milestone 9 — Interpretability and Mechanistic Analysis
-
-- [ ] Identify emergent motor primitives
-- [ ] Synapse importance visualisation
-- [ ] Activity clustering (turns vs straights)
-- [ ] Export topology + activity traces
-
-**Success criteria:**
-The system becomes inspectable as a learning mechanism, not just a black box.
+At most one `force-*` flag may be enabled at a time. `force-accelerate` on non-macOS platforms is a compile-time error.
 
 ---
 
@@ -727,11 +573,11 @@ The system becomes inspectable as a learning mechanism, not just a black box.
 
 - Not a benchmark suite for mainstream RL.
 - Not a competition between optimisation paradigms.
-- Not a wrapper around PyTorch.
-- Not an evolutionary algorithm playground.
+- Not a wrapper around PyTorch / TensorFlow / JAX / any ML library.
+- Not an evolutionary-algorithm playground.
 - Not a racing game with AI glued on top.
 
-It is a controlled experiment in building a brain-inspired learning system from first principles.
+It is a controlled experiment in building a brain-inspired learning system from first principles, with a biology-first discipline that makes every design decision defensible against a neuroscience reference.
 
 ---
 
@@ -739,14 +585,14 @@ It is a controlled experiment in building a brain-inspired learning system from 
 
 A racing environment provides:
 
-- Continuous control (steering/throttle)
-- Dense and interpretable progress signals
-- Non-trivial stability constraints
-- Clear measurable improvement (progress, speed, crash rate)
-- Natural generalisation tests (new tracks)
+- Continuous control (steering / throttle).
+- Dense and interpretable progress signals.
+- Non-trivial stability constraints.
+- Clear measurable improvement (progress, speed, crash rate).
+- Natural generalisation tests (new tracks in M10).
+- Visual appeal — a growing brain controlling a racing car is inherently more engaging than one controlling a number sequence.
 
-It is complex enough to require learning,
-but simple enough to keep the focus on the learning mechanism.
+It is complex enough to require learning, simple enough to keep the focus on the learning mechanism.
 
 ---
 
@@ -754,13 +600,12 @@ but simple enough to keep the focus on the learning mechanism.
 
 NeuroDrive is intended as a research-grade learning laboratory:
 
-- Study synaptic vs structural plasticity in engineered systems
-- Implement dopamine-modulated local learning without gradients
-- Upgrade to spiking dynamics and STDP-family learning rules
-- Evaluate generalisation and continual learning behaviour
-- Build a system that _visibly learns_ and can be instrumented end-to-end
+- Study synaptic vs structural plasticity in engineered systems.
+- Implement dopamine-modulated local learning without gradients.
+- Upgrade toward spiking dynamics and STDP-family learning rules.
+- Evaluate generalisation and continual learning behaviour.
+- Build a system that _visibly learns_ and can be instrumented end-to-end.
 
 The ultimate goal is not the fastest racing agent.
 
-It is to build a system that **visibly, measurably, and continuously learns**
-using principles inspired by how biological brains adapt to the world.
+It is to build a system that **visibly, measurably, and continuously learns** using principles inspired by how biological brains adapt to the world — and to prove, through the biology-first discipline, that such a system can match what ML-playbook tools achieve.

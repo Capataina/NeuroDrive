@@ -1,53 +1,152 @@
-# Project Phase — Baseline → Brain-Inspired
+# Baseline → Brain-Inspired
+
+Captures the transition from Milestone 5 (PPO baseline with critic target-scaling, validated) to Milestone 6 and beyond (the brain-inspired arc). Last refreshed 2026-04-19 after the seven-paper research round landed and the v1 design was settled.
 
 ## Current Understanding
 
-As of 2026-04-19, NeuroDrive has **completed its Milestone-1 PPO baseline validation**. The environment, observation contract, reward structure, and analytics pipeline are all confirmed healthy by the round-2 training run (`reports/analytics/run_1776556719.md`):
+As of 2026-04-19, NeuroDrive has **completed Milestones 1–5**:
 
-- all 8 cars complete the full track loop within ~2,000 episodes,
-- fleet converges tightly (max-progress spread 1.1%),
-- mean speed rises monotonically across training,
-- crash rate collapsed from 100% → ~56% in the best chunk,
-- critic now genuinely anticipates (96% of crashes had throttle released > 0.25 s before impact).
+- M1 — Environment + keyboard controller
+- M2 — PPO baseline from scratch (actor-critic, GAE, clipped surrogate)
+- M3 — Multi-car vectorisation + comprehensive analytics pipeline
+- M4 — Performance overhaul (dual GEMM backend, batched actor, 21× frame-time improvement)
+- M5 — Critic target-scaling (PopArt, γ=0.995, observation normalisation, target-KL early stop)
 
-This was the goal of the baseline phase: prove the environment is learnable and the observation/reward contract is sound. **That proof is complete.**
+M5's validation (`reports/analytics/run_1776556719.md`) showed all 8 cars completing the full track loop, fleet max-progress spread 1.1%, crash rate falling from 100% to 56% in the best chunk, and pre-crash analytics confirming the policy anticipates (96% of crashes had throttle released > 0.25 s before impact). The environment, observation contract, and reward shaping are **confirmed learnable**.
 
-The project's intent per `README.md` has always been **brain-inspired local plasticity** rather than backprop-driven PPO. The PPO path existed specifically to validate the environment before committing to the harder learning-rules work. The transition to that phase is now pending.
+This was the goal of the baseline phase: prove the environment is learnable before committing to the harder biology-first learning-rules work. **That proof is complete.** The project now transitions to the brain-inspired arc.
 
-## Rationale
+## The Transition Framing
 
-The baseline was necessary because introducing brain-inspired plasticity rules on an *unvalidated* environment would have confounded every failure: "is the environment broken, the observation wrong, the reward mis-shaped, or is the learning rule genuinely incapable of solving this?" Now when a biological-plasticity implementation fails to learn, we can rule out the environment as the cause — PPO has demonstrated that the same observation → action mapping **is** learnable under standard RL machinery.
+The PPO work was never the destination — it was environment validation. The project's stated intent per `README.md` has always been brain-inspired local plasticity. The baseline phase existed specifically to:
 
-## What This Means for `context/`
+- Validate that a 43-dim observation + 2-dim action contract is sufficient for learning this task.
+- Validate that the velocity-projection + centreline reward produces entertaining driving without reward hacks.
+- Provide a permanent diagnostic baseline for future environment changes — if the brain-inspired learner fails and PPO still works, we know the environment is fine.
 
-- The PPO subsystem is **stable reference machinery**, not active development. `systems/brain-ppo.md` captures its current reality; further PPO polish items (LR annealing, log-std Adam extraction) are deferred indefinitely.
-- The four round-1 research references (`ppo-critic-architecture.md`, `value-target-normalisation.md`, `observation-horizon-racing-rl.md`, `ppo-tuning-knobs-racing.md`) now document *why the baseline works*, not active intervention candidates.
-- The environment, agent interface, and analytics subsystems are load-bearing for the next phase — whatever replaces PPO will still consume the same observation contract and produce the same `ActionState.desired` writes.
-- New `systems/*.md` files will likely appear for biological-plasticity substrates, but the shape isn't committed yet. **Do not create speculative system files.**
+**PPO stays permanently live** as a diagnostic controller (per the three-way `AgentMode` toggle: Keyboard / PPO / Brain-Inspired). It is not being retired. It is not being replaced. The brain-inspired learner is **additive**, not a replacement.
+
+## Research Round (2026-04-19)
+
+Seven parallel project-research agents on Opus produced deep analysis across the brain-inspired design space. All seven outputs live in `context/references/brain-inspired-learning/`:
+
+1. `biological-learning-foundations.md` — the neuroscience baseline
+2. `local-learning-rules.md` — computational non-backprop algorithms
+3. `structural-plasticity-neuroevolution.md` — topology change
+4. `training-paradigms.md` — population vs lifelong-plasticity
+5. `reward-design.md` — how reward signals feed into plasticity
+6. `learning-timescales.md` — fast synaptic vs slow structural dynamics
+7. `transfer-and-curriculum.md` — scope protection
+
+All seven converged on a consistent design and it is captured in `overview.md` and in `notes/brain-v1-design.md`.
+
+## Decisions Settled in This Transition
+
+### The Biology-First Principle
+
+The single most important decision of the transition: **when we hit a problem, the answer comes from biology, not the ML toolkit.** See `notes/biology-first-principle.md` for the full articulation.
+
+This changes how every future decision is made. It rules out reaching for dropout, batch norm, experience replay, or other ML-toolkit defaults as responses to problems unless they have a direct biological analogue.
+
+### The v1 Substrate
+
+Concrete v1 design captured in `notes/brain-v1-design.md`:
+
+- **Graph topology** (not layered). Sparse edge list, cyclic allowed, one-step propagation per tick.
+- **Three-factor plasticity with eligibility traces.** `e ← λe + pre·post; δw = η·M·e`.
+- **Raw per-tick reward as the modulator (Option C).** No value predictor in v1. No borrowed critic from PPO.
+- **Homeostatic scaling + intrinsic excitability** — two settled biological mechanisms running alongside plasticity.
+- **Structural plasticity via continual backprop** adapted to graph form. Low-utility neurons replaced, plateau-triggered neurogenesis, synapse pruning + sprouting.
+- **Tanh activation** (matches PPO baseline; avoids dead-neuron failure seen with ReLU).
+- **Fixed depth, variable width** (Net2DeeperNet is incompatible with tanh; we grow the graph's width, not depth).
+- **Reserved I/O neurons** preserving the stable 43-dim observation and 2-dim action contracts.
+
+### What Does NOT Change
+
+- **Reward structure:** unchanged. Velocity projection + centreline proximity, no crash penalty, entertainment-first. Compatible with plasticity unchanged.
+- **Observation contract:** 43-dim, stable. Both PPO and brain-inspired consume it identically.
+- **Action contract:** 2-dim (steering, throttle), stable.
+- **Agent mode boundary:** still a drop-in swap at the controller level.
+
+### What Carries Forward From PPO Work
+
+- All analytics infrastructure (`src/analytics/`) — episode tracking, reward decomposition, crash forensics all apply to brain-inspired episodes.
+- The visualisation / HUD culture — debugging the brain-inspired learner will rely on the same observability habits.
+- The `EpisodeState.current_tick_reward` pipeline — the modulator signal for v1 reads directly from it.
+- The env-tagged rollout pattern (if we need buffered experience for later milestones, the infrastructure exists).
+- The performance-tuning lessons — tanh, flat weight storage, pre-allocated scratch, disjoint-field borrows. Graph storage is different (sparse edges) but the discipline transfers.
+
+## Updated Milestone Structure (2026-04-19)
+
+The old "Milestone 1 of 9" framing is replaced by the 11-milestone structure in `README.md`:
+
+```
+M1  Environment + keyboard controller                    ✓
+M2  PPO baseline from scratch                            ✓
+M3  Multi-car + analytics pipeline                       ✓
+M4  Performance overhaul                                 ✓
+M5  Critic target-scaling                                ✓
+M6  Brain-inspired v1 — the substrate                    ← next
+M7  Brain visualisation
+M8  Brain-inspired v2 — plastic value predictor (Option B)
+M9  Multi-neuromodulator refinement
+
+Long-Term Plan (biological-realism arc, ordering flexible):
+    • Dale's law
+    • Synaptic delays
+    • Short-term synaptic dynamics (Tsodyks-Markram)
+    • Multiple neuron types (pyramidal + interneurons)
+    • Sleep/replay consolidation
+    • Spiking neurons + STDP
+
+M10 Evaluation (multi-track, transfer, curriculum)
+M11 Writeup / release preparation
+
+Research Frontier (explicitly out of scope, not forgotten):
+    • Dendritic compartments
+    • Glial cells
+    • Multi-region architecture
+    • Developmental programs / critical periods
+    • Embodied proprioception
+    • Evolutionary priors
+    • Full-scale neuron counts
+```
+
+Each future milestone names a biological mechanism and a pathology it addresses. Long-Term Plan ordering is flexible — we pull items forward as we encounter the pathologies they address.
 
 ## Guiding Principles for the Transition
 
-- **Preserve the stable boundary.** The agent interface (`CarAction` ↔ `ActionState`, `ObservationVector` 43-dim) is the stable contract. Whatever learning rule replaces PPO must consume the same inputs and produce the same outputs — otherwise the environment validation has to be redone.
-- **PPO stays until the replacement works end-to-end.** The `AgentMode` toggle (F4 keyboard vs Ai) becomes a three-way toggle (keyboard, PPO, brain-inspired), or PPO is retired only when the brain-inspired agent has been shown to learn on the same track.
-- **Entertainment-first reward constraint carries forward.** `notes/reward-and-entertainment.md` applies regardless of learning rule — no crash penalty, no survival bonus, velocity projection + centreline proximity.
-- **Analytics also carry forward.** The 15-section Markdown report and `PpoUpdateRecord` schema assume PPO internals, but the *episode-level* fields (`EpisodeRecord`, `TickTraceRecord`) are learning-rule-agnostic and should be reused.
+- **Preserve the stable boundary.** `CarAction` ↔ `ActionState`, `ObservationVector` 43-dim. Any new learning rule consumes and produces identical contracts.
+- **PPO stays until retired deliberately, not by default.** `AgentMode::BrainInspired` is a third option, not a replacement. Retire PPO only if the brain-inspired learner has been shown to work end-to-end.
+- **Entertainment-first reward carries forward.** `notes/reward-and-entertainment.md` applies regardless of learning rule.
+- **Biology-first discipline applies to every decision from here forward.** See `notes/biology-first-principle.md`.
+- **Visualisation matters.** The M7 brain inspector is the emotional core of the project. Graph topology makes it possible.
 
-## What Was Tried
+## What Was Tried During the Baseline (Preserved)
 
-- **PPO baseline from scratch in handwritten Rust** (no PyTorch, no external ML libs). Succeeded.
-- Throughout PPO baseline development, multiple dead ends were explored and captured durably:
-  - ReLU critic (reverted to tanh — dead-neuron fraction starved the actor).
-  - Brake axis (reverted — policy collapsed into idle basin).
-  - Crash penalty in reward (never shipped — would produce boring driving).
-  - Progress-bonus reward (superseded by velocity projection).
+Durable lessons from the PPO baseline that inform the brain-inspired design:
 
-## What Comes Next
+- **ReLU → tanh switch** because ReLU produced 34–57% dead neurons. The brain-inspired v1 also uses tanh for this reason.
+- **Braking axis reverted** because the policy collapsed into an idle basin. The brain-inspired learner inherits the throttle-only `[0, 1]` action space.
+- **Crash penalty never shipped** because any crash penalty produces boring safe play. Entertainment-first reward philosophy preserved.
+- **Progress-bonus reward superseded by velocity projection.** Dense per-tick reward lets the eligibility trace do credit assignment — relevant for v1's Option C choice.
+- **Asymmetric actor/critic** (2×64 + 2×128) for PPO. Doesn't directly apply to brain-inspired since there's no layered structure, but the underlying lesson — value estimation may need more capacity than action selection — may inform M8's plastic value predictor design.
+- **Wider critic + AdamW + log_std floor** (round 1) + **PopArt + observation norm + γ + target-KL** (round 2) — the PPO-specific fixes don't transfer directly, but the research methodology (parallel project-research agents, falsification criteria, analytics-first debugging) does.
 
-Pending discussion (2026-04-19): what specifically counts as the first brain-inspired increment. Candidates the user has mentioned in `README.md`:
+## Constraints That Persist
 
-- Local Hebbian / STDP-style synaptic updates.
-- Dopamine-like neuromodulation gating plasticity.
-- Structural adaptation (connection formation and pruning).
-- Continual online learning without episode resets on the learning side.
+- Rust from scratch, no external ML libraries.
+- M2 MacBook Air (Apple Silicon, AMX via Accelerate, no GPU).
+- Bevy 60 Hz fixed tick, 8 cars (configurable).
+- 43-dim observation, 2-dim action — stable.
+- PPO coexists permanently as diagnostic.
 
-This note will be updated or superseded once the first brain-inspired commit lands.
+## References
+
+- `notes/biology-first-principle.md` — the discipline.
+- `notes/brain-v1-design.md` — concrete v1 design.
+- `notes/reward-and-entertainment.md` — reward philosophy.
+- `notes/normalisation-layers.md` — the three normalisations in PPO, relevant if we ever reference PPO as a comparison.
+- `notes/conventions.md` — project-wide conventions.
+- `context/references/brain-inspired-learning/overview.md` — seven-paper synthesis.
+- `README.md` — project intent and current milestone structure.
