@@ -144,7 +144,16 @@ impl Default for PpoConfig {
             // convention). `None` disables the guardrail entirely.
             target_kl: Some(0.03),
             popart_enabled: true,
-            popart_beta: 1e-4,
+            // Raised from 1e-4 → 3e-2 after the first post-round-2 training
+            // run (`reports/analytics/run_1776556719.md`). At 1e-4 per
+            // update, PopArt retained ~85% of its zero-initial state after
+            // 1,582 updates — barely tracking the actual return
+            // distribution (batch_mean 262 vs PopArt µ 30). The critic
+            // became biased LOW (residual mean -339, section 14) because
+            // σ·z + µ ≈ 80·z + 30 could not reach the ~500+ reward-unit
+            // returns some episodes delivered. At 3e-2 the EMA tracks the
+            // batch mean within ~30 updates.
+            popart_beta: 3e-2,
             popart_sigma_floor: 1e-4,
         }
     }
