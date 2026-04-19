@@ -168,6 +168,7 @@ mod tests {
             mean_front_ray_distance: 0.0,
             mean_side_ray_distance: 0.0,
             failure_mode: None,
+            controller: "Ppo".to_string(),
         }
     }
 

@@ -87,6 +87,12 @@ pub struct EpisodeRecord {
     pub mean_policy_steering_std: Option<f32>,
     pub mean_policy_throttle_std: Option<f32>,
 
+    /// Which controller drove this episode's car. Serialised as a short
+    /// string ("Ppo", "Brain", "Keyboard") for report readability. Defaults
+    /// to "Unknown" via `default_controller` so pre-S6 exports deserialise.
+    #[serde(default = "default_controller")]
+    pub controller: String,
+
     // Existing turn metrics
     pub turn_in_latency_fraction: Option<f32>,
     pub turn_in_latency_ticks: Option<u32>,
@@ -255,6 +261,10 @@ fn one_f32() -> f32 {
     1.0
 }
 
+fn default_controller() -> String {
+    "Unknown".to_string()
+}
+
 /// Exported run-level analytics data.
 #[derive(Resource, Default, Debug, Serialize, Deserialize)]
 pub struct EpisodeTracker {
@@ -304,6 +314,21 @@ pub struct RunMetadata {
     pub gae_lambda: f32,
     pub max_steps: usize,
     pub samples_per_tick: usize,
+    /// `TrainerLayout::label()` — one of "Keyboard", "AllPpo", "AllBrain",
+    /// "SideBySide". Present so the markdown exporter can decide whether to
+    /// emit the Fleet Comparison section (only meaningful in SideBySide runs).
+    #[serde(default = "default_layout_label")]
+    pub layout: String,
+    /// Number of PPO cars in this run.
+    #[serde(default)]
+    pub ppo_cars: usize,
+    /// Number of brain-inspired cars in this run.
+    #[serde(default)]
+    pub brain_cars: usize,
+}
+
+fn default_layout_label() -> String {
+    "AllPpo".to_string()
 }
 
 /// Compact export schema — episodes and PPO updates with run metadata,

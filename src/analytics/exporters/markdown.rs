@@ -952,6 +952,16 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str, context_head
         append_brain_sections(&mut md, tracker);
     }
 
+    // ════════════════════════════════════════════════════════════════════
+    // 19. Fleet Comparison — only when this run had both PPO and brain cars
+    // (detected by scanning EpisodeRecord.controller values).
+    // ════════════════════════════════════════════════════════════════════
+    let has_ppo_eps = tracker.episodes.iter().any(|e| e.controller == "Ppo");
+    let has_brain_eps = tracker.episodes.iter().any(|e| e.controller == "Brain");
+    if has_ppo_eps && has_brain_eps {
+        append_fleet_comparison(&mut md, tracker);
+    }
+
     let _ = fs::write(filepath, md);
 }
 
@@ -1141,6 +1151,140 @@ fn append_brain_sections(md: &mut String, tracker: &EpisodeTracker) {
             "- Plateau detector triggered {} neurogenesis events, growing the \
              hidden layer as reward improvement stalled.\n",
             total_neurogen
+        ));
+    }
+    md.push_str("\n");
+}
+
+/// Section 19 — head-to-head PPO vs brain-inspired fleet comparison.
+/// Only emitted when the run had at least one of each controller kind in its
+/// episodes. Segments episodes by `controller` and produces parallel sparklines,
+/// means, loop-completion counts, and crash-rate deltas.
+fn append_fleet_comparison(md: &mut String, tracker: &EpisodeTracker) {
+    md.push_str("## 19. Fleet Comparison — PPO vs Brain-Inspired\n\n");
+    md.push_str(
+        "Side-by-side mode ran PPO (warm-palette cars) and the brain-inspired \
+         learner (cool-palette cars) in the same simulation. Each fleet saw the \
+         same track, same reward shaping, same observation contract — any \
+         difference in learning trajectory is attributable to the controller.\n\n",
+    );
+
+    let ppo_episodes: Vec<&EpisodeRecord> = tracker
+        .episodes
+        .iter()
+        .filter(|e| e.controller == "Ppo")
+        .collect();
+    let brain_episodes: Vec<&EpisodeRecord> = tracker
+        .episodes
+        .iter()
+        .filter(|e| e.controller == "Brain")
+        .collect();
+
+    let ppo_rewards: Vec<f32> = ppo_episodes.iter().map(|e| e.reward).collect();
+    let brain_rewards: Vec<f32> = brain_episodes.iter().map(|e| e.reward).collect();
+    let ppo_progress: Vec<f32> = ppo_episodes.iter().map(|e| e.progress * 100.0).collect();
+    let brain_progress: Vec<f32> =
+        brain_episodes.iter().map(|e| e.progress * 100.0).collect();
+    let ppo_crashes = ppo_episodes
+        .iter()
+        .filter(|e| e.end_reason == "Crash")
+        .count();
+    let brain_crashes = brain_episodes
+        .iter()
+        .filter(|e| e.end_reason == "Crash")
+        .count();
+    let ppo_loops = ppo_episodes.iter().filter(|e| e.progress >= 1.0).count();
+    let brain_loops = brain_episodes.iter().filter(|e| e.progress >= 1.0).count();
+
+    let ppo_mean_reward = mean(&ppo_rewards);
+    let brain_mean_reward = mean(&brain_rewards);
+    let ppo_mean_progress = mean(&ppo_progress);
+    let brain_mean_progress = mean(&brain_progress);
+    let ppo_crash_rate = if !ppo_episodes.is_empty() {
+        100.0 * ppo_crashes as f32 / ppo_episodes.len() as f32
+    } else {
+        0.0
+    };
+    let brain_crash_rate = if !brain_episodes.is_empty() {
+        100.0 * brain_crashes as f32 / brain_episodes.len() as f32
+    } else {
+        0.0
+    };
+
+    md.push_str("| Metric | PPO | Brain-Inspired |\n");
+    md.push_str("|---|---|---|\n");
+    md.push_str(&format!(
+        "| Episodes | {} | {} |\n",
+        ppo_episodes.len(),
+        brain_episodes.len()
+    ));
+    md.push_str(&format!(
+        "| Mean reward | {:.2} | {:.2} |\n",
+        ppo_mean_reward, brain_mean_reward
+    ));
+    md.push_str(&format!(
+        "| Mean progress (%) | {:.1} | {:.1} |\n",
+        ppo_mean_progress, brain_mean_progress
+    ));
+    md.push_str(&format!(
+        "| Loops completed | {} | {} |\n",
+        ppo_loops, brain_loops
+    ));
+    md.push_str(&format!(
+        "| Crash rate (%) | {:.1} | {:.1} |\n\n",
+        ppo_crash_rate, brain_crash_rate
+    ));
+
+    let ppo_reward_smooth = rolling_mean(&ppo_rewards, 20);
+    let brain_reward_smooth = rolling_mean(&brain_rewards, 20);
+    md.push_str("PPO reward trajectory (rolling-20):\n```\n");
+    md.push_str(&sparkline(&ppo_reward_smooth, SPARKLINE_WIDTH));
+    md.push_str("\n```\n\n");
+    md.push_str("Brain-inspired reward trajectory (rolling-20):\n```\n");
+    md.push_str(&sparkline(&brain_reward_smooth, SPARKLINE_WIDTH));
+    md.push_str("\n```\n\n");
+
+    // Takeaway.
+    md.push_str("### Verdict\n\n");
+    let delta = brain_mean_reward - ppo_mean_reward;
+    if delta.abs() < 0.05 * ppo_mean_reward.abs().max(1e-3) {
+        md.push_str(
+            "- Fleets are tracking each other closely (within ±5% on mean \
+             reward). The brain-inspired learner is holding its own — if \
+             progress rates are similar, this is strong evidence that pure \
+             three-factor plasticity can match PPO on this task.\n",
+        );
+    } else if delta > 0.0 {
+        md.push_str(&format!(
+            "- Brain-inspired fleet is OUTPERFORMING PPO by {:.2} mean reward. \
+             Unusual — double-check that PPO is actually training (check section 2 \
+             of this report). If confirmed, this is a strong result for \
+             biological plasticity.\n",
+            delta
+        ));
+    } else {
+        md.push_str(&format!(
+            "- PPO fleet leads brain-inspired by {:.2} mean reward ({:.1}% \
+             gap). Expected direction for v1 given the research synthesis; \
+             what matters next is whether the brain-inspired trend is still \
+             rising (sparkline above) or has flattened. A still-rising brain \
+             trend with a gap is exactly the success bar defined in the M6 plan.\n",
+            delta.abs(),
+            100.0 * delta.abs() / ppo_mean_reward.abs().max(1e-3)
+        ));
+    }
+    if brain_loops == 0 && ppo_loops > 0 {
+        md.push_str(
+            "- Brain-inspired fleet has completed zero loops while PPO has. \
+             Expected for v1; the visible-learning success bar does not \
+             require loop completion.\n",
+        );
+    }
+    if brain_loops > 0 {
+        md.push_str(&format!(
+            "- Brain-inspired fleet completed {} loops — the biology-first \
+             substrate has proven capable on this task.\n",
+            brain_loops
         ));
     }
     md.push_str("\n");

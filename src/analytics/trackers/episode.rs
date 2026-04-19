@@ -8,6 +8,7 @@ use crate::analytics::trackers::action::PerCarActionAccumulators;
 use crate::analytics::trackers::trace::PerCarTraceAccumulators;
 use crate::brain::inspired::BrainTrainingStats;
 use crate::brain::ppo::PpoTrainingStats;
+use crate::brain::types::{BrainCar, KeyboardCar, PpoCar};
 use crate::game::car::{Car, EnvInstanceId};
 use crate::game::episode::EpisodeState;
 
@@ -180,14 +181,33 @@ struct TraceAggregates {
 /// Folds completed episodes from all cars into EpisodeTracker, tagged with env_id.
 /// Also records PPO update snapshots from the shared training stats resource.
 pub fn episode_tracker_system(
-    car_query: Query<(&EnvInstanceId, &EpisodeState), With<Car>>,
+    car_query: Query<
+        (
+            &EnvInstanceId,
+            &EpisodeState,
+            Option<&PpoCar>,
+            Option<&BrainCar>,
+            Option<&KeyboardCar>,
+        ),
+        With<Car>,
+    >,
     ppo_stats: Option<Res<PpoTrainingStats>>,
     brain_stats: Option<Res<BrainTrainingStats>>,
     mut action_accumulators: ResMut<PerCarActionAccumulators>,
     mut trace_accumulators: ResMut<PerCarTraceAccumulators>,
     mut tracker: ResMut<EpisodeTracker>,
 ) {
-    for (env_id, episode_state) in car_query.iter() {
+    for (env_id, episode_state, is_ppo, is_brain, is_kbd) in car_query.iter() {
+        let controller = if is_ppo.is_some() {
+            "Ppo"
+        } else if is_brain.is_some() {
+            "Brain"
+        } else if is_kbd.is_some() {
+            "Keyboard"
+        } else {
+            "Unknown"
+        }
+        .to_string();
         let Some(reason) = episode_state.last.end_reason else {
             continue;
         };
@@ -316,6 +336,7 @@ pub fn episode_tracker_system(
             mean_front_ray_distance: trace_metrics.mean_front_ray_distance,
             mean_side_ray_distance: trace_metrics.mean_side_ray_distance,
             failure_mode: trace_metrics.failure_mode,
+            controller,
         });
     }
 

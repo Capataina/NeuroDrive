@@ -749,3 +749,66 @@ fn compact_run_export_skips_brain_records_when_absent() {
     let export: CompactRunExport = serde_json::from_str(legacy).expect("legacy JSON");
     assert!(export.brain_records.is_empty());
 }
+
+// ── S6: Side-by-side partition + isolation ─────────────────────────────
+
+/// TrainerLayout::total_cars returns correct sums for every variant.
+#[test]
+fn trainer_layout_total_cars_is_sum_of_controllers() {
+    use neurodrive::game::car::TrainerLayout;
+
+    assert_eq!(TrainerLayout::Keyboard.total_cars(), 1);
+    assert_eq!(TrainerLayout::AllPpo { count: 8 }.total_cars(), 8);
+    assert_eq!(TrainerLayout::AllBrain { count: 8 }.total_cars(), 8);
+    assert_eq!(
+        TrainerLayout::SideBySide { ppo: 8, brain: 8 }.total_cars(),
+        16
+    );
+    assert_eq!(
+        TrainerLayout::SideBySide { ppo: 3, brain: 5 }.total_cars(),
+        8
+    );
+}
+
+/// TrainerLayout::next cycles deterministically through all four variants.
+#[test]
+fn trainer_layout_cycle_visits_all_four_variants() {
+    use neurodrive::game::car::TrainerLayout;
+
+    let mut layout = TrainerLayout::Keyboard;
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..5 {
+        seen.insert(layout.label().to_string());
+        layout = layout.next();
+    }
+    assert!(seen.contains("Keyboard"));
+    assert!(seen.contains("AllPpo"));
+    assert!(seen.contains("AllBrain"));
+    assert!(seen.contains("SideBySide"));
+    // After 4 cycles we should be back at Keyboard.
+    assert_eq!(TrainerLayout::Keyboard.next().next().next().next(), TrainerLayout::Keyboard);
+}
+
+/// Warm and cool palette helpers return disjoint hue families — asserts
+/// that at least for the first index the warm palette is red-dominant and
+/// the cool palette is blue-dominant, guarding against accidental palette
+/// swaps.
+#[test]
+fn warm_and_cool_palettes_are_visually_distinct() {
+    use neurodrive::game::car::{car_colour_cool, car_colour_warm};
+
+    let warm = car_colour_warm(0);
+    let cool = car_colour_cool(0);
+    assert!(
+        warm.r > warm.b,
+        "warm palette entry 0 should be red-dominant, got r={} b={}",
+        warm.r,
+        warm.b
+    );
+    assert!(
+        cool.b > cool.r,
+        "cool palette entry 0 should be blue-dominant, got r={} b={}",
+        cool.r,
+        cool.b
+    );
+}

@@ -100,6 +100,9 @@ fn on_exit_system(
             gae_lambda: brain.config.gae_lambda,
             max_steps: brain.config.max_steps,
             samples_per_tick: brain.config.samples_per_tick,
+            layout: trainer_config.layout.label().to_string(),
+            ppo_cars: trainer_config.layout.ppo_count(),
+            brain_cars: trainer_config.layout.brain_count(),
         };
 
         // Capture run context for the markdown header.
