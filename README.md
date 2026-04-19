@@ -234,7 +234,7 @@ A **sparse directed graph of rate-coded tanh neurons**, trained by local plastic
 - **Input**: 43 reserved neurons bound to the observation contract.
 - **Output**: 2 reserved neurons bound to steering + throttle.
 - **Hidden**: starts at ~15 neurons, grows to a few hundred over training via structural plasticity.
-- **Synapses**: sparse edges (~10% initial density). Each synapse has weight + eligibility trace.
+- **Synapses**: sparse edges (~10% initial density — the brain is not fully connected, matching biological connectivity). Each synapse has weight + eligibility trace. Weights change continuously via plasticity; synapses also appear and disappear dynamically over time (see "Synaptic Dynamics" below).
 
 ### How v1 Learns
 
@@ -260,16 +260,24 @@ Two biological mechanisms running alongside plasticity:
 
 Both prevent the pathologies plasticity can introduce (weight explosion, neuron death).
 
+### Synaptic Dynamics
+
+Synapses are not fixed. They change on three independent axes throughout training:
+
+- **Strength varies continuously.** Every synapse's weight updates per tick via the three-factor plasticity rule above. This is the primary learning signal.
+- **New synapses appear.** When two neurons that are not currently connected show high co-activation, a new synapse sprouts between them (biological "sprouting" analogue). Starting density is sparse (~10%), meaning most neuron pairs are initially disconnected — and stay that way unless co-activation justifies a new edge.
+- **Unused synapses disappear.** Synapses whose weight magnitude drops below a threshold and whose eligibility contribution stays near zero get pruned entirely — removed from the graph, not just zeroed.
+
+The result is a synaptic web that continuously rewires itself: strengthening useful connections, growing new ones where correlations demand them, and pruning dead weight. No neuron is ever fully connected to all others; the brain remains sparse throughout its lifetime, like its biological counterpart.
+
 ### Structural Plasticity — the "Brain That Grows" Feature
 
-The vision of watching a neural web grow and evolve over time is preserved intact. The v1 brain implements continual-backprop-style structural plasticity (Dohare et al., Nature 2024), adapted to graph topology:
+Beyond synaptic dynamics, the graph itself grows and reshapes. The v1 brain implements continual-backprop-style structural plasticity (Dohare et al., Nature 2024), adapted to graph topology:
 
-- **Neuron replacement**: low-utility neurons get their outgoing edges zeroed and incoming edges resampled. Behaviour-preserving at the moment of replacement.
+- **Neuron replacement**: low-utility neurons get their outgoing edges zeroed and incoming edges resampled. Behaviour-preserving at the moment of replacement — the neuron's slot is reused with a fresh random identity.
 - **Neurogenesis**: when learning plateaus, new neurons appear with random connections to existing neurons.
-- **Synapse pruning**: below-threshold synapses get removed.
-- **Synapse sprouting**: occasionally, two highly-correlated unconnected neurons get a new edge.
 
-Depth is fixed (tanh activations are incompatible with identity-preserving depth growth). Width and synaptic density grow freely. The brain literally reshapes itself during training.
+Depth is fixed (tanh activations are incompatible with identity-preserving depth growth). Width and synaptic density grow freely. The brain literally reshapes itself during training — neurons appear and get recycled, synapses sprout and prune — while the I/O contract (43 input neurons, 2 output neurons) stays stable.
 
 ### Integration
 
