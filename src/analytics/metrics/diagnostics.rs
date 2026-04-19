@@ -199,6 +199,8 @@ mod tests {
             ppo_updates: vec![update],
             episode_traces: Vec::new(),
             last_recorded_update: 0,
+            brain_records: Vec::new(),
+            last_recorded_brain_records: 0,
         };
 
         let flags = compute_diagnostic_flags(&tracker);
@@ -216,6 +218,8 @@ mod tests {
             ppo_updates: vec![healthy_update()],
             episode_traces: Vec::new(),
             last_recorded_update: 0,
+            brain_records: Vec::new(),
+            last_recorded_brain_records: 0,
         };
 
         let flags = compute_diagnostic_flags(&tracker);

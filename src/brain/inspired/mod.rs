@@ -417,4 +417,80 @@ pub fn brain_learn_all_cars_system(
     brain.stats.dead_neuron_fraction = health.dead_neuron_fraction;
 
     stats.total_ticks = stats.total_ticks.saturating_add(1);
+
+    // Step 6: on the structural cadence, flush a BrainUpdateRecord into
+    // BrainTrainingStats so analytics can pick it up.
+    if on_cadence {
+        let record = build_brain_update_record(
+            &brain.graph,
+            &brain.stats,
+            tick_counter
+                .saturating_sub(config_snapshot.structural_cadence),
+            tick_counter,
+            health,
+        );
+        stats.latest = record.clone();
+        stats.history.push(record);
+
+        // Reset per-window counters so the next record captures fresh counts.
+        brain.stats.replacement_events = 0;
+        brain.stats.neurogenesis_events = 0;
+        brain.stats.prune_events = 0;
+        brain.stats.sprout_events = 0;
+        brain.stats.plasticity_updates = 0;
+    }
+}
+
+/// Builds a `BrainUpdateRecord` snapshot from the current graph + running
+/// stats. Called on the structural cadence; extracts everything analytics
+/// needs from a single graph scan.
+fn build_brain_update_record(
+    graph: &graph::BrainGraph,
+    stats: &BrainRunningStats,
+    tick_start: u64,
+    tick_end: u64,
+    health: plasticity::PlasticitySample,
+) -> BrainUpdateRecord {
+    let neuron_count = graph.live_neuron_count() as u32;
+    let hidden_count = graph.live_hidden_count() as u32;
+    let synapse_count = graph.live_synapse_count() as u32;
+
+    // Utility percentiles over live hidden neurons.
+    let mut utilities: Vec<f32> = graph
+        .neurons
+        .iter()
+        .filter(|n| n.alive && n.role.is_hidden())
+        .map(|n| n.utility)
+        .collect();
+    let (mean_utility, utility_p10, utility_p90) = if utilities.is_empty() {
+        (0.0, 0.0, 0.0)
+    } else {
+        utilities.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let n = utilities.len();
+        let p10_idx = (n as f32 * 0.10) as usize;
+        let p90_idx = ((n as f32 * 0.90) as usize).min(n - 1);
+        let mean: f32 = utilities.iter().sum::<f32>() / n as f32;
+        (mean, utilities[p10_idx], utilities[p90_idx])
+    };
+
+    BrainUpdateRecord {
+        tick_start,
+        tick_end,
+        neuron_count,
+        hidden_count,
+        synapse_count,
+        mean_abs_weight: health.mean_abs_weight,
+        weight_sigma: health.weight_sigma,
+        mean_abs_eligibility: health.mean_abs_eligibility,
+        mean_utility,
+        utility_p10,
+        utility_p90,
+        replacement_count: stats.replacement_events as u32,
+        neurogenesis_count: stats.neurogenesis_events as u32,
+        prune_count: stats.prune_events as u32,
+        sprout_count: stats.sprout_events as u32,
+        dead_neuron_fraction: stats.dead_neuron_fraction,
+        saturation_fraction: stats.saturation_fraction,
+        mean_m: stats.last_mean_m,
+    }
 }

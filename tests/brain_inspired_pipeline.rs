@@ -689,3 +689,63 @@ fn utility_tick_updates_toward_contribution() {
         .any(|n| matches!(n.role, NeuronRole::Hidden) && n.utility > 0.0);
     assert!(any_positive, "no hidden utility grew from non-zero activation");
 }
+
+// ── S5: Analytics integration ───────────────────────────────────────────
+
+/// BrainUpdateRecord round-trips through serde without data loss.
+#[test]
+fn brain_update_record_serializes_and_deserializes() {
+    use neurodrive::brain::inspired::BrainUpdateRecord;
+
+    let record = BrainUpdateRecord {
+        tick_start: 100,
+        tick_end: 228,
+        neuron_count: 62,
+        hidden_count: 17,
+        synapse_count: 145,
+        mean_abs_weight: 0.12,
+        weight_sigma: 0.25,
+        mean_abs_eligibility: 0.03,
+        mean_utility: 0.05,
+        utility_p10: 0.002,
+        utility_p90: 0.08,
+        replacement_count: 1,
+        neurogenesis_count: 0,
+        prune_count: 3,
+        sprout_count: 2,
+        dead_neuron_fraction: 0.03,
+        saturation_fraction: 0.10,
+        mean_m: 0.42,
+    };
+    let json = serde_json::to_string(&record).expect("serialize");
+    let round_tripped: BrainUpdateRecord = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(round_tripped.tick_start, 100);
+    assert_eq!(round_tripped.neuron_count, 62);
+    assert_eq!(round_tripped.replacement_count, 1);
+    assert!((round_tripped.mean_m - 0.42).abs() < 1e-6);
+}
+
+/// CompactRunExport with an empty brain_records field still (de)serialises
+/// — validates the `#[serde(default)]` back-compat shield.
+#[test]
+fn compact_run_export_skips_brain_records_when_absent() {
+    use neurodrive::analytics::models::CompactRunExport;
+    // An older JSON without brain_records — simulated here by omitting the field.
+    let legacy = r#"{
+        "metadata": {
+            "car_count": 8,
+            "track_name": "Monaco",
+            "session_timestamp": 0,
+            "ppo_epochs": 4,
+            "clip_epsilon": 0.2,
+            "gamma": 0.995,
+            "gae_lambda": 0.95,
+            "max_steps": 512,
+            "samples_per_tick": 32
+        },
+        "episodes": [],
+        "ppo_updates": []
+    }"#;
+    let export: CompactRunExport = serde_json::from_str(legacy).expect("legacy JSON");
+    assert!(export.brain_records.is_empty());
+}

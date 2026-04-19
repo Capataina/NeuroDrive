@@ -944,8 +944,208 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str, context_head
         ));
     }
 
+    // ════════════════════════════════════════════════════════════════════
+    // 16–18. Brain-inspired learner diagnostics (populated when any brain
+    // cars ran; otherwise these sections are skipped entirely).
+    // ════════════════════════════════════════════════════════════════════
+    if !tracker.brain_records.is_empty() {
+        append_brain_sections(&mut md, tracker);
+    }
+
     let _ = fs::write(filepath, md);
 }
+
+/// Appends sections 16 (structure), 17 (plasticity health), 18 (structural
+/// events) for the brain-inspired learner. Only called when
+/// `tracker.brain_records` has at least one entry.
+fn append_brain_sections(md: &mut String, tracker: &EpisodeTracker) {
+    // ─── Section 16: Brain Structure Over Time ──────────────────────────
+    md.push_str("## 16. Brain Structure Over Time\n\n");
+    let neuron_series: Vec<f32> = tracker
+        .brain_records
+        .iter()
+        .map(|r| r.neuron_count as f32)
+        .collect();
+    let hidden_series: Vec<f32> = tracker
+        .brain_records
+        .iter()
+        .map(|r| r.hidden_count as f32)
+        .collect();
+    let synapse_series: Vec<f32> = tracker
+        .brain_records
+        .iter()
+        .map(|r| r.synapse_count as f32)
+        .collect();
+    md.push_str(&format!(
+        "- Neurons: {} → {} ({} records)\n",
+        neuron_series.first().copied().unwrap_or(0.0) as u32,
+        neuron_series.last().copied().unwrap_or(0.0) as u32,
+        tracker.brain_records.len()
+    ));
+    md.push_str(&format!(
+        "- Hidden neurons: {} → {}\n",
+        hidden_series.first().copied().unwrap_or(0.0) as u32,
+        hidden_series.last().copied().unwrap_or(0.0) as u32
+    ));
+    md.push_str(&format!(
+        "- Synapses: {} → {}\n\n",
+        synapse_series.first().copied().unwrap_or(0.0) as u32,
+        synapse_series.last().copied().unwrap_or(0.0) as u32
+    ));
+    md.push_str("Neuron count trajectory:\n```\n");
+    md.push_str(&sparkline(&neuron_series, SPARKLINE_WIDTH));
+    md.push_str("\n```\n\n");
+    md.push_str("Synapse count trajectory:\n```\n");
+    md.push_str(&sparkline(&synapse_series, SPARKLINE_WIDTH));
+    md.push_str("\n```\n\n");
+
+    // ─── Section 17: Plasticity Health ──────────────────────────────────
+    md.push_str("## 17. Plasticity Health\n\n");
+    let w_series: Vec<f32> = tracker
+        .brain_records
+        .iter()
+        .map(|r| r.mean_abs_weight)
+        .collect();
+    let e_series: Vec<f32> = tracker
+        .brain_records
+        .iter()
+        .map(|r| r.mean_abs_eligibility)
+        .collect();
+    let w_sigma_series: Vec<f32> = tracker
+        .brain_records
+        .iter()
+        .map(|r| r.weight_sigma)
+        .collect();
+    let dead_series: Vec<f32> = tracker
+        .brain_records
+        .iter()
+        .map(|r| r.dead_neuron_fraction * 100.0)
+        .collect();
+    let sat_series: Vec<f32> = tracker
+        .brain_records
+        .iter()
+        .map(|r| r.saturation_fraction * 100.0)
+        .collect();
+    let m_series: Vec<f32> = tracker
+        .brain_records
+        .iter()
+        .map(|r| r.mean_m)
+        .collect();
+
+    md.push_str(&format!(
+        "- Mean |w| (final): {:.4}\n",
+        w_series.last().copied().unwrap_or(0.0)
+    ));
+    md.push_str(&format!(
+        "- Weight σ (final): {:.4}\n",
+        w_sigma_series.last().copied().unwrap_or(0.0)
+    ));
+    md.push_str(&format!(
+        "- Mean |eligibility| (final): {:.4}\n",
+        e_series.last().copied().unwrap_or(0.0)
+    ));
+    md.push_str(&format!(
+        "- Dead-neuron fraction (final): {:.1}%\n",
+        dead_series.last().copied().unwrap_or(0.0)
+    ));
+    md.push_str(&format!(
+        "- Saturation fraction (final): {:.1}%\n",
+        sat_series.last().copied().unwrap_or(0.0)
+    ));
+    md.push_str(&format!(
+        "- Mean modulator M (final): {:.4}\n\n",
+        m_series.last().copied().unwrap_or(0.0)
+    ));
+
+    md.push_str("Mean |w| over cadence windows:\n```\n");
+    md.push_str(&sparkline(&w_series, SPARKLINE_WIDTH));
+    md.push_str("\n```\n\n");
+    md.push_str("Mean |eligibility| over cadence windows:\n```\n");
+    md.push_str(&sparkline(&e_series, SPARKLINE_WIDTH));
+    md.push_str("\n```\n\n");
+    md.push_str("Modulator M (per-car reward mean) over cadence windows:\n```\n");
+    md.push_str(&sparkline(&m_series, SPARKLINE_WIDTH));
+    md.push_str("\n```\n\n");
+
+    // ─── Section 18: Structural Events ─────────────────────────────────
+    md.push_str("## 18. Structural Events\n\n");
+    let mut total_replace = 0u64;
+    let mut total_neurogen = 0u64;
+    let mut total_prune = 0u64;
+    let mut total_sprout = 0u64;
+    for r in &tracker.brain_records {
+        total_replace += r.replacement_count as u64;
+        total_neurogen += r.neurogenesis_count as u64;
+        total_prune += r.prune_count as u64;
+        total_sprout += r.sprout_count as u64;
+    }
+    md.push_str("| Event | Total |\n");
+    md.push_str("|---|---|\n");
+    md.push_str(&format!("| Neurons replaced (CBP) | {} |\n", total_replace));
+    md.push_str(&format!(
+        "| Neurogenesis (plateau-triggered) | {} |\n",
+        total_neurogen
+    ));
+    md.push_str(&format!("| Synapses pruned | {} |\n", total_prune));
+    md.push_str(&format!("| Synapses sprouted | {} |\n\n", total_sprout));
+
+    let replace_series: Vec<f32> = tracker
+        .brain_records
+        .iter()
+        .map(|r| r.replacement_count as f32)
+        .collect();
+    md.push_str("Replacements per cadence window:\n```\n");
+    md.push_str(&sparkline(&replace_series, SPARKLINE_WIDTH));
+    md.push_str("\n```\n\n");
+
+    let prune_series: Vec<f32> = tracker
+        .brain_records
+        .iter()
+        .map(|r| r.prune_count as f32)
+        .collect();
+    let sprout_series: Vec<f32> = tracker
+        .brain_records
+        .iter()
+        .map(|r| r.sprout_count as f32)
+        .collect();
+    md.push_str("Prune count per cadence window:\n```\n");
+    md.push_str(&sparkline(&prune_series, SPARKLINE_WIDTH));
+    md.push_str("\n```\n\n");
+    md.push_str("Sprout count per cadence window:\n```\n");
+    md.push_str(&sparkline(&sprout_series, SPARKLINE_WIDTH));
+    md.push_str("\n```\n\n");
+
+    // Takeaways.
+    md.push_str("### Takeaways\n\n");
+    if total_replace == 0 {
+        md.push_str(
+            "- No neurons were replaced this run. Either the maturity gate \
+             (config.maturity_ticks) is suppressing replacement, or utility \
+             was above threshold everywhere.\n",
+        );
+    } else {
+        md.push_str(&format!(
+            "- {} neurons were replaced via continual-backprop utility \
+             tracking. Low-utility neurons getting recycled is the project \
+             working as designed.\n",
+            total_replace
+        ));
+    }
+    if total_neurogen == 0 {
+        md.push_str(
+            "- No plateau-triggered neurogenesis fired. Either learning was \
+             not plateauing or the reward window had not filled.\n",
+        );
+    } else {
+        md.push_str(&format!(
+            "- Plateau detector triggered {} neurogenesis events, growing the \
+             hidden layer as reward improvement stalled.\n",
+            total_neurogen
+        ));
+    }
+    md.push_str("\n");
+}
+
 
 // ── Helpers ────────────────────────────────────────────────────────────
 

@@ -27,6 +27,7 @@ pub fn export_compact_json(tracker: &EpisodeTracker, metadata: &RunMetadata, fil
         metadata: metadata.clone(),
         episodes: tracker.episodes.clone(),
         ppo_updates: tracker.ppo_updates.clone(),
+        brain_records: tracker.brain_records.clone(),
     };
 
     if let Ok(json) = serde_json::to_string_pretty(&export) {

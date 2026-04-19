@@ -6,6 +6,7 @@ use crate::analytics::models::{
 };
 use crate::analytics::trackers::action::PerCarActionAccumulators;
 use crate::analytics::trackers::trace::PerCarTraceAccumulators;
+use crate::brain::inspired::BrainTrainingStats;
 use crate::brain::ppo::PpoTrainingStats;
 use crate::game::car::{Car, EnvInstanceId};
 use crate::game::episode::EpisodeState;
@@ -181,6 +182,7 @@ struct TraceAggregates {
 pub fn episode_tracker_system(
     car_query: Query<(&EnvInstanceId, &EpisodeState), With<Car>>,
     ppo_stats: Option<Res<PpoTrainingStats>>,
+    brain_stats: Option<Res<BrainTrainingStats>>,
     mut action_accumulators: ResMut<PerCarActionAccumulators>,
     mut trace_accumulators: ResMut<PerCarTraceAccumulators>,
     mut tracker: ResMut<EpisodeTracker>,
@@ -315,6 +317,20 @@ pub fn episode_tracker_system(
             mean_side_ray_distance: trace_metrics.mean_side_ray_distance,
             failure_mode: trace_metrics.failure_mode,
         });
+    }
+
+    // Brain-inspired update recording — reads from the shared
+    // BrainTrainingStats resource. Copies newly-appended records from
+    // `brain_stats.history` into `tracker.brain_records`, tracked by count so
+    // repeated calls are idempotent.
+    if let Some(brain_stats) = brain_stats.as_ref() {
+        let total = brain_stats.history.len();
+        let already = tracker.last_recorded_brain_records;
+        if total > already {
+            let new_slice: Vec<_> = brain_stats.history[already..].iter().cloned().collect();
+            tracker.brain_records.extend(new_slice);
+            tracker.last_recorded_brain_records = total;
+        }
     }
 
     // PPO update recording — reads from a global resource, not per-car.

@@ -177,6 +177,8 @@ mod tests {
             ppo_updates: Vec::new(),
             episode_traces: Vec::new(),
             last_recorded_update: 0,
+            brain_records: Vec::new(),
+            last_recorded_brain_records: 0,
         }
     }
 

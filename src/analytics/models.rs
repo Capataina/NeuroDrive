@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::brain::inspired::BrainUpdateRecord;
+
 pub const NUM_PROGRESS_SECTORS: usize = 20;
 
 /// Classification of how a crash occurred, based on terminal tick kinematics.
@@ -259,8 +261,18 @@ pub struct EpisodeTracker {
     pub episodes: Vec<EpisodeRecord>,
     pub ppo_updates: Vec<PpoUpdateRecord>,
     pub episode_traces: Vec<EpisodeTrace>,
+    /// Brain-inspired learner diagnostics, one record per structural cadence.
+    /// Empty when no brain cars ran in this session (`#[serde(default)]` so
+    /// historical JSON exports without this field still deserialise).
+    #[serde(default)]
+    pub brain_records: Vec<BrainUpdateRecord>,
     #[serde(skip)]
     pub last_recorded_update: u64,
+    /// Count of brain records already copied from `BrainTrainingStats.history`
+    /// into `brain_records`. Kept outside the serialised form — rebuilds from
+    /// `brain_records.len()` on load if needed.
+    #[serde(skip)]
+    pub last_recorded_brain_records: usize,
 }
 
 /// Controls which analytics artefacts are exported on exit.
@@ -301,4 +313,8 @@ pub struct CompactRunExport {
     pub metadata: RunMetadata,
     pub episodes: Vec<EpisodeRecord>,
     pub ppo_updates: Vec<PpoUpdateRecord>,
+    /// Brain-inspired learner diagnostics. `#[serde(default)]` so older
+    /// exports (before M6) deserialise cleanly.
+    #[serde(default)]
+    pub brain_records: Vec<BrainUpdateRecord>,
 }

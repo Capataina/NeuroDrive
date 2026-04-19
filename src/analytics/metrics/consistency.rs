@@ -195,6 +195,8 @@ mod tests {
             ppo_updates: Vec::new(),
             episode_traces: vec![trace],
             last_recorded_update: 0,
+            brain_records: Vec::new(),
+            last_recorded_brain_records: 0,
         };
 
         let profiles = compute_sector_consistency(&tracker, 10);
@@ -217,6 +219,8 @@ mod tests {
             ppo_updates: Vec::new(),
             episode_traces: vec![trace],
             last_recorded_update: 0,
+            brain_records: Vec::new(),
+            last_recorded_brain_records: 0,
         };
 
         let profiles = compute_sector_consistency(&tracker, 10);
@@ -234,6 +238,8 @@ mod tests {
             ppo_updates: Vec::new(),
             episode_traces: Vec::new(),
             last_recorded_update: 0,
+            brain_records: Vec::new(),
+            last_recorded_brain_records: 0,
         };
         let profiles = compute_sector_consistency(&tracker, 10);
         let score = overall_consistency_score(&profiles);
