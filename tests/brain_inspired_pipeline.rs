@@ -9,12 +9,18 @@
 //! - S5: analytics serialisation.
 //! - S6: side-by-side partition + cross-contamination guards.
 
+use std::collections::VecDeque;
+
 use neurodrive::brain::inspired::config::BrainInspiredConfig;
 use neurodrive::brain::inspired::graph::{BrainGraph, NeuronRole};
 use neurodrive::brain::inspired::homeostasis::{
     apply_synaptic_scaling, update_intrinsic_homeostat,
 };
 use neurodrive::brain::inspired::plasticity::{CarLearnSample, apply_plasticity_tick};
+use neurodrive::brain::inspired::structural::{
+    detect_plateau, grow_hidden_neuron, prune_synapses, replace_low_utility, sprout_synapses,
+    update_utility_tick,
+};
 use neurodrive::brain::inspired::{NeuronActivations, forward_tick};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -494,4 +500,192 @@ fn homeostasis_idempotent_at_steady_state() {
             b
         );
     }
+}
+
+// ── S4: Structural plasticity ────────────────────────────────────────────
+
+/// Replacement selects mature, low-utility hidden neurons — not inputs,
+/// outputs, or immature neurons.
+#[test]
+fn replacement_selects_lowest_utility_mature_neurons() {
+    let mut config = BrainInspiredConfig::default();
+    config.replace_fraction = 0.5; // force several replacements for this test
+    let mut rng = StdRng::seed_from_u64(2024);
+    let mut graph = BrainGraph::seed(&config, 1, &mut rng);
+
+    // Mature and assign distinct utilities to hidden neurons.
+    for (i, n) in graph.neurons.iter_mut().enumerate() {
+        if matches!(n.role, NeuronRole::Hidden) {
+            n.age_ticks = config.maturity_ticks + 1;
+            n.utility = 1.0 + (i as f32 * 0.1);
+        }
+    }
+    // Input/output neurons get very low utility but high age — they must
+    // still be excluded.
+    for n in graph.neurons.iter_mut() {
+        if !matches!(n.role, NeuronRole::Hidden) {
+            n.age_ticks = config.maturity_ticks + 1;
+            n.utility = -1.0;
+        }
+    }
+
+    let replaced = replace_low_utility(&mut graph, &config, &mut rng);
+    assert!(replaced > 0, "nothing replaced");
+
+    // The replaced neurons should all be Hidden (age reset + utility reset).
+    let mut reset_count = 0u32;
+    for n in &graph.neurons {
+        if matches!(n.role, NeuronRole::Hidden) && n.age_ticks == 0 && n.utility == 0.0 {
+            reset_count += 1;
+        }
+    }
+    assert_eq!(reset_count, replaced);
+
+    // Inputs and outputs never touched.
+    for n in &graph.neurons {
+        match n.role {
+            NeuronRole::Input(_) | NeuronRole::Output(_) => {
+                assert_ne!(
+                    n.age_ticks, 0,
+                    "input/output neuron was reset by replacement"
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Replacement zeros outgoing weights on the target neuron (behaviour-
+/// preserving at the moment of replacement).
+#[test]
+fn replacement_zeros_outgoing_weights() {
+    let mut config = BrainInspiredConfig::default();
+    config.replace_fraction = 0.5;
+    let mut rng = StdRng::seed_from_u64(7);
+    let mut graph = BrainGraph::seed(&config, 1, &mut rng);
+
+    // Mature all hidden neurons; give distinct utilities.
+    for (i, n) in graph.neurons.iter_mut().enumerate() {
+        if matches!(n.role, NeuronRole::Hidden) {
+            n.age_ticks = config.maturity_ticks + 1;
+            n.utility = -1.0 + (i as f32 * 0.001); // most negative first = first replaced
+        }
+    }
+
+    // Identify the lowest-utility hidden neuron — this one will be replaced
+    // first.
+    let (victim_id, _) = graph
+        .neurons
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| matches!(n.role, NeuronRole::Hidden))
+        .min_by(|(_, a), (_, b)| a.utility.partial_cmp(&b.utility).unwrap())
+        .map(|(i, n)| (i as u32, n.utility))
+        .expect("at least one hidden neuron");
+
+    replace_low_utility(&mut graph, &config, &mut rng);
+
+    // Victim's outgoing synapses should all have weight 0.
+    let outgoing = graph.neurons[victim_id as usize].outgoing.clone();
+    for sid in outgoing {
+        let syn = &graph.synapses[sid as usize];
+        if syn.alive {
+            assert_eq!(
+                syn.weight, 0.0,
+                "outgoing synapse from replaced neuron was not zeroed"
+            );
+        }
+    }
+}
+
+/// After any structural operation, every live synapse's source and target
+/// must point to live neurons.
+#[test]
+fn replacement_preserves_graph_connectivity_invariant() {
+    let config = BrainInspiredConfig::default();
+    let mut rng = StdRng::seed_from_u64(111);
+    let mut graph = BrainGraph::seed(&config, 1, &mut rng);
+
+    // Mature all neurons so replacement is eligible.
+    for n in graph.neurons.iter_mut() {
+        n.age_ticks = config.maturity_ticks + 1;
+    }
+
+    // Run a mixed sequence of structural operations many times.
+    for _ in 0..50 {
+        replace_low_utility(&mut graph, &config, &mut rng);
+        prune_synapses(&mut graph, &config);
+        sprout_synapses(&mut graph, &config, &mut rng, 8);
+        grow_hidden_neuron(&mut graph, &config, &mut rng);
+    }
+
+    for syn in &graph.synapses {
+        if syn.alive {
+            assert!(
+                graph.neurons[syn.source as usize].alive,
+                "dangling source"
+            );
+            assert!(
+                graph.neurons[syn.target as usize].alive,
+                "dangling target"
+            );
+            assert_ne!(syn.source, syn.target, "self-loop created");
+        }
+    }
+}
+
+/// Plateau detector returns true when the two halves of the window have
+/// near-equal means, false when there is a clear upward trend.
+#[test]
+fn plateau_detector_triggers_on_flat_reward_window() {
+    let flat: VecDeque<f32> = vec![10.0_f32; 50].into();
+    assert!(detect_plateau(&flat, 50, 0.02));
+
+    let rising: VecDeque<f32> = (0..50).map(|i| i as f32).collect();
+    assert!(!detect_plateau(&rising, 50, 0.02));
+
+    // Too few entries → not a plateau regardless.
+    let tiny: VecDeque<f32> = vec![5.0; 10].into();
+    assert!(!detect_plateau(&tiny, 50, 0.02));
+}
+
+/// Neurogenesis grows the live neuron count by one each call.
+#[test]
+fn neurogenesis_grows_neuron_count() {
+    let config = BrainInspiredConfig::default();
+    let mut rng = StdRng::seed_from_u64(3);
+    let mut graph = BrainGraph::seed(&config, 1, &mut rng);
+
+    let before = graph.live_neuron_count();
+    for _ in 0..5 {
+        grow_hidden_neuron(&mut graph, &config, &mut rng);
+    }
+    let after = graph.live_neuron_count();
+    assert_eq!(after, before + 5);
+}
+
+/// Utility update moves `utility` in the direction of current |h| · Σ|w_out|.
+#[test]
+fn utility_tick_updates_toward_contribution() {
+    let config = BrainInspiredConfig::default();
+    let mut rng = StdRng::seed_from_u64(41);
+    let mut graph = BrainGraph::seed(&config, 1, &mut rng);
+
+    // Force a strong activation everywhere so utility contribution is large.
+    let big: Vec<f32> = vec![0.8; graph.neurons.len()];
+    let per_car: Vec<&[f32]> = vec![&big];
+
+    // Reset utilities to 0 so we can observe growth.
+    for n in graph.neurons.iter_mut() {
+        n.utility = 0.0;
+    }
+
+    update_utility_tick(&mut graph, &per_car, config.eta_utility);
+    // At least one hidden neuron should now have utility > 0 (growing toward
+    // contribution at rate 1 - eta_utility = 0.01).
+    let any_positive = graph
+        .neurons
+        .iter()
+        .any(|n| matches!(n.role, NeuronRole::Hidden) && n.utility > 0.0);
+    assert!(any_positive, "no hidden utility grew from non-zero activation");
 }

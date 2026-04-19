@@ -257,15 +257,31 @@ pub fn brain_learn_all_cars_system(
 ) {
     use self::homeostasis::{apply_synaptic_scaling, update_intrinsic_homeostat};
     use self::plasticity::{CarLearnSample, apply_plasticity_tick, sample_plasticity_health};
+    use self::structural::{
+        detect_plateau, grow_hidden_neuron, prune_synapses, replace_low_utility,
+        sprout_synapses, update_utility_tick,
+    };
 
-    if !brain.config.enable_plasticity && !brain.config.enable_homeostasis {
+    if !brain.config.enable_plasticity
+        && !brain.config.enable_homeostasis
+        && !brain.config.enable_structural
+    {
         return;
     }
 
-    // Gather per-car samples. Activations slices borrow from the read_query
-    // iteration; that borrow is released after this pass.
+    const REWARD_WINDOW_CAP: usize = 1024;
+
+    // Collect per-car samples. Simultaneously push episode returns onto the
+    // rolling reward window used by the plateau detector. Both happen in one
+    // pass because read_query and brain.reward_window are disjoint borrows.
     let mut samples: Vec<CarLearnSample> = Vec::with_capacity(16);
     for (env_id, episode_state, activations) in read_query.iter() {
+        if episode_state.tick.end_reason.is_some() {
+            brain.reward_window.push_back(episode_state.last.return_sum);
+            while brain.reward_window.len() > REWARD_WINDOW_CAP {
+                brain.reward_window.pop_front();
+            }
+        }
         samples.push(CarLearnSample {
             env_id: env_id.0,
             modulator: episode_state.tick.reward,
@@ -279,10 +295,12 @@ pub fn brain_learn_all_cars_system(
         return;
     }
 
-    // Snapshot hot config values to dodge the aliasing borrow-check when we
-    // later pass `&mut brain.graph` and `&brain.config` into helpers.
+    // Snapshot hot config + tick counter so we can freely borrow graph / rng /
+    // reward_window / stats without aliasing.
     let config_snapshot = brain.config.clone();
     let tick_counter = brain.tick_counter;
+    let on_cadence = tick_counter > 0
+        && tick_counter % config_snapshot.structural_cadence == 0;
 
     // Step 1: plasticity (S2).
     if config_snapshot.enable_plasticity {
@@ -296,20 +314,18 @@ pub fn brain_learn_all_cars_system(
         brain.stats.plasticity_updates = brain.stats.plasticity_updates.saturating_add(applied);
     }
 
+    // Pre-compute per-car curr slices once — reused by homeostasis, utility,
+    // and saturation diagnostics. Ordering is samples order.
+    let curr_per_car: Vec<&[f32]> = samples.iter().map(|s| s.curr).collect();
+
     // Step 2: homeostasis (S3).
     if config_snapshot.enable_homeostasis {
-        // Intrinsic excitability + mean-rate EMA + age advancement every tick.
-        let curr_per_car: Vec<&[f32]> = samples.iter().map(|s| s.curr).collect();
         update_intrinsic_homeostat(&mut brain.graph, &curr_per_car, &config_snapshot);
 
-        // Synaptic scaling only on the structural cadence — it is a bigger
-        // operation and biologically slow (hours in real brains).
-        if tick_counter > 0 && tick_counter % config_snapshot.structural_cadence == 0 {
+        if on_cadence {
             apply_synaptic_scaling(&mut brain.graph, &config_snapshot);
         }
 
-        // Saturation fraction diagnostic (cheap scan, useful for detecting
-        // the runaway-excitation failure mode).
         let mut saturated = 0u64;
         let mut counted = 0u64;
         for car_acts in curr_per_car.iter() {
@@ -327,11 +343,66 @@ pub fn brain_learn_all_cars_system(
         };
     }
 
-    // Step 3: surface per-car M via PolicyOutput.
+    // Step 3: structural plasticity (S4).
+    if config_snapshot.enable_structural {
+        // Per-tick utility EMA update (cheap — mean(|h|) × Σ|w_out| per neuron).
+        update_utility_tick(
+            &mut brain.graph,
+            &curr_per_car,
+            config_snapshot.eta_utility,
+        );
+
+        if on_cadence {
+            // Field-level destructuring so we can borrow graph/rng/reward_window/stats
+            // simultaneously without violating the borrow checker.
+            let BrainBrain {
+                graph,
+                rng,
+                stats: brain_stats,
+                reward_window,
+                ..
+            } = &mut *brain;
+
+            // Replacement: lowest-utility mature hidden neurons get recycled.
+            let replaced = replace_low_utility(graph, &config_snapshot, rng);
+            brain_stats.replacement_events = brain_stats
+                .replacement_events
+                .saturating_add(replaced as u64);
+
+            // Plateau-triggered neurogenesis.
+            if detect_plateau(
+                reward_window,
+                config_snapshot.plateau_episode_window,
+                config_snapshot.plateau_threshold,
+            ) {
+                let _ = grow_hidden_neuron(graph, &config_snapshot, rng);
+                brain_stats.neurogenesis_events = brain_stats.neurogenesis_events.saturating_add(1);
+                // After growth, clear the reward window so the next plateau is
+                // measured fresh rather than immediately re-triggering.
+                reward_window.clear();
+            }
+
+            // Prune below-threshold synapses.
+            let pruned = prune_synapses(graph, &config_snapshot);
+            brain_stats.prune_events = brain_stats.prune_events.saturating_add(pruned as u64);
+
+            // Probabilistic sprouting to replace pruned capacity.
+            let sprouted = sprout_synapses(
+                graph,
+                &config_snapshot,
+                rng,
+                config_snapshot.sprout_candidates_per_event,
+            );
+            brain_stats.sprout_events = brain_stats.sprout_events.saturating_add(sprouted as u64);
+        }
+    }
+
+    // Step 4: surface per-car M via PolicyOutput.
     let m_sum: f32 = samples.iter().map(|s| s.modulator).sum();
     let mean_m = m_sum / samples.len() as f32;
     brain.stats.last_mean_m = mean_m;
     let car_m: Vec<(u32, f32)> = samples.iter().map(|s| (s.env_id, s.modulator)).collect();
+    drop(curr_per_car);
     drop(samples);
     for (env_id, mut policy_output) in write_query.iter_mut() {
         if let Some((_, m)) = car_m.iter().find(|(id, _)| *id == env_id.0) {
@@ -339,7 +410,7 @@ pub fn brain_learn_all_cars_system(
         }
     }
 
-    // Step 4: refresh plasticity-health metrics (S2/S3 diagnostics).
+    // Step 5: refresh plasticity-health metrics.
     let health = sample_plasticity_health(&brain.graph);
     brain.stats.mean_abs_weight = health.mean_abs_weight;
     brain.stats.mean_abs_eligibility = health.mean_abs_eligibility;
