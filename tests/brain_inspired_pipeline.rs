@@ -11,6 +11,9 @@
 
 use neurodrive::brain::inspired::config::BrainInspiredConfig;
 use neurodrive::brain::inspired::graph::{BrainGraph, NeuronRole};
+use neurodrive::brain::inspired::homeostasis::{
+    apply_synaptic_scaling, update_intrinsic_homeostat,
+};
 use neurodrive::brain::inspired::plasticity::{CarLearnSample, apply_plasticity_tick};
 use neurodrive::brain::inspired::{NeuronActivations, forward_tick};
 use rand::SeedableRng;
@@ -335,6 +338,160 @@ fn terminal_episode_zeros_eligibility() {
         assert!(
             (syn.eligibility[2] - expected_2).abs() < 1e-5,
             "car 2 eligibility drifted"
+        );
+    }
+}
+
+// ── S3: Homeostasis ──────────────────────────────────────────────────────
+
+/// Synaptic scaling pushes Σ|w_in| per non-input neuron toward target.
+///
+/// Seed a graph, hand-scale one neuron's incoming weights to 10× the target,
+/// run scaling repeatedly, and assert the sum converges toward target.
+#[test]
+fn synaptic_scaling_brings_sum_to_target() {
+    let config = BrainInspiredConfig::default();
+    let mut rng = StdRng::seed_from_u64(555);
+    let mut graph = BrainGraph::seed(&config, 1, &mut rng);
+
+    // Pick a hidden neuron that has incoming synapses.
+    let mut victim: Option<u32> = None;
+    for (i, n) in graph.neurons.iter().enumerate() {
+        if n.alive && matches!(n.role, NeuronRole::Hidden) && !n.incoming.is_empty() {
+            victim = Some(i as u32);
+            break;
+        }
+    }
+    let victim = victim.expect("seed graph should have a hidden neuron with incoming edges");
+
+    // Inflate its incoming weights to way above target.
+    let incoming = graph.neurons[victim as usize].incoming.clone();
+    for sid in incoming.iter() {
+        let syn = &mut graph.synapses[*sid as usize];
+        if syn.alive {
+            syn.weight = 1.0 * syn.weight.signum().max(0.5_f32.signum());
+            if syn.weight.abs() < 0.5 {
+                syn.weight = 1.0;
+            }
+        }
+    }
+    // Force a known large sum: set every incoming weight to +5 so total ≈ 5×n.
+    for sid in incoming.iter() {
+        let syn = &mut graph.synapses[*sid as usize];
+        if syn.alive {
+            syn.weight = 5.0;
+        }
+    }
+    let initial_sum: f32 = incoming
+        .iter()
+        .filter_map(|&sid| {
+            let s = &graph.synapses[sid as usize];
+            if s.alive { Some(s.weight.abs()) } else { None }
+        })
+        .sum();
+    assert!(
+        initial_sum > config.synaptic_scaling_target * 3.0,
+        "setup: initial sum ({}) should be well above target ({})",
+        initial_sum,
+        config.synaptic_scaling_target
+    );
+
+    // Run many scaling passes.
+    for _ in 0..200 {
+        apply_synaptic_scaling(&mut graph, &config);
+    }
+
+    let final_sum: f32 = incoming
+        .iter()
+        .filter_map(|&sid| {
+            let s = &graph.synapses[sid as usize];
+            if s.alive { Some(s.weight.abs()) } else { None }
+        })
+        .sum();
+    // Should have contracted toward target within 20%.
+    let target = config.synaptic_scaling_target;
+    assert!(
+        (final_sum - target).abs() < target * 0.2,
+        "final sum {} did not converge toward target {}",
+        final_sum,
+        target
+    );
+}
+
+/// Intrinsic homeostat nudges bias toward a target rate band.
+///
+/// Drive a graph with activations that keep all hidden neurons at ~0
+/// firing rate, then run many intrinsic updates and assert that at least
+/// some hidden biases became positive (nudging neurons back above the lower
+/// band).
+#[test]
+fn intrinsic_homeostat_moves_bias_toward_target_band() {
+    let mut config = BrainInspiredConfig::default();
+    // Make the effect faster for the test.
+    config.intrinsic_bias_rate = 1e-2;
+    let mut rng = StdRng::seed_from_u64(17);
+    let mut graph = BrainGraph::seed(&config, 1, &mut rng);
+
+    // Zero activations → mean_rate stays at 0 → below lower band → bias should drift up.
+    let zeros = vec![0.0; graph.neurons.len()];
+    let per_car: Vec<&[f32]> = vec![&zeros];
+
+    for _ in 0..2000 {
+        update_intrinsic_homeostat(&mut graph, &per_car, &config);
+    }
+
+    let mut positive_biases = 0u32;
+    let mut hidden_count = 0u32;
+    for n in &graph.neurons {
+        if n.alive && matches!(n.role, NeuronRole::Hidden) {
+            hidden_count += 1;
+            if n.bias > 0.0 {
+                positive_biases += 1;
+            }
+        }
+    }
+    assert!(hidden_count > 0);
+    assert!(
+        positive_biases as f32 / hidden_count as f32 > 0.5,
+        "expected most hidden biases to drift positive; got {}/{}",
+        positive_biases,
+        hidden_count
+    );
+}
+
+/// Idempotence: once a neuron's Σ|w_in| is exactly at target, scaling
+/// should not mutate the weights.
+#[test]
+fn homeostasis_idempotent_at_steady_state() {
+    let config = BrainInspiredConfig::default();
+    let mut rng = StdRng::seed_from_u64(99);
+    let mut graph = BrainGraph::seed(&config, 1, &mut rng);
+
+    // Set every hidden neuron's incoming weights to exactly target / n per edge.
+    for nid in 0..graph.neurons.len() {
+        let incoming = graph.neurons[nid].incoming.clone();
+        if incoming.is_empty() {
+            continue;
+        }
+        let per_edge = config.synaptic_scaling_target / incoming.len() as f32;
+        for sid in incoming {
+            let syn = &mut graph.synapses[sid as usize];
+            if syn.alive {
+                syn.weight = per_edge;
+            }
+        }
+    }
+
+    let before: Vec<f32> = graph.synapses.iter().map(|s| s.weight).collect();
+    apply_synaptic_scaling(&mut graph, &config);
+    let after: Vec<f32> = graph.synapses.iter().map(|s| s.weight).collect();
+
+    for (a, b) in before.iter().zip(after.iter()) {
+        assert!(
+            (a - b).abs() < 1e-6,
+            "weight drifted at steady state: {} → {}",
+            a,
+            b
         );
     }
 }

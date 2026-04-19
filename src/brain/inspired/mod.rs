@@ -255,15 +255,16 @@ pub fn brain_learn_all_cars_system(
     mut stats: ResMut<BrainTrainingStats>,
     _trainer_config: Res<TrainerConfig>,
 ) {
+    use self::homeostasis::{apply_synaptic_scaling, update_intrinsic_homeostat};
     use self::plasticity::{CarLearnSample, apply_plasticity_tick, sample_plasticity_health};
 
-    if !brain.config.enable_plasticity {
+    if !brain.config.enable_plasticity && !brain.config.enable_homeostasis {
         return;
     }
 
     // Gather per-car samples. Activations slices borrow from the read_query
-    // iteration; that borrow is released when this block ends.
-    let mut samples: Vec<CarLearnSample> = Vec::with_capacity(8);
+    // iteration; that borrow is released after this pass.
+    let mut samples: Vec<CarLearnSample> = Vec::with_capacity(16);
     for (env_id, episode_state, activations) in read_query.iter() {
         samples.push(CarLearnSample {
             env_id: env_id.0,
@@ -278,19 +279,58 @@ pub fn brain_learn_all_cars_system(
         return;
     }
 
-    let lambda = brain.config.lambda;
-    let eta = brain.config.eta;
-    let sum_per_car = brain.config.sum_per_car_updates;
+    // Snapshot hot config values to dodge the aliasing borrow-check when we
+    // later pass `&mut brain.graph` and `&brain.config` into helpers.
+    let config_snapshot = brain.config.clone();
+    let tick_counter = brain.tick_counter;
 
-    let applied = apply_plasticity_tick(&mut brain.graph, &samples, lambda, eta, sum_per_car);
-    brain.stats.plasticity_updates = brain.stats.plasticity_updates.saturating_add(applied);
+    // Step 1: plasticity (S2).
+    if config_snapshot.enable_plasticity {
+        let applied = apply_plasticity_tick(
+            &mut brain.graph,
+            &samples,
+            config_snapshot.lambda,
+            config_snapshot.eta,
+            config_snapshot.sum_per_car_updates,
+        );
+        brain.stats.plasticity_updates = brain.stats.plasticity_updates.saturating_add(applied);
+    }
 
-    // Track the modulator and per-car M per PolicyOutput.
+    // Step 2: homeostasis (S3).
+    if config_snapshot.enable_homeostasis {
+        // Intrinsic excitability + mean-rate EMA + age advancement every tick.
+        let curr_per_car: Vec<&[f32]> = samples.iter().map(|s| s.curr).collect();
+        update_intrinsic_homeostat(&mut brain.graph, &curr_per_car, &config_snapshot);
+
+        // Synaptic scaling only on the structural cadence — it is a bigger
+        // operation and biologically slow (hours in real brains).
+        if tick_counter > 0 && tick_counter % config_snapshot.structural_cadence == 0 {
+            apply_synaptic_scaling(&mut brain.graph, &config_snapshot);
+        }
+
+        // Saturation fraction diagnostic (cheap scan, useful for detecting
+        // the runaway-excitation failure mode).
+        let mut saturated = 0u64;
+        let mut counted = 0u64;
+        for car_acts in curr_per_car.iter() {
+            for &a in car_acts.iter() {
+                counted += 1;
+                if a.abs() > 0.95 {
+                    saturated += 1;
+                }
+            }
+        }
+        brain.stats.saturation_fraction = if counted > 0 {
+            saturated as f32 / counted as f32
+        } else {
+            0.0
+        };
+    }
+
+    // Step 3: surface per-car M via PolicyOutput.
     let m_sum: f32 = samples.iter().map(|s| s.modulator).sum();
     let mean_m = m_sum / samples.len() as f32;
     brain.stats.last_mean_m = mean_m;
-
-    // Samples collected read-only; now release that borrow and expose M.
     let car_m: Vec<(u32, f32)> = samples.iter().map(|s| (s.env_id, s.modulator)).collect();
     drop(samples);
     for (env_id, mut policy_output) in write_query.iter_mut() {
@@ -299,15 +339,11 @@ pub fn brain_learn_all_cars_system(
         }
     }
 
-    // Refresh plasticity-health metrics — cheap scan over synapses. S5 will
-    // gate this behind the structural cadence but for S2 we sample every tick
-    // so `last *_` stats stay live.
+    // Step 4: refresh plasticity-health metrics (S2/S3 diagnostics).
     let health = sample_plasticity_health(&brain.graph);
     brain.stats.mean_abs_weight = health.mean_abs_weight;
     brain.stats.mean_abs_eligibility = health.mean_abs_eligibility;
     brain.stats.dead_neuron_fraction = health.dead_neuron_fraction;
 
-    // S5 wires BrainTrainingStats.total_ticks; for S2 we increment here so
-    // analytics has a tick count to segment by.
     stats.total_ticks = stats.total_ticks.saturating_add(1);
 }
