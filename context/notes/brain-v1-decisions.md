@@ -184,6 +184,34 @@ Every dial in `BrainInspiredConfig` is explicitly annotated. RESEARCH-ANCHORED d
 
 **Why:** Such a test would verify the compiler is doing its job rather than catch a real failure mode. The palette distinctness test + TrainerLayout sum test are the places the partitioning logic could actually go wrong; both are covered.
 
+### D21 — Default launch layout is AllBrain, not AllPpo
+
+**Chosen:** `TrainerLayout::default()` returns `AllBrain { count: 8 }`. First boot puts the brain-inspired learner on screen.
+
+**Rejected:** Keep `AllPpo` as default (matches pre-M6 behaviour — most recent working run).
+
+**Why:** User-directed. The project's stated thesis is the brain-inspired learner; PPO is the diagnostic baseline. The default launch should reflect the thesis. PPO-only and side-by-side layouts are one and two F4 presses away.
+
+### D22 — F4 cycle excludes Keyboard
+
+**Chosen:** F4 cycles through the three learning modes only: `AllBrain → SideBySide → AllPpo → AllBrain`. Keyboard layout exists and can be set programmatically, but the next press from Keyboard drops back into the cycle at `AllBrain`.
+
+**Rejected:** Four-way cycle including Keyboard.
+
+**Why:** Keyboard is a manual-intervention escape hatch for cases where the learners misbehave and the user needs to take the wheel. It is not a routine step in the learning-mode rotation, and putting it in the cycle means users have to tap past it to get back to learners. If keyboard ever needs a routine binding, a dedicated key (e.g. `F7`) is cleaner than cramming it into F4's cycle.
+
+### D23 — Reports get layout slug in filename; PPO sections suppressed in brain-only runs
+
+**Chosen:**
+- Markdown report filename: `run_<timestamp>_<slug>.md` where slug is one of `brain` / `side` / `ppo` / `keyboard`. JSON companion files follow the same pattern.
+- Sections 9 (Training Health), 12 (Layer Health), 13 (Value Target Scale), 14 (Critic Prediction Quality) — all PPO-centric — skip **entirely** (no header at all) when `tracker.ppo_updates.is_empty()`. No more "No PPO updates recorded" stubs in brain-only reports.
+- Brain sections 16, 17, 18 already skip when `tracker.brain_records.is_empty()`.
+- Fleet Comparison section 19 skips unless the run had at least one PPO-tagged and one brain-tagged episode.
+
+**Rejected:** Keep placeholder stubs for PPO sections in brain-only reports; name files by timestamp only.
+
+**Why:** User-directed. A brain-only run should produce a brain-only report — the file's name, content, and verdicts should all reflect what actually ran. The slug also lets `ls reports/analytics/` communicate which runs to look at for which comparison.
+
 ## Tests by Stage
 
 21 brain-pipeline tests total:

@@ -457,49 +457,55 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str, context_head
     // ════════════════════════════════════════════════════════════════════
     // 9. Training Health
     // ════════════════════════════════════════════════════════════════════
-    md.push_str("## 9. Training Health\n\n");
+    // Section 9 is PPO-centric: entropy / clip / KL / explained-variance /
+    // layer-health timeseries only make sense for a backprop-trained policy.
+    // Skip the entire section for brain-only runs.
+    if !tracker.ppo_updates.is_empty() {
+        md.push_str("## 9. Training Health\n\n");
 
-    if !upd_series.entropy.is_empty() {
-        md.push_str(&format!("**Entropy:** `{}`\n\n", sparkline(&upd_series.entropy, SPARKLINE_WIDTH)));
-        md.push_str(&format!("**Clip %:** `{}`\n\n", sparkline(&upd_series.clip_fraction, SPARKLINE_WIDTH)));
-        md.push_str(&format!("**Approx KL:** `{}`\n\n", sparkline(&upd_series.approx_kl, SPARKLINE_WIDTH)));
-        md.push_str(&format!("**Explained Var:** `{}`\n\n", sparkline(&upd_series.explained_variance, SPARKLINE_WIDTH)));
-    }
+        if !upd_series.entropy.is_empty() {
+            md.push_str(&format!("**Entropy:** `{}`\n\n", sparkline(&upd_series.entropy, SPARKLINE_WIDTH)));
+            md.push_str(&format!("**Clip %:** `{}`\n\n", sparkline(&upd_series.clip_fraction, SPARKLINE_WIDTH)));
+            md.push_str(&format!("**Approx KL:** `{}`\n\n", sparkline(&upd_series.approx_kl, SPARKLINE_WIDTH)));
+            md.push_str(&format!("**Explained Var:** `{}`\n\n", sparkline(&upd_series.explained_variance, SPARKLINE_WIDTH)));
+        }
 
-    if let Some(latest) = tracker.ppo_updates.last() {
-        md.push_str("**Latest update:**\n\n");
-        md.push_str("| Metric | Value |\n");
-        md.push_str("|--------|-------|\n");
-        md.push_str(&format!("| Policy entropy | {:.4} |\n", latest.policy_entropy));
-        md.push_str(&format!("| Value loss | {:.4} |\n", latest.value_loss));
-        md.push_str(&format!("| Explained variance | {:.4} |\n", latest.explained_variance));
-        md.push_str(&format!("| Clip fraction | {:.2}% |\n", latest.clip_fraction * 100.0));
-        md.push_str(&format!("| Approx KL | {:.5} |\n", latest.approx_kl));
-        md.push_str(&format!("| Steering mean / std | {:.4} / {:.4} |\n", latest.steering_mean, latest.steering_std));
-        md.push_str(&format!("| Throttle mean / std | {:.4} / {:.4} |\n", latest.throttle_mean, latest.throttle_std));
-        md.push('\n');
+        if let Some(latest) = tracker.ppo_updates.last() {
+            md.push_str("**Latest update:**\n\n");
+            md.push_str("| Metric | Value |\n");
+            md.push_str("|--------|-------|\n");
+            md.push_str(&format!("| Policy entropy | {:.4} |\n", latest.policy_entropy));
+            md.push_str(&format!("| Value loss | {:.4} |\n", latest.value_loss));
+            md.push_str(&format!("| Explained variance | {:.4} |\n", latest.explained_variance));
+            md.push_str(&format!("| Clip fraction | {:.2}% |\n", latest.clip_fraction * 100.0));
+            md.push_str(&format!("| Approx KL | {:.5} |\n", latest.approx_kl));
+            md.push_str(&format!("| Steering mean / std | {:.4} / {:.4} |\n", latest.steering_mean, latest.steering_std));
+            md.push_str(&format!("| Throttle mean / std | {:.4} / {:.4} |\n", latest.throttle_mean, latest.throttle_std));
+            md.push('\n');
 
-        if !latest.layer_health.is_empty() {
-            md.push_str("**Layer health:**\n\n");
-            md.push_str("| Layer | Weight Norm | Grad Norm | Saturated % |\n");
-            md.push_str("|-------|------------:|----------:|------------:|\n");
-            for layer in &latest.layer_health {
-                let dead = layer.saturated_fraction.map(|v| format!("{:.1}%", v * 100.0)).unwrap_or_else(|| "N/A".to_string());
-                md.push_str(&format!("| {} | {:.4} | {:.4} | {} |\n", layer.layer_name, layer.weight_l2_norm, layer.gradient_l2_norm, dead));
+            if !latest.layer_health.is_empty() {
+                md.push_str("**Layer health:**\n\n");
+                md.push_str("| Layer | Weight Norm | Grad Norm | Saturated % |\n");
+                md.push_str("|-------|------------:|----------:|------------:|\n");
+                for layer in &latest.layer_health {
+                    let dead = layer.saturated_fraction.map(|v| format!("{:.1}%", v * 100.0)).unwrap_or_else(|| "N/A".to_string());
+                    md.push_str(&format!("| {} | {:.4} | {:.4} | {} |\n", layer.layer_name, layer.weight_l2_norm, layer.gradient_l2_norm, dead));
+                }
+                md.push('\n');
+            }
+        }
+
+        // Reward decomposition (universal, but kept under section 9's umbrella
+        // since this is where readers look for chunk-level breakdowns).
+        if !chunks.is_empty() {
+            md.push_str("**Reward decomposition by chunk:**\n\n");
+            md.push_str("| Chunk | Progress R | Time Pen | Crash Pen |\n");
+            md.push_str("|------:|-----------:|---------:|----------:|\n");
+            for c in &chunks {
+                md.push_str(&format!("| {} | {:.3} | {:.3} | {:.3} |\n", c.chunk_index + 1, c.avg_progress_reward, c.avg_time_penalty, c.avg_crash_penalty));
             }
             md.push('\n');
         }
-    }
-
-    // Reward decomposition.
-    if !chunks.is_empty() {
-        md.push_str("**Reward decomposition by chunk:**\n\n");
-        md.push_str("| Chunk | Progress R | Time Pen | Crash Pen |\n");
-        md.push_str("|------:|-----------:|---------:|----------:|\n");
-        for c in &chunks {
-            md.push_str(&format!("| {} | {:.3} | {:.3} | {:.3} |\n", c.chunk_index + 1, c.avg_progress_reward, c.avg_time_penalty, c.avg_crash_penalty));
-        }
-        md.push('\n');
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -612,13 +618,10 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str, context_head
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // 12. Layer Health Over Training (round-2 diagnostic)
+    // 12. Layer Health Over Training (round-2 diagnostic — PPO-only)
     // ════════════════════════════════════════════════════════════════════
-    md.push_str("## 12. Layer Health Over Training\n\n");
-
-    if tracker.ppo_updates.is_empty() {
-        md.push_str("No PPO updates recorded.\n\n");
-    } else {
+    if !tracker.ppo_updates.is_empty() {
+        md.push_str("## 12. Layer Health Over Training\n\n");
         // Collect per-layer timeseries: layer name → (sat %, weight L2, grad L2) per update.
         let mut layer_names: Vec<String> = tracker.ppo_updates.first()
             .map(|u| u.layer_health.iter().map(|l| l.layer_name.clone()).collect())
@@ -719,12 +722,10 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str, context_head
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // 13. Value Target Scale Tracker (PopArt, round-2 diagnostic)
+    // 13. Value Target Scale Tracker (PopArt, round-2 diagnostic — PPO-only)
     // ════════════════════════════════════════════════════════════════════
-    md.push_str("## 13. Value Target Scale Tracker\n\n");
-    if tracker.ppo_updates.is_empty() {
-        md.push_str("No PPO updates recorded.\n\n");
-    } else {
+    if !tracker.ppo_updates.is_empty() {
+        md.push_str("## 13. Value Target Scale Tracker\n\n");
         let return_means: Vec<f32> = tracker.ppo_updates.iter().map(|u| u.return_mean).collect();
         let return_stds: Vec<f32> = tracker.ppo_updates.iter().map(|u| u.return_std).collect();
         let return_maxes: Vec<f32> = tracker.ppo_updates.iter().map(|u| u.return_max).collect();
@@ -778,12 +779,10 @@ pub fn export_to_markdown(tracker: &EpisodeTracker, filepath: &str, context_head
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // 14. Critic Prediction Quality (round-2 diagnostic)
+    // 14. Critic Prediction Quality (round-2 diagnostic — PPO-only)
     // ════════════════════════════════════════════════════════════════════
-    md.push_str("## 14. Critic Prediction Quality\n\n");
-    if tracker.ppo_updates.is_empty() || tracker.episodes.is_empty() {
-        md.push_str("No PPO updates or episodes recorded.\n\n");
-    } else {
+    if !tracker.ppo_updates.is_empty() && !tracker.episodes.is_empty() {
+        md.push_str("## 14. Critic Prediction Quality\n\n");
         // Explained variance timeseries (already captured per update).
         let ev_series: Vec<f32> = tracker.ppo_updates.iter().map(|u| u.explained_variance).collect();
         md.push_str(&format!(

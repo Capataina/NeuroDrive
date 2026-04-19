@@ -36,8 +36,10 @@ pub enum TrainerLayout {
 
 impl Default for TrainerLayout {
     fn default() -> Self {
-        // Default to 8 PPO cars so existing Milestone 1–5 runs behave identically.
-        Self::AllPpo { count: 8 }
+        // Default to the brain-inspired learner so the core project thesis is
+        // what you see on launch. PPO and side-by-side are one and two F4
+        // presses away, respectively.
+        Self::AllBrain { count: 8 }
     }
 }
 
@@ -52,13 +54,19 @@ impl TrainerLayout {
         }
     }
 
-    /// Cycle to the next layout (F4 handler).
+    /// Cycle to the next layout via the F4 handler.
+    ///
+    /// Order: `AllBrain → SideBySide → AllPpo → AllBrain`. Keyboard is
+    /// deliberately excluded — keyboard control is a manual-intervention
+    /// escape hatch, not a routine step in the learning-mode rotation. If
+    /// keyboard is ever the active layout (e.g. set programmatically), the
+    /// next press drops back into the learning cycle at `AllBrain`.
     pub fn next(self) -> Self {
         match self {
-            Self::Keyboard => Self::AllPpo { count: 8 },
-            Self::AllPpo { .. } => Self::AllBrain { count: 8 },
+            Self::Keyboard => Self::AllBrain { count: 8 },
             Self::AllBrain { .. } => Self::SideBySide { ppo: 8, brain: 8 },
-            Self::SideBySide { .. } => Self::Keyboard,
+            Self::SideBySide { .. } => Self::AllPpo { count: 8 },
+            Self::AllPpo { .. } => Self::AllBrain { count: 8 },
         }
     }
 
@@ -92,6 +100,17 @@ impl TrainerLayout {
             Self::AllPpo { .. } => "AllPpo",
             Self::AllBrain { .. } => "AllBrain",
             Self::SideBySide { .. } => "SideBySide",
+        }
+    }
+
+    /// Short slug for use in report filenames: `"keyboard"`, `"ppo"`,
+    /// `"brain"`, `"side"`. Stable across project lifetime.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::Keyboard => "keyboard",
+            Self::AllPpo { .. } => "ppo",
+            Self::AllBrain { .. } => "brain",
+            Self::SideBySide { .. } => "side",
         }
     }
 }

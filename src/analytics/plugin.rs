@@ -116,15 +116,21 @@ fn on_exit_system(
         );
         let context_header = run_context.to_markdown_header();
 
+        // Layout slug goes into filenames so a `ls reports/analytics/`
+        // immediately tells you which runs were brain-only, PPO-only, or
+        // side-by-side comparison — without opening them.
+        let slug = trainer_config.layout.slug();
+
         // Always write compact JSON (no traces).
         let json_dir = Path::new("reports/json/analytics");
-        let compact_path = format!("reports/json/analytics/run_{}.json", timestamp);
+        let compact_path = format!("reports/json/analytics/run_{}_{}.json", timestamp, slug);
         info!("Exporting compact JSON to: {}", compact_path);
         export_compact_json(&tracker, &metadata, &compact_path);
 
         // Opt-in: write full trace JSON when configured.
         if config.full_trace_export {
-            let traces_path = format!("reports/json/analytics/run_{}_traces.json", timestamp);
+            let traces_path =
+                format!("reports/json/analytics/run_{}_{}_traces.json", timestamp, slug);
             info!("Exporting full trace JSON to: {}", traces_path);
             export_full_json(&tracker, &traces_path);
         }
@@ -134,7 +140,7 @@ fn on_exit_system(
 
         // Always write the markdown report from full in-memory data.
         let analytics_dir = Path::new("reports/analytics");
-        let md_path = format!("reports/analytics/run_{}.md", timestamp);
+        let md_path = format!("reports/analytics/run_{}_{}.md", timestamp, slug);
         info!("Exporting Markdown to: {}", md_path);
         export_to_markdown(&tracker, &md_path, &context_header);
 

@@ -770,23 +770,51 @@ fn trainer_layout_total_cars_is_sum_of_controllers() {
     );
 }
 
-/// TrainerLayout::next cycles deterministically through all four variants.
+/// TrainerLayout::next cycles deterministically through the three learning
+/// modes (AllBrain → SideBySide → AllPpo → AllBrain) and does not reach
+/// Keyboard from any learning-mode start — Keyboard is a manual-intervention
+/// escape hatch, not a step in the cycle.
 #[test]
-fn trainer_layout_cycle_visits_all_four_variants() {
+fn trainer_layout_cycle_visits_three_learning_modes() {
     use neurodrive::game::car::TrainerLayout;
 
-    let mut layout = TrainerLayout::Keyboard;
-    let mut seen = std::collections::HashSet::new();
-    for _ in 0..5 {
-        seen.insert(layout.label().to_string());
-        layout = layout.next();
-    }
-    assert!(seen.contains("Keyboard"));
-    assert!(seen.contains("AllPpo"));
-    assert!(seen.contains("AllBrain"));
-    assert!(seen.contains("SideBySide"));
-    // After 4 cycles we should be back at Keyboard.
-    assert_eq!(TrainerLayout::Keyboard.next().next().next().next(), TrainerLayout::Keyboard);
+    // Default starts at AllBrain.
+    assert_eq!(TrainerLayout::default(), TrainerLayout::AllBrain { count: 8 });
+
+    // Three presses from AllBrain should return to AllBrain, visiting
+    // SideBySide and AllPpo along the way.
+    let a = TrainerLayout::AllBrain { count: 8 };
+    let b = a.next();
+    let c = b.next();
+    let d = c.next();
+    assert!(matches!(b, TrainerLayout::SideBySide { .. }));
+    assert!(matches!(c, TrainerLayout::AllPpo { .. }));
+    assert_eq!(d, a);
+
+    // Keyboard, if entered programmatically, drops back into the learning
+    // cycle on the next press (at AllBrain) — not sticky.
+    assert_eq!(
+        TrainerLayout::Keyboard.next(),
+        TrainerLayout::AllBrain { count: 8 }
+    );
+
+    // And Keyboard is never reachable from any of the three learning modes.
+    let labels: Vec<&str> = [a, b, c]
+        .iter()
+        .flat_map(|l| {
+            let mut chain = Vec::new();
+            let mut cur = *l;
+            for _ in 0..8 {
+                cur = cur.next();
+                chain.push(cur.label());
+            }
+            chain
+        })
+        .collect();
+    assert!(
+        !labels.iter().any(|l| *l == "Keyboard"),
+        "Keyboard reached from a learning mode; cycle should exclude it"
+    );
 }
 
 /// Warm and cool palette helpers return disjoint hue families — asserts
