@@ -2,7 +2,7 @@
 
 Recurring patterns that appear in three or more locations across the codebase and are **not** enforced by `rustfmt`, `clippy`, or the type system. A new contributor (human or agent) would not discover these from the code alone — they are de facto standards that should be maintained for consistency.
 
-Captured during the 2026-04-18 upkeep pass after source-level scans; refreshed 2026-04-19 after the round-2 critic target-scaling work landed (PopArt + observation normaliser + target-KL early stop).
+Captured during the 2026-04-18 upkeep pass after source-level scans; refreshed 2026-04-19 after the round-2 critic target-scaling work landed (PopArt + observation normaliser + target-KL early stop); refreshed again 2026-04-19 after M6 (brain-inspired v1) shipped, adding the ZST-marker-plus-enum controller pattern and the layout-slug filename pattern.
 
 ## Current Understanding
 
@@ -108,6 +108,35 @@ Each training-time normaliser exposes an explicit off-switch:
 - `PpoConfig.target_kl: Option<f32>` — `None` disables the target-KL early-stop guardrail entirely.
 
 Advantage normalisation is the exception — it is inherent to `ppo_process_chunk` and has no disable flag. Any future training-time transform should follow the same pattern so ablation experiments are one-line config edits, not refactors. See `notes/normalisation-layers.md` for the full picture of how the three normalisations compose.
+
+**M6 extension:** `BrainInspiredConfig` follows the same pattern with three ablation flags — `enable_plasticity`, `enable_homeostasis`, `enable_structural`. All default `true`. Individual off-switches let "does homeostasis matter" style ablations run without recompiling. Verified in `src/brain/inspired/config.rs` and enforced by early-return guards in `brain_learn_all_cars_system` / `update_utility_tick` / `apply_synaptic_scaling` call-site conditionals.
+
+### 12. Per-car controller partitioning: enum Component + ZST marker components (M6)
+
+Cars are tagged with both a `Controller` enum Component (source-of-truth identity: `Keyboard` / `Ppo` / `Brain`) and exactly one of three zero-sized marker components (`PpoCar` / `BrainCar` / `KeyboardCar`). The pairing is deliberate:
+
+- The **enum** is what analytics reads when it needs to emit a human-readable `controller: String` on `EpisodeRecord`, and what any future system reads when it needs the identity itself.
+- The **ZST markers** are what learner systems filter on via `With<PpoCar>` / `With<BrainCar>` query filters. Bevy's filter machinery is optimised for ZST presence checks, and `With<>` is checkable at the ECS-query level rather than being an extra conditional inside each system's body.
+- Both are attached together at `spawn_car` in `src/game/car.rs` based on the `controller: Controller` argument. If one is added, the other must be too — any system that filters by marker assumes the enum matches.
+
+Verified across: `src/brain/ppo/mod.rs` (PPO systems use `With<PpoCar>`), `src/brain/inspired/mod.rs` (brain-inspired systems use `With<BrainCar>`), `src/agent/action.rs` (keyboard system uses `With<KeyboardCar>`), `src/analytics/trackers/trace.rs` + `src/analytics/trackers/episode.rs` (use `Option<&PpoCar>` / `Option<&BrainCar>` to discriminate semantics of shared components like `PolicyOutput`).
+
+Pre-M6 this was a global `AgentMode` Resource with two variants. The enum-plus-ZST pattern replaced it to support side-by-side coexistence (`TrainerLayout::SideBySide` runs PPO and brain cars in the same simulation). See `notes/brain-v1-decisions.md` D1 for the rationale. Any future per-car identity tagging (e.g. a new learner added in M8) should follow this pattern — extend the enum and add a new marker together.
+
+### 13. Layout slug in exported report filenames (M6)
+
+Exported reports include a layout slug from `TrainerLayout::slug()` in their filename:
+
+- `reports/analytics/run_<timestamp>_brain.md` — `AllBrain` run
+- `reports/analytics/run_<timestamp>_side.md` — `SideBySide` run
+- `reports/analytics/run_<timestamp>_ppo.md` — `AllPpo` run
+- `reports/analytics/run_<timestamp>_keyboard.md` — `Keyboard` run
+
+JSON companions follow the same naming (`_<slug>.json` and `_<slug>_traces.json`). Profiling reports (`reports/performance/perf_<ts>.md`) do **not** carry the slug — their scope is frame-budget analysis, which is layout-independent.
+
+The slug is built from `trainer_config.layout.slug()` in `src/analytics/plugin.rs::on_exit_system` at export time. Any new exporter that produces one-file-per-run artefacts tied to a specific layout should follow the same naming. Artefacts that span layouts (profiling, historical comparisons) do not need a slug.
+
+Reason: `ls reports/analytics/` should answer "which runs were which" at a glance without opening files. See `notes/brain-v1-decisions.md` D23.
 
 ## What Was Tried
 

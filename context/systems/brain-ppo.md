@@ -2,27 +2,40 @@
 
 ## Scope / Purpose
 
-- Provide the current autonomous-controller baseline used to validate that the environment and observation contract are learnable.
+- Provide the permanent diagnostic baseline for the environment and observation contract — a handwritten PPO actor-critic that validated the task is learnable (M1–M5).
 - Keep the baseline self-contained in Rust without external ML frameworks.
-- PPO (upgraded from A2C) exists as a **diagnostic tool**, not the intended final learning architecture. The project's long-term direction is brain-inspired local plasticity.
+- Coexist with the brain-inspired learner (see `brain-inspired.md`) — both controllers can run in the same simulation via the `TrainerLayout::SideBySide` fleet partition.
+- PPO is **the diagnostic reference**, not the intended final learning architecture. The project's long-term direction is brain-inspired local plasticity; PPO stays permanently live to provide a known-working comparison.
 
 ## Boundaries / Ownership
 
 | Owner | Owns | Does not own |
 |-------|------|-------------|
-| `src/brain/plugin.rs` | `BrainPlugin`, `AgentMode` toggle (F4), registers `TrainerLiveRanking`, wires ranking and visual-role systems, rollout-buffer reset on mode switch | Policy implementation details |
-| `src/brain/types.rs` | `AgentMode` enum (`Keyboard` / `Ai`), `PolicyOutput` component | Observation or reward production |
-| `src/brain/ppo/` | `PpoBrain` (model + hyperparams + seeded RNG + `act_entity_buffer` reusable scratch, **no buffer**), `TrainerRolloutBuffer` (separate resource with env_id tagging + old log-probs + reusable `EnvGrouping` scratch), `PpoUpdateState` (staged update resource), `PpoPlugin`, vectorised act/collect/epoch/flush systems, per-env GAE, `ActorCritic` model (asymmetric: actor 2×64, critic 2×128, with `BatchIo`+`BatchScratch`+`SampleScratch` pre-allocation), PPO clipped update logic, `PpoTrainingStats`, `PpoLayerHealth` | Environment truth, observation construction |
+| `src/brain/plugin.rs` | `BrainPlugin`, the F4 handler `cycle_trainer_layout_system` (despawns + respawns cars on layout change, resets PPO and brain state), registers `TrainerLiveRanking`, wires `PpoPlugin` + `BrainInspiredPlugin` + ranking/visual-role systems | Per-tick learner work |
+| `src/brain/types.rs` | `Controller` enum Component (`Keyboard` / `Ppo` / `Brain`) plus `PpoCar` / `BrainCar` / `KeyboardCar` ZST marker components; `PolicyOutput` component (controller-dependent field semantics) | Observation or reward production |
+| `src/brain/ppo/` | `PpoBrain` (model + hyperparams + seeded RNG + `act_entity_buffer` reusable scratch, **no buffer**), `TrainerRolloutBuffer` (separate resource with env_id tagging + old log-probs + reusable `EnvGrouping` scratch), `PpoUpdateState` (staged update resource), `PpoPlugin`, vectorised act/collect/epoch/flush systems filtered by `(With<Car>, With<PpoCar>)`, per-env GAE, `ActorCritic` model (asymmetric: actor 2×64, critic 2×128, with `BatchIo`+`BatchScratch`+`SampleScratch` pre-allocation), PPO clipped update logic, `PpoTrainingStats`, `PpoLayerHealth` | Environment truth, observation construction, brain-inspired learner |
+| `src/brain/inspired/` | Everything belonging to the brain-inspired learner — see `systems/brain-inspired.md` | PPO machinery |
 | `src/brain/ranking.rs` | `TrainerLiveRanking` resource, ranking computation, `update_car_visual_roles_system` (best-car highlighting via alpha + z-order), `CarColour`-aware sprite updates | Policy, observation, reward |
 | `src/brain/common/` | Reusable handwritten ML primitives: `Linear` (flat `Vec<f32>` weight storage, batched forward/backward routed through `gemm_backend`), `Tanh` (with saturation tracking), `AdamOptimizer` (AdamW-style with decoupled weight decay, precomputed bias correction, ε=1e-5), Gaussian math, orthogonal init, `gemm_backend` (three-way GEMM dispatch: scalar / matrixmultiply / accelerate) | Algorithm-specific logic |
 
 ## Current Implemented Reality
 
-### Mode Switching
+### Controller Partitioning (M6)
 
-- `AgentMode` defaults to `Ai`.
-- `F4` toggles between `Ai` and `Keyboard` in the `Update` schedule.
-- Toggling clears `TrainerRolloutBuffer` (separate resource, not brain-owned) and resets `step_counter` to avoid mixed-control trajectories.
+The pre-M6 global `AgentMode` enum (two states: `Keyboard` / `Ai`) was replaced in Milestone 6 by a per-car marker-component scheme so PPO and the brain-inspired learner can coexist in the same simulation. See `notes/brain-v1-decisions.md` D1 for rationale.
+
+- **`Controller` enum Component** on each car: `Keyboard` / `Ppo` / `Brain`. Source-of-truth identity, used by analytics for episode tagging and by any system that needs to read the controller kind directly.
+- **ZST marker components** (`PpoCar`, `BrainCar`, `KeyboardCar`) attached alongside. All PPO systems filter via `(With<Car>, With<PpoCar>)` — cross-controller contamination is impossible at compile time.
+- **`TrainerLayout`** enum on `TrainerConfig` (`Keyboard` / `AllPpo{count}` / `AllBrain{count}` / `SideBySide{ppo,brain}`) drives which markers get attached at car spawn.
+- **F4 handler** (`cycle_trainer_layout_system` in `src/brain/plugin.rs`):
+  - Cycles layouts `AllBrain → SideBySide{8,8} → AllPpo → AllBrain` (excludes Keyboard — see D22).
+  - Despawns all existing cars.
+  - Resets PPO state (clears `TrainerRolloutBuffer`, zeroes `PpoBrain.step_counter`).
+  - Resets brain-inspired state (`BrainBrain::reset_to_seed(num_cars)`).
+  - Respawns cars per the new layout via `spawn_cars_for_layout` in `src/game/plugin.rs`.
+- **Default layout** is `AllBrain { count: 8 }` (D21) — launching the app drops you straight into the brain-inspired learner. PPO is one F4 press via side-by-side.
+
+In `TrainerLayout::Keyboard` (reachable programmatically; not in the F4 cycle) only one car is spawned, carrying `KeyboardCar`. Keyboard intervention is an escape hatch for cases where the learners misbehave.
 
 ### Model Architecture
 
@@ -217,8 +230,8 @@ Tick lifecycle (vectorised):
 
 ## Implemented Outputs / Artifacts
 
-- **Runtime resources:** `AgentMode`, `PpoBrain` (no buffer), `PpoTrainingStats`, `TrainerRolloutBuffer`, `TrainerLiveRanking`
-- **Runtime components (per car):** `PolicyOutput` (value_prediction, steering_mean/std, throttle_mean/std)
+- **Runtime resources:** `PpoBrain` (no buffer), `PpoTrainingStats`, `TrainerRolloutBuffer`, `PpoUpdateState`, `TrainerLiveRanking`. The pre-M6 `AgentMode` Resource no longer exists — `TrainerConfig.layout` (in the `game` subsystem) is now the source of truth for controller partitioning.
+- **Runtime components (per car):** `PolicyOutput` (value_prediction, steering_mean/std, throttle_mean/std — field semantics depend on controller, see `brain-inspired.md`); `PpoCar` ZST marker attached to cars PPO should drive; `Controller::Ppo` enum variant on the same cars (source-of-truth identity).
 - **Handwritten ML primitives:** `Linear` (flat weight storage, forward/backward + batched variants, orthogonal init), `Tanh` (with saturation tracking), `AdamOptimizer` (AdamW-style with decoupled weight decay, per-layer, ε=1e-5), `sample_normal`, `log_prob_normal`, `tanh_correction`, `orthogonal_init`
 - **Unit tests in `buffer.rs`:** single-env GAE regression test (verifies per-env GAE matches flat GAE for one env), multi-env GAE isolation test (verifies no cross-env value leakage in interleaved buffer).
 

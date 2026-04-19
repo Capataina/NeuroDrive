@@ -21,6 +21,8 @@ Forward-looking plans live in `context/plans/`:
 - `plans/analytics-tui.md` — idea stage, terminal-based analytics explorer
 - `plans/visual-overhaul.md` — idea stage, track/car rendering polish
 
-No active implementation plans currently. Milestones 1–5 (PPO baseline + round-2 critic target-scaling) are complete and validated. Milestone 6 (brain-inspired v1) is the next active work area — a plan file will be drafted (`plans/brain-inspired-v1.md`) when implementation begins.
+Milestones 1–6 are all shipped and committed (M6 as six staged commits `6237aa7..c64ce9b` + wrap `4c5c7c5` + default/analytics fix `3a737d9`, pushed to origin/master). The brain-inspired v1 substrate, the full test suite (133 green), the analytics integration, and the side-by-side Fleet Comparison are all live.
 
-Research for Milestone 6 is captured in `context/references/brain-inspired-learning/` — start with `overview.md` which synthesises the seven deep-dive papers into one picture.
+The next active work area is **empirical validation of M6** — a real training run (AllBrain or SideBySide) to confirm the visible-learning acceptance bar. After that, M7 (brain visualisation) is the next explicit milestone. Training is running while this upkeep pass is in progress; no plan file has been drafted for validation because the work is "run it and read the report" rather than an implementation effort.
+
+Research for Milestones 6–9 is captured in `context/references/brain-inspired-learning/` — start with `overview.md` which synthesises the seven deep-dive papers into one picture.

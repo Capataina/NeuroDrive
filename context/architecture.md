@@ -8,22 +8,26 @@
 
 ## Repository Overview
 
-- NeuroDrive is a Rust application built on **Bevy 0.18**, targeting brain-inspired online learning from first principles.
+- NeuroDrive is a Rust application built on **Bevy 0.18**, implementing brain-inspired online learning from first principles.
 - The current runtime is a **deterministic 2D top-down racing environment** with:
   - a fixed 60 Hz simulation timestep,
   - a single hard-coded track,
-  - a **multi-car vectorised trainer** (configurable car count via `TrainerConfig`, default 8) with per-car components and one shared rollout buffer,
+  - a **multi-controller, multi-car vectorised trainer** — fleet composition is governed by `TrainerConfig.layout: TrainerLayout` with variants `Keyboard` / `AllPpo{count}` / `AllBrain{count}` / `SideBySide{ppo,brain}`. Default is `AllBrain{8}`.
+  - **F4 cycles layouts** `AllBrain → SideBySide → AllPpo → AllBrain` (Keyboard is not in the cycle — it is a manual-intervention escape hatch reachable programmatically only).
+  - per-car `Controller` enum Component + ZST markers (`PpoCar` / `BrainCar` / `KeyboardCar`) to enforce compile-time partitioning between learners,
   - all cars spawning at **random centreline positions** (re-randomised each reset, no privileged car),
   - throttle axis `[0, 1]` (coast to full thrust, no braking — drag is the sole deceleration mechanism),
   - a **velocity-projection reward** (dot of velocity onto centreline tangent) plus centreline proximity reward,
   - **43-dimensional observations** (rays, kinematics with v_forward/v_lateral split, speed_delta, 12-point lookahead with heading deltas + curvatures spanning 30–650 units, previous actions),
-  - a live handwritten **PPO** brain (upgraded from A2C — clipped surrogate objective, multi-epoch updates amortised across ticks, **asymmetric architecture**: actor 2×64, critic 2×128; round-2 extensions 2026-04-19: **PopArt value-target normalisation** on `c_value`, **γ raised to 0.995**, **target-KL early stop**, **running observation mean/var normaliser** per Andrychowicz 2021),
-  - a **PolicyOutput** component per car exposing value prediction and policy distribution parameters,
-  - a comprehensive analytics pipeline: 16 tick-level fields, 25 episode-level aggregates, crash classification, 10-section Markdown report with auto-generated takeaways (exports to `reports/json/analytics/` and `reports/analytics/`),
+  - **two live learners running in parallel when the layout allows:**
+    - a handwritten **PPO** actor-critic (M1–M5 diagnostic baseline — clipped surrogate objective, asymmetric 2×64 / 2×128, PopArt, γ=0.995, target-KL early stop, observation normaliser);
+    - a **brain-inspired v1 learner** (M6 — sparse directed graph of rate-coded tanh neurons, three-factor plasticity with eligibility traces, raw-reward modulator, synaptic scaling + intrinsic excitability homeostasis, continual-backprop structural plasticity with plateau-triggered neurogenesis);
+  - a **PolicyOutput** component per car whose field semantics depend on which learner drives the car (critic estimate vs modulator M),
+  - a comprehensive analytics pipeline with **layout-aware Markdown reports** (up to 19 sections, content-gated per what actually ran — brain-only runs omit PPO-specific sections; side-by-side adds a Fleet Comparison section) exported to `reports/{json/,}analytics/run_<ts>_<slug>.md/json` where slug is `brain` / `side` / `ppo` / `keyboard`,
   - a debug HUD, world-space overlay layer, and live leaderboard panel.
 - Episodes end on **crash or 30-second timeout only** — there is no finish line or lap concept.
-- The project intent in `README.md` is biologically inspired local plasticity. The current implementation reality is still at **baseline validation** — proving the environment and observation contract are learnable before transitioning to biological learning rules.
-- `cargo check` and `cargo test` both pass in the current workspace state.
+- The project intent in `README.md` is biologically inspired local plasticity. As of M6 that substrate is live alongside the PPO diagnostic baseline; the empirical acceptance bar (visible brain learning relative to PPO in a ~2000-episode side-by-side run) is pending a real training run.
+- `cargo check` and `cargo test` both pass — 133 tests green across default, `force-scalar`, and release builds.
 
 ## Repository Structure
 
@@ -56,14 +60,22 @@ NeuroDrive/
 │   │   ├── action.rs                    # CarAction, ActionState (Component, desired/applied), smoothing, keyboard input
 │   │   └── observation.rs               # SensorReadings (v_forward, v_lateral, speed_delta, previous_steering, previous_throttle), ObservationVector (dim 43), ray + centreline features
 │   ├── brain/
-│   │   ├── mod.rs
-│   │   ├── plugin.rs                    # BrainPlugin: AgentMode toggle (F4), PPO buffer reset on switch
-│   │   ├── types.rs                     # AgentMode enum, PolicyOutput component
-│   │   ├── ppo/
-│   │   │   ├── mod.rs                   # PpoBrain (with act_entity_buffer scratch), PpoPlugin, PpoUpdateState, ppo_act_all_cars_system (3-pass batched), collect/epoch/flush systems
+│   │   ├── mod.rs                       # Re-exports: common / inspired / plugin / ppo / ranking / types
+│   │   ├── plugin.rs                    # BrainPlugin: registers PpoPlugin + BrainInspiredPlugin + ranking/visual-role systems; F4 handler cycle_trainer_layout_system despawns+respawns cars on layout change, resets both learners' state
+│   │   ├── types.rs                     # Controller enum Component (Keyboard/Ppo/Brain); PpoCar/BrainCar/KeyboardCar ZST marker components; PolicyOutput (controller-dependent field semantics)
+│   │   ├── ppo/                         # PPO diagnostic baseline (M1–M5)
+│   │   │   ├── mod.rs                   # PpoBrain (with act_entity_buffer scratch), PpoPlugin, PpoUpdateState, ppo_act_all_cars_system (3-pass batched, With<PpoCar>), collect/epoch/flush systems (all With<PpoCar>)
 │   │   │   ├── model.rs                 # ActorCritic: asymmetric MLP (actor 2×64, critic 2×128), BatchIo + BatchScratch + SampleScratch (critic-only), forward_actor_batch/forward_critic_batch/forward_critic
-│   │   │   ├── buffer.rs               # TrainerRolloutBuffer: env_id-tagged transitions + old_log_probs, per-env GAE via reusable EnvGrouping (Vec-indexed by env_id, deterministic iteration)
-│   │   │   └── update.rs               # PreparedUpdate, ppo_process_chunk/ppo_finish_epoch, PPO clipped surrogate
+│   │   │   ├── buffer.rs                # TrainerRolloutBuffer: env_id-tagged transitions + old_log_probs, per-env GAE via reusable EnvGrouping (Vec-indexed by env_id, deterministic iteration)
+│   │   │   └── update.rs                # PreparedUpdate, ppo_process_chunk/ppo_finish_epoch, PPO clipped surrogate
+│   │   ├── inspired/                    # Brain-inspired v1 learner (M6) — see systems/brain-inspired.md
+│   │   │   ├── mod.rs                   # BrainInspiredPlugin, BrainBrain resource, BrainRunningStats, BrainUpdateRecord, BrainTrainingStats, brain_act_all_cars_system (With<BrainCar>), brain_learn_all_cars_system (With<BrainCar>), build_brain_update_record cadence flush
+│   │   │   ├── config.rs                # BrainInspiredConfig — all dials tagged RESEARCH-ANCHORED or TUNE, plus enable_plasticity/homeostasis/structural ablation flags
+│   │   │   ├── graph.rs                 # NeuronId/SynapseId, NeuronRole enum (Input/Hidden/Output), Neuron, Synapse (per-car eligibility Vec), BrainGraph (slot-stable storage + free-lists); seed-graph constructor
+│   │   │   ├── forward.rs               # NeuronActivations per-car Component (prev/curr buffers); pure forward_tick (one-step propagation, prev-tick reads, tanh on hidden/output)
+│   │   │   ├── plasticity.rs            # CarLearnSample<'a>, apply_plasticity_tick (three-factor rule), sample_plasticity_health diagnostic scan
+│   │   │   ├── homeostasis.rs           # apply_synaptic_scaling (cadence, clamped to [0.5, 2.0]), update_intrinsic_homeostat (per tick, mean-rate EMA + bias nudge)
+│   │   │   └── structural.rs            # update_utility_tick (CBP η_u=0.99), replace_low_utility, detect_plateau, grow_hidden_neuron, prune_synapses, sprout_synapses
 │   │   ├── common/
 │   │   │   ├── mod.rs
 │   │   │   ├── gemm_backend.rs          # GEMM dispatch module — selects scalar/matrixmultiply/accelerate at compile time; backend_name() for profiling reports
@@ -71,8 +83,8 @@ NeuroDrive/
 │   │   │   ├── gemm_matrixmultiply.rs   # Pure-Rust BLIS-style NEON microkernel via matrixmultiply crate
 │   │   │   ├── gemm_accelerate.rs       # Apple Accelerate via cblas_sgemm (macOS; dispatches to AMX)
 │   │   │   ├── mlp.rs                   # Handwritten Linear (flat weight storage) + Tanh; forward_batch/backward_batch route through gemm_backend; forward_into single-sample scalar path
-│   │   │   ├── math.rs                  # Gaussian sampling, log-prob, tanh correction, orthogonal init utilities
-│   │   │   └── optim.rs                # AdamW optimiser with per-layer state and decoupled weight decay
+│   │   │   ├── math.rs                  # Gaussian sampling, log-prob, tanh correction, orthogonal init utilities (reused by brain-inspired replacement resample)
+│   │   │   └── optim.rs                 # AdamW optimiser with per-layer state and decoupled weight decay
 │   │   └── ranking.rs                   # TrainerLiveRanking resource, car colour-based visual roles, best-car highlighting
 │   ├── analytics/
 │   │   ├── mod.rs
@@ -124,6 +136,7 @@ NeuroDrive/
 │   ├── analytics/                       # Markdown analytics reports
 │   └── performance/                     # Markdown performance reports
 ├── tests/                               # Integration tests (unblocked by the 2026-04-18 [lib] target)
+│   ├── brain_inspired_pipeline.rs       # 21 tests across M6 stages S1–S6 — graph, forward, plasticity, homeostasis, structural, analytics, side-by-side
 │   ├── gemm_correctness.rs              # Cross-validates active GEMM backend against inline scalar reference on every shape PPO uses
 │   └── ppo_pipeline.rs                  # End-to-end forward+backward+optimiser pipeline; finite gradients, Adam step, varying batch sizes
 ├── Cargo.toml                           # bevy 0.18 + rand + serde + matrixmultiply; Accelerate (blas-src + cblas) gated on target_os = "macos"; feature flags: profiling / force-scalar / force-matrixmultiply / force-accelerate
@@ -138,8 +151,8 @@ NeuroDrive/
 | **sim** | Named fixed-tick ordering sets shared across all runtime plugins, canonical shared geometry utilities (`wrap_angle`, `signed_angle_between` — consolidated from earlier triplication) | all fixed-update subsystems | `src/sim/` |
 | **maps** | Track topology, tile semantics, centreline derivation, visual track geometry (no finish line, no fixed spawn pose) | game, agent, debug | `src/maps/` |
 | **game** | Car entity lifecycle (random spawn, drag-only deceleration), collision truth, cumulative progress measurement, velocity-projection + centreline reward shaping, crash/timeout episode boundaries | maps, agent, analytics, debug, brain | `src/game/` |
-| **agent** | Stable action boundary (CarAction ↔ ActionState, throttle [0,1]) and policy observation contract (ObservationVector, 43 dims) | game, maps, brain, debug | `src/agent/` |
-| **brain** | Controller mode switching (F4), the PPO baseline implementation (clipped surrogate, amortised epochs), PolicyOutput per-car component, trainer live ranking, and car visual roles | agent, game, analytics | `src/brain/` |
+| **agent** | Stable action boundary (CarAction ↔ ActionState, throttle [0,1]), keyboard system (`With<KeyboardCar>`), policy observation contract (ObservationVector, 43 dims), Welford observation normaliser | game, maps, brain, debug | `src/agent/` |
+| **brain** | Controller partitioning (per-car `Controller` enum + `PpoCar` / `BrainCar` / `KeyboardCar` ZST markers), F4 layout cycle (`cycle_trainer_layout_system`), the PPO baseline (clipped surrogate, amortised epochs; `With<PpoCar>`-filtered), the brain-inspired v1 learner (sparse graph + three-factor plasticity + homeostasis + structural plasticity; `With<BrainCar>`-filtered — see `systems/brain-inspired.md`), PolicyOutput per-car component, trainer live ranking, and car visual roles | agent, game, analytics | `src/brain/` |
 | **analytics** | Multi-car episode/update capture (env_id-tagged), 10 derived metric modules, crash classification (Slide/HeadOn/Overshoot/Spin/Stall), two-tier JSON export to `reports/json/analytics/`, diagnostic Markdown to `reports/analytics/`, RunContext snapshot, retention-limited cleanup, auto-generated takeaways | game, agent, brain | `src/analytics/` |
 | **profiling** | Feature-gated (`--features profiling`) per-frame and per-system timing capture (17 systems), per-SimSet breakdown, ring buffer storage, auto-exit, JSON + Markdown report export with RunContext snapshot, retention-limited cleanup | sim, brain, analytics | `src/profiling/` |
 | **debug** | Live world-space overlays, runtime HUD panel, live leaderboard panel, and recent-run assessment | game, agent, brain, maps | `src/debug/` |
@@ -206,8 +219,9 @@ DefaultPlugins → MonacoPlugin → AgentPlugin → BrainPlugin → AnalyticsPlu
 frame_start_system                        (profiling, feature-gated — captures frame start timestamp)
 
 SimSet::Input
-├── keyboard_action_input_system          (agent — mode-gated, writes ActionState.desired)
-├── ppo_act_all_cars_system               (brain — mode-gated; 3-pass batched: stacks obs into batch_io → single mat-mat actor + critic batched forwards → per-car sampling + PolicyOutput writes + rollout buffer push)
+├── keyboard_action_input_system          (agent — With<KeyboardCar> filter, writes ActionState.desired)
+├── ppo_act_all_cars_system               (brain::ppo — With<PpoCar> filter; 3-pass batched: stacks obs into batch_io → single mat-mat actor + critic batched forwards → per-car sampling + PolicyOutput writes + rollout buffer push)
+├── brain_act_all_cars_system             (brain::inspired — With<BrainCar> filter; per-car forward_tick over the shared BrainGraph; writes ActionState.desired + PolicyOutput.*_mean; increments BrainBrain.tick_counter)
 └── action_smoothing_system               (agent — copies or smooths desired → applied)
 
 input_end_system                          (profiling, feature-gated — marks Input→Physics boundary)
@@ -231,8 +245,9 @@ SimSet::Measurement
 ├── capture_episode_tick_trace_system     (analytics — per-tick trace record)
 ├── snapshot_completed_episode_trace_system     (analytics)
 ├── snapshot_completed_episode_action_stats_system  (analytics)
-├── ppo_collect_rewards_all_cars_system   (brain — appends reward/done for all cars, prepares PPO update at horizon)
-├── ppo_epoch_system                     (brain — processes one samples_per_tick chunk (default 32) from prepared update via active GEMM backend, advances epoch state)
+├── ppo_collect_rewards_all_cars_system   (brain::ppo — With<PpoCar> filter; appends reward/done for PPO cars, prepares PPO update at horizon)
+├── ppo_epoch_system                     (brain::ppo — processes one samples_per_tick chunk (default 32) from prepared update via active GEMM backend, advances epoch state)
+├── brain_learn_all_cars_system           (brain::inspired — With<BrainCar> filter; pushes terminal-episode returns to reward_window; applies three-factor plasticity across all brain cars; runs intrinsic homeostat every tick; on structural_cadence (default 128): synaptic scaling, utility-based replacement, plateau-triggered neurogenesis, synapse prune/sprout; cadence flush of BrainUpdateRecord into BrainTrainingStats.history)
 ├── update_driving_hud_stats_system       (debug — updates live HUD values)
 └── capture_driving_hud_episode_metrics_system  (debug — captures episode-end data for quarter summaries)
 
@@ -243,8 +258,8 @@ auto_exit_system                          (profiling, feature-gated — exits ap
 ### Update Schedule (every frame)
 
 ```text
-├── toggle_agent_mode_system              (brain — F4 toggles AI ↔ Keyboard, clears rollout buffer)
-├── episode_tracker_system                (analytics — folds completed snapshots into EpisodeTracker)
+├── cycle_trainer_layout_system           (brain — F4 cycles TrainerLayout (AllBrain → SideBySide → AllPpo → AllBrain); despawns all cars, resets PPO + brain state, respawns via spawn_cars_for_layout)
+├── episode_tracker_system                (analytics — folds completed snapshots into EpisodeTracker; copies new BrainTrainingStats.history entries into brain_records; tags EpisodeRecord.controller from Option<&PpoCar>/&BrainCar/&KeyboardCar)
 ├── debug_overlay_toggle_system           (debug — F1/F2/F3 toggle handling)
 ├── draw_geometry_overlay_system          (debug — centreline, tangent, forward, velocity gizmos)
 ├── draw_sensor_overlay_system            (debug — ray segments and hit points)
@@ -277,8 +292,9 @@ auto_exit_system                          (profiling, feature-gated — exits ap
 |-------------|--------|--------------|
 | `systems/environment.md` | Track topology (`src/maps/`), car lifecycle, physics, collisions, progress, reward, episodes (`src/game/`) | `src/maps/`, `src/game/` |
 | `systems/agent-interface.md` | Action contract, observation contract, scheduling | `src/agent/` |
-| `systems/brain-ppo.md` | PPO algorithm, model architecture, rollout buffer, ranking, ML primitives | `src/brain/` |
-| `systems/analytics.md` | Capture pipeline, derived metrics, two-tier export, crash classification | `src/analytics/` |
+| `systems/brain-ppo.md` | PPO algorithm, model architecture, rollout buffer, ranking, ML primitives, controller partitioning (M6: `Controller` enum + ZST markers) | `src/brain/` |
+| `systems/brain-inspired.md` | Brain-inspired v1 learner (M6) — graph topology, three-factor plasticity, homeostasis, structural plasticity, side-by-side coexistence with PPO | `src/brain/inspired/` |
+| `systems/analytics.md` | Capture pipeline, derived metrics, two-tier export, crash classification, brain records + layout-aware filenames + section gating (M6) | `src/analytics/` |
 | `systems/profiling.md` | Feature-gated per-system timing, auto-exit, performance reports | `src/profiling/` |
 | `systems/debug.md` | Live overlays, HUD panel, leaderboard | `src/debug/` |
 | `systems/determinism.md` | Cross-cutting: ordering contract, reproducibility surfaces, RNG state | `src/sim/`, cross-cutting |
@@ -291,10 +307,13 @@ Individual system files cover their own boundaries. This section is the canonica
 |---|---|-----------|------|-----------------------|
 | `game` | `agent` | Read-only: `Car`, `ActionState.applied`, `TrackProgress`, centreline projection | Physics state + projection truth | Observations become stale or wrong-tick; post-reset observations leak crash state |
 | `agent` | `game` | Write path: `ActionState.applied` consumed by `car_physics_system` | Steering + throttle | Physics stops executing policy decisions |
-| `agent` | `brain` | Read-only: `ObservationVector` (43-dim) consumed by `ppo_act_all_cars_system` | Normalised observation tensor | Any change in `OBSERVATION_DIM` constant or feature ordering desynchronises the model (dim mismatch panics on `forward_actor`); no runtime dimension assertion beyond shared `const OBSERVATION_DIM` |
-| `brain` | `agent` | Write path: writes per-car `ActionState.desired` and `PolicyOutput` component | Steering + throttle means/stds + value prediction | Smoothing + physics receive stale or default actions |
-| `game` | `brain` | `EpisodeState.current_tick_reward` + `current_tick_end_reason` consumed by `ppo_collect_rewards_all_cars_system` | Per-tick reward + terminal flag | PPO mis-aligns reward-to-observation; GAE becomes invalid |
-| `brain` | `analytics` | `PolicyOutput` per-car component read by `capture_episode_tick_trace_system`; `PpoTrainingStats` read by `episode_tracker_system` | Value prediction, policy confidences, update diagnostics | Trace records miss policy stats; Markdown report's "What Does the Car Think" section becomes meaningless |
+| `agent` | `brain::ppo` | Read-only: `ObservationVector` (43-dim) consumed by `ppo_act_all_cars_system` via `(With<Car>, With<PpoCar>)` filter | Normalised observation tensor | Any change in `OBSERVATION_DIM` constant or feature ordering desynchronises the model (dim mismatch panics on `forward_actor`); no runtime dimension assertion beyond shared `const OBSERVATION_DIM` |
+| `agent` | `brain::inspired` | Read-only: `ObservationVector` (43-dim) consumed by `brain_act_all_cars_system` via `(With<Car>, With<BrainCar>)` filter; written into input-neuron activations by `forward_tick` | Same observation tensor as PPO — contract is stable across learners | Any change to `OBSERVATION_DIM` simultaneously breaks both learners (graph's `input_neurons` Vec length is `config.obs_dim`) |
+| `brain::ppo` | `agent` | Write path: writes per-car `ActionState.desired` and `PolicyOutput` component (With<PpoCar> cars only) | Steering + throttle means/stds + critic value prediction | Smoothing + physics receive stale or default actions on PPO cars |
+| `brain::inspired` | `agent` | Write path: writes per-car `ActionState.desired` and `PolicyOutput` (With<BrainCar> cars only); `PolicyOutput.value_prediction` carries per-car modulator M (not a critic estimate) | Steering + throttle activations; raw tick reward M | Brain cars stop moving or PolicyOutput semantics leak into PPO analytics paths |
+| `game` | `brain::ppo` | `EpisodeState.tick.reward` + `tick.end_reason` consumed by `ppo_collect_rewards_all_cars_system` | Per-tick reward + terminal flag | PPO mis-aligns reward-to-observation; GAE becomes invalid |
+| `game` | `brain::inspired` | `EpisodeState.tick.reward` = modulator M; `EpisodeState.tick.end_reason` zeros per-car eligibility; `EpisodeState.last.return_sum` pushed to reward_window on terminal for plateau detection | Per-tick reward, terminal flag, per-episode return sum | Brain learns wrong correlations (bad modulator); eligibility leaks across resets (bad terminal signal); plateau detector never fires (no reward_window entries) |
+| `brain` (both) | `analytics` | `PolicyOutput` per-car component read by `capture_episode_tick_trace_system`; `PpoTrainingStats` read by `episode_tracker_system`; `BrainTrainingStats.history` also read by `episode_tracker_system` and copied to `EpisodeTracker.brain_records`; `PpoCar` / `BrainCar` / `KeyboardCar` markers read by `episode_tracker_system` to set `EpisodeRecord.controller` | Value/modulator, policy confidences, PPO update diagnostics, brain cadence snapshots, controller identity | Trace records miss policy stats; Markdown report's "What Does the Car Think" section becomes meaningless; brain sections (16–18) miss data; Fleet Comparison (19) cannot segment by controller |
 | `game` | `analytics` | `EpisodeState` (current and finalised), `Collided` marker, `TrackProgress` consumed by per-car capture systems | Episode summary + reward decomposition | Episode records desynchronise with env truth; crash classification becomes unreliable |
 | `maps` | `game` | `Track { grid, centerline }` singleton consumed by physics (via progress), collision, and episode reset (spawn RNG draws centreline fractions) | Spatial truth (grid occupancy + arc-length parametrisation) | No collisions, no spawn, no progress — runtime fails before first tick |
 | `maps` | `agent` | `TrackGrid` consumed by raycast marching; `TrackCenterline` consumed by lookahead features | Grid occupancy + `tangent_at_s` | Sensor readings collapse; lookahead curvature vanishes |
@@ -302,6 +321,9 @@ Individual system files cover their own boundaries. This section is the canonica
 | `analytics::exporters::{cleanup, context}` | `profiling::exporters::json` | Direct `use crate::analytics::exporters::{cleanup::enforce_retention, context::RunContext}` | `RunContext` struct (full run config snapshot) + retention-limited directory pruning | Profiling report lose their run-context header and unbounded report directories accumulate; see Shared Infrastructure below |
 | `brain::ranking` | `debug::leaderboard` | `TrainerLiveRanking` resource + per-car `CarColour` component | Ranked car order + colour swatches | Leaderboard panel goes blank or shows stale ordering |
 | `brain::ranking` | `debug::hud` | Same `TrainerLiveRanking` read by `update_driving_hud_text_system` to pick the "best car" view (falls back to first car if unavailable) | Best car index | HUD silently shows first car instead of best — not fatal but misleading |
+| `brain::plugin` | `game::plugin` | `cycle_trainer_layout_system` (in `brain::plugin`) calls `spawn_cars_for_layout` (in `game::plugin`) on every F4 press; also mutates `TrainerConfig.layout` via `set_layout` | Fleet-composition Resource + spawn helper | F4 toggle stops working, or spawn loses layout-awareness — side-by-side mode becomes unreachable |
+| `brain::inspired` (BrainBrain) | `brain::plugin` | `cycle_trainer_layout_system` calls `brain_brain.reset_to_seed(num_cars)` to rebuild the graph cleanly when layout changes | Graph, RNG, reward_window reset | Stale eligibility / weights bleed across F4 transitions |
+| `brain` (types) | `game` + `brain::ppo` + `brain::inspired` + `analytics` + `agent` | `Controller` enum Component + `PpoCar` / `BrainCar` / `KeyboardCar` ZST markers are **the** controller partitioning contract. Attached once at spawn; read via `With<>` query filters everywhere | Compile-time controller identity | Any system that forgets to filter would accidentally drive or observe the wrong car-set — the compiler prevents this by construction |
 
 ### Shared Infrastructure: RunContext and Retention Cleanup
 
@@ -314,13 +336,13 @@ These helpers live in `analytics::exporters` and are imported by `profiling::exp
 
 ### Dependency Chain Trace — One PPO Training Tick (end-to-end)
 
-The single operation that crosses the most system boundaries is one fixed tick during PPO training (mode = `Ai`, rollout near horizon). Tracing it names the full blast radius that any change to the tick pipeline must respect.
+The single operation that crosses the most system boundaries is one fixed tick during PPO training (`TrainerLayout::AllPpo` or the PPO half of `SideBySide`, rollout near horizon). Tracing it names the full blast radius that any change to the tick pipeline must respect.
 
 ```text
 Step  Owner / System                                  Reads                       Writes
 ────  ──────────────────────────────────────────────  ──────────────────────────  ──────────────────────────────
  1    profiling::frame_start_system (feature-gated)   —                           FrameRecord.frame_start
- 2    agent::keyboard_action_input_system             AgentMode, KeyCode          — (exits early in Ai mode)
+ 2    agent::keyboard_action_input_system             KeyCode                     — (With<KeyboardCar> filter empty in AllPpo — iterates zero cars)
  3    brain::ppo_act_all_cars_system                  ObservationVector per car,  batch_io.obs_batch stacked,
                                                       model (3-pass batched:      scratch.a_out (batched means),
                                                       forward_actor_batch then    scratch.c_out (RAW normalised values),
@@ -379,9 +401,118 @@ Step  Owner / System                                  Reads                     
 - **Step 3 denormalisation asymmetry.** Inside `brain::ppo_act_all_cars_system`, the critic's `c_out[i]` is raw (normalised) but the `value` written to `PolicyOutput` and pushed to the buffer is denormalised via `value_norm.σ·z + µ`. This asymmetry is load-bearing: GAE in step 17 consumes buffer values in reward units, and analytics in steps 15–16 read `PolicyOutput.value_prediction` in reward units. If either callsite forgot to denormalise, GAE would compute advantages against normalised-scale bootstrap values (silent training corruption) or the analytics report would show values bounded to ~(-3, +3) (meaningless).
 - **Step 9 Collided as a marker not an event.** The environment never fires Bevy events for collisions; `Collided` is added as a component marker and read by the episode system two steps later. Any system that needs to react to collisions must be placed **in `SimSet::Measurement` after `episode_loop_system`** to see it before it is cleared on reset.
 
-## Coverage (Knowledge Gaps from this 2026-04-19 Pass)
+### Dependency Chain Trace — One Brain-Inspired Training Tick (end-to-end)
 
-This section is explicit about where this upkeep pass relied on direct code inspection versus inference from existing documentation and the scan-tool output, so the next session knows what still needs verification.
+The parallel trace for `TrainerLayout::AllBrain` (or the brain half of `SideBySide`). Shares the environment path with PPO; diverges in steps 3 and 17. Steps marked `(— With<PpoCar> empty)` iterate zero cars when no PPO cars exist in the layout; in `SideBySide` they run on the PPO half only.
+
+```text
+Step  Owner / System                                  Reads                       Writes
+────  ──────────────────────────────────────────────  ──────────────────────────  ──────────────────────────────
+ 1    profiling::frame_start_system (feature-gated)   —                           FrameRecord.frame_start
+ 2    agent::keyboard_action_input_system             KeyCode                     — (With<KeyboardCar> empty in AllBrain)
+ 3a   brain::ppo_act_all_cars_system                  —                           — (With<PpoCar> empty in AllBrain; runs on PPO half in SideBySide)
+ 3b   brain::brain_act_all_cars_system                ObservationVector per car,  NeuronActivations.prev ← curr,
+                                                      NeuronActivations (prev),   input-neuron curr ← observation,
+                                                      BrainGraph (shared),        hidden/output curr = tanh(bias + Σ prev·w),
+                                                      BrainBrain.tick_counter     ActionState.desired (per car),
+                                                                                  PolicyOutput.*_mean (raw output activations);
+                                                                                  BrainBrain.tick_counter += 1
+ 4    agent::action_smoothing_system                  ActionState.desired         ActionState.applied (per car)
+ 5    profiling::input_end_system                     —                           FrameRecord.input_end
+ 6    game::car_physics_system                        ActionState.applied, Car    Car.velocity, Transform
+ 7    analytics::capture_episode_action_stats_system  ActionState.applied         PerCarActionAccumulators entry
+ 8    profiling::physics_end_system                   —                           FrameRecord.physics_end
+ 9    game::collision_detection_system                Transform, TrackGrid        Collided marker (add/remove)
+10    profiling::collision_end_system                 —                           FrameRecord.collision_end
+11    game::update_track_progress_system              Transform, TrackCenterline  TrackProgress (per car)
+12    game::episode_loop_system                       TrackProgress, Collided,    EpisodeState.tick.*, SpawnRng on reset,
+                                                      Car.velocity, EpisodeConfig Transform + velocity reset on terminal
+13    agent::update_sensor_readings_system            Transform, TrackGrid,       SensorReadings (post-reset state)
+                                                      TrackCenterline
+14    agent::build_observation_vector_system          SensorReadings,             ObservationVector (per car)
+                                                      ObservationNormalizer
+15    analytics::capture_episode_tick_trace_system    EpisodeState, PolicyOutput, PerCarTraceAccumulators push
+                                                      SensorReadings, Transform
+16    analytics::snapshot_completed_episode_*_system  PerCar*Accumulators,        EpisodeTracker.pending_episodes /
+                                                      EpisodeState (terminal)     pending_traces on terminal
+17a   brain::ppo_collect_rewards_all_cars_system      —                           — (With<PpoCar> empty in AllBrain)
+17b   brain::brain_learn_all_cars_system              EpisodeState.tick.reward,   Synapse.eligibility[car] updates (all cars),
+                                                      EpisodeState.tick.end_reason,Δw accumulated and applied to shared weights,
+                                                      EpisodeState.last.return_sum,reward_window push on terminal,
+                                                      NeuronActivations (prev/curr),PolicyOutput.value_prediction ← M per car,
+                                                      BrainGraph, BrainBrain.rng, Neuron.mean_rate EMA + bias nudge (every tick),
+                                                      BrainBrain.tick_counter,    on cadence: Σ|w_in| scaling,
+                                                      BrainBrain.config,          utility EMA update,
+                                                      BrainBrain.reward_window    replacement + plateau neurogenesis + prune + sprout,
+                                                                                  BrainTrainingStats.history push + counter reset
+18    brain::ppo_epoch_system                         PreparedUpdate (only when   model weights + Adam state (when applicable)
+                                                      PPO cars contributed)       — idle in AllBrain
+19    debug::update_driving_hud_stats_system          TrackProgress, Collided     DrivingHudStats
+20    debug::capture_driving_hud_episode_metrics      EpisodeState (terminal)     DrivingHudHistory
+21    profiling::frame_end_system + auto_exit         SystemTimers.durations_us   FrameRecord completed
+```
+
+**Brain-mode failure semantics:**
+
+- **Step 3b buffer rotation timing.** `forward_tick` rotates `prev ← curr` at the *start* of the forward pass. This means when step 17b reads `NeuronActivations.prev`, it sees the previous tick's source activations — exactly the "pre-before-post" semantics the three-factor rule requires. Reversing the rotation (e.g. rotating at end instead of start) would break the eligibility update and silently produce wrong learning.
+- **Step 17b cadence ordering.** Per-tick order inside the learn system is: plasticity → homeostasis → structural → stats flush. If structural runs before plasticity, the replacement would happen against a graph that has not absorbed this tick's reward. If homeostasis runs before plasticity, bias updates would fight the just-applied weight step. The current order is load-bearing.
+- **Step 17b field-destructure pattern.** Structural operations need simultaneous `&mut` access to `graph`, `rng`, `stats`, and `reward_window`. The learn system uses a `let BrainBrain { graph, rng, stats: brain_stats, reward_window, .. } = &mut *brain;` destructure to get disjoint borrows. Any change that refactors this has to preserve the same borrow-split or compilation fails.
+- **Step 17b `PolicyOutput.value_prediction` semantics.** In brain mode this field carries the **per-car modulator M (raw tick reward)**, not a critic estimate. Analytics uses `Option<&PpoCar>` / `Option<&BrainCar>` markers to discriminate — `capture_episode_tick_trace_system` reads the same PolicyOutput field but interprets it differently downstream. Any code that reads `value_prediction` without respecting this dual semantics becomes a silent interpretation bug.
+- **Step 17a/17b layout gating.** In `SideBySide` both 17a and 17b fire — PPO runs on its 8 cars, brain-inspired on its 8. The PPO rollout buffer's `env_ids` column contains only PPO env_ids by construction (query filter partitions at compile time). Brain-inspired's `reward_window` contains only brain-car returns.
+- **Step 3b / 17b same-tick pairing.** Unlike PPO where `old_log_prob` protects the ratio even across amortised updates, brain-inspired plasticity applies weight changes *within the same tick* as it observes `pre`/`post`. There is no amortisation. This is cheaper but also means any reordering between steps 3b and 17b that decorrelates the activation snapshot from the reward corrupts learning.
+
+## Coverage (Knowledge Gaps from the 2026-04-19 Upkeep Passes)
+
+This section is explicit about where upkeep passes relied on direct code inspection versus inference from existing documentation and the scan-tool output, so the next session knows what still needs verification.
+
+### Second pass — 2026-04-19 (post-M6)
+
+The second upkeep pass this date ran after M6 (brain-inspired v1) shipped — six staged commits `6237aa7..c64ce9b` + wrap `4c5c7c5` + default/analytics fix `3a737d9`. Updates focused on capturing the controller-partitioning migration (AgentMode → per-car markers + TrainerLayout), the new `brain::inspired` module, analytics integration (BrainUpdateRecord, layout slug, section gating), and the Fleet Comparison side-by-side diagnostic.
+
+**Directly inspected this pass:**
+
+- `src/brain/inspired/*` in full — config.rs (every dial tagged), graph.rs (slot-stable Vec + free-lists), forward.rs (NeuronActivations + forward_tick), mod.rs (BrainBrain, BrainInspiredPlugin, act/learn systems, build_brain_update_record flush), plasticity.rs (apply_plasticity_tick + sample_plasticity_health), homeostasis.rs (apply_synaptic_scaling + update_intrinsic_homeostat), structural.rs (utility/replace/plateau/grow/prune/sprout).
+- `src/brain/types.rs` — Controller enum + ZST markers (PpoCar/BrainCar/KeyboardCar); verified field semantics on PolicyOutput.
+- `src/brain/plugin.rs` — cycle_trainer_layout_system full body; F4 cycle order, despawn+respawn, reset paths.
+- `src/brain/ppo/mod.rs` relevant deltas — four systems now filter via (With<Car>, With<PpoCar>); Res<AgentMode> parameter removed; early-exit gate removed.
+- `src/agent/action.rs` — keyboard_action_input_system now filters With<KeyboardCar>; env_id==0 special case removed.
+- `src/game/car.rs` in full — TrainerLayout enum + variants + default + next + total_cars + ppo_count + brain_count + slug; TrainerConfig::set_layout sync; car_colour_warm / car_colour_cool; spawn_car now attaches Controller + marker.
+- `src/game/plugin.rs` — spawn_cars_for_layout (shared between PostStartup setup_game and F4 respawn).
+- `src/analytics/models.rs` — EpisodeTracker.brain_records + last_recorded_brain_records; CompactRunExport.brain_records; RunMetadata.layout + ppo_cars + brain_cars; EpisodeRecord.controller (all #[serde(default)]).
+- `src/analytics/trackers/episode.rs` — episode_tracker_system gains Option<Res<BrainTrainingStats>> + per-car marker reads; idempotent brain_records sync.
+- `src/analytics/exporters/{json.rs, markdown.rs}` — filename slug, section gating on PPO-only sections 9/12/13/14, brain sections 16–18, Fleet Comparison section 19.
+- `src/analytics/plugin.rs` — RunMetadata construction populates layout/ppo_cars/brain_cars; filename includes slug.
+- `src/analytics/metrics/{consistency, diagnostics, phases}.rs` — test fixtures for new EpisodeTracker / EpisodeRecord fields.
+- `tests/brain_inspired_pipeline.rs` in full — 21 tests across S1–S6.
+- Full M6 git commit bodies — 613 lines across `9bd2407..3a737d9` inspected for rationale not already captured.
+- Grep over `src/brain/inspired/` for `WHY|HACK|IMPORTANT|SAFETY|NOTE:|FIXME|TODO` — zero matches (rationale lives in rustdoc `///` comments + `notes/brain-v1-decisions.md`).
+- `context/notes/brain-v1-decisions.md` — 20+3 = 23 decisions, all grounded in the code and commit history inspected above.
+
+**Trusted from M6 commits without re-inspection:**
+
+- `src/brain/common/*` — unchanged by M6; trusted from the 2026-04-18 performance pass.
+- `src/profiling/*` — unchanged.
+- `src/maps/*` — unchanged.
+- `src/debug/*` — unchanged by M6; HUD/leaderboard work in side-by-side by reading PolicyOutput unchanged, but live HUD column split is explicitly deferred (decisions note, outstanding follow-ups).
+- `src/game/{episode, physics, collision, progress}.rs` — unchanged by M6.
+- `src/sim/*` — unchanged.
+
+**Not re-inspected (first-pass coverage still stands):**
+
+- `src/analytics/metrics/{chunking, sectors, sparkline, stats, timeseries, trajectory, turns, pre_crash}.rs` — unchanged by M6; trusted from the first 2026-04-19 upkeep pass.
+
+**Known gaps still outstanding:**
+
+- User-controllable init seed — still weak (both `SpawnRng` and `PpoBrain.rng` seed from `rand::rng()` at startup; `BrainInspiredConfig.rng_seed` accepts a `Some(u64)` but is not yet wired through a user-facing config source).
+- Headless training mode — still missing; becomes more valuable now that brain-mode training runs are the primary workflow.
+- ECS-level replay harness — still missing.
+- HUD column split in side-by-side — analytics side is done; live HUD still shows single-column PPO stats (decisions note outstanding follow-up).
+- Tuning sweep over `TUNE`-flagged brain dials (η, ρ, structural_cadence, plateau_window, prune_threshold, sprout_probability, …) — pending empirical data from a real training run.
+- **First real brain-mode training run** to hit the M6 acceptance bar (visible learning relative to PPO) — has not happened yet. Infrastructure is ready; the user is running training while this upkeep pass runs.
+
+### First pass — 2026-04-19 (round-2 PPO critic target-scaling)
+
+The first upkeep pass this date covered the PPO round-2 changes (PopArt, γ=0.995, target-KL early stop, observation normaliser).
 
 **Directly inspected this session:**
 
@@ -427,12 +558,15 @@ This section is explicit about where this upkeep pass relied on direct code insp
 
 ## Structural Notes / Current Reality
 
-- The codebase is **not** environment-only. PPO, analytics, and the debug HUD are live and substantial subsystems. Documentation treating them as roadmap-only is obsolete.
-- **Singleton-car assumptions have been removed** from `game`, `agent`, and `brain`. `ActionState`, `EpisodeState`, and `EpisodeMovingAverages` are now per-car **Components** (not Resources). `CollisionEvent` has been replaced by a `Collided` marker component. All fixed-tick systems iterate over multiple cars.
-- The runtime is a **multi-car vectorised trainer**:
-  - `TrainerConfig` controls car count (default 8). All cars spawn at **random centreline positions** (re-randomised on each episode reset), each assigned a unique colour from a 25-colour palette. There is no privileged car 0 or fixed spawn position.
-  - Per-car components: `EnvInstanceId`, `CarColour`, `ActionState`, `EpisodeState`, `EpisodeMovingAverages`, `PolicyOutput`.
-  - One shared `TrainerRolloutBuffer` collects transitions from all cars with `env_id` tagging and old log-probs for PPO ratio computation; GAE is computed per-env (no cross-env value leakage).
+- The codebase is **not** environment-only. PPO, brain-inspired v1, analytics, and the debug HUD are live and substantial subsystems. Documentation treating any of them as roadmap-only is obsolete.
+- **Singleton-car and single-controller assumptions are both removed.** `ActionState`, `EpisodeState`, `EpisodeMovingAverages`, `PolicyOutput`, `NeuronActivations`, `Controller`, and the three ZST marker components (`PpoCar` / `BrainCar` / `KeyboardCar`) are all per-car Components. `CollisionEvent` is a `Collided` marker. All fixed-tick systems iterate over multiple cars with appropriate query filters.
+- The runtime is a **multi-controller, multi-car vectorised trainer**:
+  - `TrainerConfig.layout: TrainerLayout` controls fleet composition — variants `Keyboard` (1 car) / `AllPpo{count}` / `AllBrain{count}` / `SideBySide{ppo, brain}`. Default `AllBrain{8}`. `TrainerConfig.num_envs` is kept in sync with `layout.total_cars()` for back-compat.
+  - F4 cycles `AllBrain → SideBySide{8,8} → AllPpo → AllBrain` (Keyboard excluded from the cycle — manual-intervention escape hatch only).
+  - All cars spawn at **random centreline positions** (re-randomised on each episode reset). Single-controller layouts use the 25-colour palette; side-by-side uses an 8-entry warm palette (reds/oranges/yellows) for PPO and an 8-entry cool palette (blues/teals/cyans) for brain cars.
+  - Per-car components: `EnvInstanceId`, `CarColour`, `ActionState`, `EpisodeState`, `EpisodeMovingAverages`, `PolicyOutput`, `NeuronActivations` (lazy-sized), `Controller` + exactly one of the three marker ZSTs.
+  - One shared `TrainerRolloutBuffer` collects transitions from **PPO cars only** (enforced by `With<PpoCar>` query filter) with `env_id` tagging and old log-probs; GAE is computed per-env.
+  - One shared `BrainGraph` (inside `BrainBrain`) — all brain cars are embodiments of this single graph; per-car activations and eligibility traces live on `NeuronActivations` Components and on `Synapse.eligibility[car]` respectively. 8 weight updates per tick are summed into the shared weights.
   - A `TrainerLiveRanking` resource tracks best/worst car with hysteresis; `ranking.rs` assigns visual highlight roles.
   - A live leaderboard panel (top-right, F3-toggled) shows per-car performance with colour swatches.
 - **Episode semantics**: there is no finish line or lap concept. Progress is **cumulative forward arc-length from spawn** with wrap handling. Episodes end on **crash or 30-second timeout** only. `EpisodeEndReason` has `Crash` and `Timeout` variants (no `LapComplete`).
@@ -443,15 +577,17 @@ This section is explicit about where this upkeep pass relied on direct code insp
 - **PopArt value-target normalisation** (round-2, 2026-04-19). `PpoBrain` holds a `ValueNorm { mu, sigma }` state updated once per PPO update before any training chunk: batch mean/variance of GAE returns is blended into `(mu, sigma)` via EMA (β = 3e-2 after the 2026-04-19 hotfix — initial 1e-4 retained 85% of the zero-initial state after 1,500 updates and left the critic biased low), then the POP rescale is applied to `c_value` weights and bias so externally-observed predictions `σ·z + µ` are preserved across the statistics change. The training loss regresses `c_value`'s raw output against the normalised target `(ret − µ) / σ`, so the critic targets a stationary ~N(0, 1) distribution regardless of return scale. Denormalisation `σ·raw + µ` happens at inference call sites (bootstrap `forward_critic`, action-selection `forward_critic_batch` value reads, on-exit flush). When `config.popart_enabled = false`, `ValueNorm` stays at `(0, 1)` and the pipeline is numerically equivalent to the pre-PopArt path. See `context/references/value-target-normalisation.md` for derivation.
 - **Observation running mean/var normaliser** (round-2). `ObservationNormalizer` Resource applies Welford online per-dim mean/variance tracking in `build_observation_vector_system` after raw feature assembly. Pass-through during `warmup_samples = 1000`; afterwards centres and scales each of the 43 dims and clips to `[-10, 10]` (SB3 `VecNormalize.clip_obs` convention). Stats persist across episodes. When `enabled = false`, identity pass-through.
 - **PolicyOutput** component: written by `ppo_act_all_cars_system` each tick, exposes `value_prediction`, `steering_mean`/`steering_std`, `throttle_mean`/`throttle_std`. Read by the analytics trace capture system for policy confidence metrics.
-- **Analytics** has been comprehensively expanded: 16 tick-level trace fields (position, velocity decomposition, drift angle, min ray, velocity projection, centreline reward, policy confidence), 25 episode-level aggregates, a **crash classification system** (`CrashKind`: Slide, HeadOn, Overshoot, Spin, Stall), and a **15-section Markdown report** (sections 11–15 added 2026-04-19 for the round-2 diagnostic pass — pre-crash forensics, layer-health timeseries, PopArt µ/σ tracker, critic prediction-quality histogram, fleet variance). `PpoUpdateRecord` gained `return_min/mean/max/std`, `value_norm_mu/sigma`, `epochs_completed`, `early_stopped` (backwards-compatible via `#[serde(default)]`).
+- **Analytics** has been comprehensively expanded: 16 tick-level trace fields (position, velocity decomposition, drift angle, min ray, velocity projection, centreline reward, policy confidence), 25 episode-level aggregates, a **crash classification system** (`CrashKind`: Slide, HeadOn, Overshoot, Spin, Stall), and a **layout-aware Markdown report** — up to 19 sections. Sections 11–15 were added 2026-04-19 (first pass) for the round-2 PPO diagnostics (pre-crash forensics, layer-health timeseries, PopArt µ/σ tracker, critic prediction-quality histogram, fleet variance). Sections 16–19 were added 2026-04-19 (second pass, M6): brain structure trajectory, plasticity health, structural events, and a side-by-side Fleet Comparison. PPO-specific sections (9, 12, 13, 14) skip entirely in brain-only runs. Filenames include a layout slug: `run_<ts>_<brain|side|ppo|keyboard>.md`. `PpoUpdateRecord` gained round-2 fields; `EpisodeRecord` gained `controller: String`; `EpisodeTracker` and `CompactRunExport` gained `brain_records: Vec<BrainUpdateRecord>`; `RunMetadata` gained `layout` / `ppo_cars` / `brain_cars` — all backwards-compatible via `#[serde(default)]`.
+- **Brain-inspired v1 learner (M6, shipped).** Sparse directed graph of rate-coded tanh neurons (43 inputs + 15 hidden + 2 outputs + growth), trained by three-factor plasticity with per-car eligibility traces (`e ← λ·e + pre·post; Δw = η·M·e`), raw per-tick reward as modulator M (Option C — no critic), synaptic scaling + intrinsic excitability homeostasis, continual-backprop structural plasticity (utility-based replacement, plateau-triggered neurogenesis, synapse prune/sprout). Coexists with PPO in `TrainerLayout::SideBySide`. Full details in `systems/brain-inspired.md`; design rationale in `notes/brain-v1-design.md`; 23-decision implementation log in `notes/brain-v1-decisions.md`. Acceptance bar (visible learning relative to PPO in a ~2000-episode side-by-side run) is **empirically pending** — infrastructure is ready; the first real training run has not been executed yet.
 - The brain layer now owns **ranking logic** (`src/brain/ranking.rs`) in addition to PPO. A seeded `StdRng` lives in `PpoBrain` for deterministic policy sampling.
 - **Debug overlays default to off** — geometry (F1), sensors (F2), and telemetry HUD (F3) all start disabled. The HUD is a compact 440px panel with blue accent palette, 72% opacity, condensed text lines (no wrapping), PPO-specific metrics (clip %, KL divergence), six-column quarter table, no legend. Leaderboard panel matches the updated colour scheme.
 - **Profiling** is feature-gated behind `--features profiling`. When the feature is off, all profiling code is compiled out entirely — zero runtime cost. When enabled, the app auto-exits after a configurable duration (default 30s) and exports JSON + Markdown performance reports to `reports/json/performance/` and `reports/performance/` respectively. Both include a `RunContext` snapshot which records the active **GEMM backend** under a `### Build` section (so every perf artefact is self-documenting about what produced it). Per-system timing covers all 17 FixedUpdate systems via an `instrument!()` macro. Reports have retention limits (3 reports per directory; oldest auto-deleted).
 - **GEMM backend** selection is compile-time via Cargo features. Default: Accelerate on macOS (via `cblas_sgemm`, dispatches to AMX coprocessor), `matrixmultiply` (pure-Rust BLIS NEON microkernel) elsewhere. `--features force-scalar` forces the naive reference kernel; `--features force-matrixmultiply` forces the portable Rust kernel on any platform; `--features force-accelerate` forces Apple Accelerate (macOS-only, compile-error elsewhere). Mutually exclusive — compile-error if two are set. macOS `main.rs` pins `VECLIB_MAXIMUM_THREADS=1` at startup to prevent Accelerate's internal thread pool from fighting Bevy for cores at our small matrix sizes.
 - **Performance is no longer the constraint**. Post-2026-04-18 dual-backend + batched-actor work, mean frame time dropped from 15.7 ms to 0.735 ms (21× overall), PPO Epoch from 13.5 ms to 0.446 ms (30×), action selection from 1.98 ms to 0.126 ms (16×). Budget utilisation went from 94% to 4.4%. Zero stutters, 0% frames over budget. See `notes/performance-tuning-lessons.md` for the contributing factors.
-- The project is in a **transitional architecture state, with Milestone 1 (baseline validation) confirmed complete**:
-  - Round-2 training run `reports/analytics/run_1776556719.md` — 2,271 episodes, 1,582 PPO updates — showed **all 8 cars completing the full track loop**, fleet max-progress spread 1.1%, crash rate falling from 100% to 56% in the best chunk, mean speed rising monotonically, and pre-crash analytics confirming the policy anticipates (96% of crashes had throttle released > 0.25 s before impact). The environment, observation contract, and reward shaping are confirmed learnable.
-  - The repository intent targets brain-inspired local plasticity (Milestones 2–9). That transition is the next active work area.
-  - PPO becomes **stable reference machinery** from here forward. See `notes/baseline-to-brain-inspired.md` for the full transition framing and what carries forward to the next phase.
-- `README.md` is directionally accurate but its Milestone 1 checklist understates implementation reality — PPO, debug HUD, analytics export, velocity-projection reward, expanded observations, crash classification, PopArt, observation normalisation, and target-KL early stop are all live.
-- The finish-line removal, random-spawn paradigm, velocity-projection reward, expanded observations, analytics overhaul, and round-2 critic target-scaling interventions have all been **implemented**. The system is now in a coherent post-baseline state.
+- The project is in a **post-baseline state with M1–M6 shipped**:
+  - Round-2 training run `reports/analytics/run_1776556719.md` (M5 validation) — 2,271 episodes, 1,582 PPO updates — showed **all 8 cars completing the full track loop**, fleet max-progress spread 1.1%, crash rate falling from 100% to 56% in the best chunk, mean speed rising monotonically, and pre-crash analytics confirming the policy anticipates (96% of crashes had throttle released > 0.25 s before impact). The environment, observation contract, and reward shaping are confirmed learnable.
+  - M6 (brain-inspired v1) shipped 2026-04-19 as six staged commits + wrap + default/analytics fix (`6237aa7..3a737d9`, 8 commits pushed to origin/master). 133 tests green across default, `force-scalar`, and release builds.
+  - PPO is **stable reference machinery** from here forward — the diagnostic baseline against which brain-inspired learning will be measured. See `notes/baseline-to-brain-inspired.md` for the full transition framing and what carries forward.
+  - The next active work is **empirical validation of M6** — a real training run (AllBrain or SideBySide) to check whether the brain-inspired substrate actually learns. Pre-empirical. M7 (brain visualisation) is the next explicit milestone after validation.
+- `README.md` progress bar reflects M1–M6 at 100%, M7 (brain visualisation) as the next pointer. The README's Known Biological Simplifications section captures scope compromises (slot-recycling apoptosis, unrestricted neurogenesis location, no spatial constraints on synapse formation, etc.) that are intentional at v1 scale.
+- The finish-line removal, random-spawn paradigm, velocity-projection reward, expanded observations, analytics overhaul, round-2 critic target-scaling interventions, and the full brain-inspired v1 learner with side-by-side comparison have all been **implemented**. The system is now in a coherent post-M6 state ready for empirical measurement.

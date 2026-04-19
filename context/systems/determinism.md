@@ -33,7 +33,11 @@
 | Target-KL early stop (round-2) | **Session-deterministic** | Fires deterministically based on `approx_kl` accumulator state, which is itself downstream of the PPO RNG chain |
 | PPO action sampling | **Improved** | Uses a seeded `StdRng` stored in `PpoBrain` — deterministic given the same seed |
 | PPO model initialisation | **Weak** | Uses `rand::rng()` once at startup for init, then seeds a `StdRng` for runtime — init seed not yet user-controllable |
-| Analytics export filenames | **Weak** | Timestamp-based, naturally non-deterministic (acceptable) |
+| Brain-inspired graph seed (M6) | **User-seedable** | `BrainInspiredConfig.rng_seed: Option<u64>` — `Some(s)` → `StdRng::seed_from_u64(s)`; `None` → `StdRng::from_rng(&mut rand::rng())` (same weakness as PPO init). Once seeded, graph topology, synapse weights, and every structural-plasticity event (replacement, neurogenesis, prune, sprout) are deterministic from that seed. |
+| Brain-inspired plasticity sequencing (M6) | **Session-deterministic** | Eligibility updates, weight updates, homeostasis, and structural events all flow from `BrainBrain.rng` + `tick_counter` + observation/reward streams. Given the same inputs and seed, the entire trajectory of the shared graph is reproducible. |
+| Brain-inspired F4 reset (M6) | **Session-deterministic** | `BrainBrain::reset_to_seed(num_cars)` re-seeds from `config.rng_seed` when set; mid-session F4 cycles produce reproducible post-reset behaviour. |
+| Controller marker attachment (M6) | **Strong** | `Controller` enum Component and ZST markers (`PpoCar` / `BrainCar` / `KeyboardCar`) are assigned at spawn by `spawn_cars_for_layout` based on `TrainerLayout` — no RNG involved in the assignment. |
+| Analytics export filenames | **Weak** | Timestamp + layout slug; timestamp is wall-clock, slug is deterministic from `TrainerConfig.layout` |
 | Full ECS replay | **Missing** | No end-to-end action/observation/reward replay harness |
 
 ### What Is Currently Reproducible

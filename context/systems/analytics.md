@@ -10,7 +10,7 @@
 
 | Owner | Owns | Does not own |
 |-------|------|-------------|
-| `src/analytics/models.rs` | Canonical analytics schemas: `EpisodeRecord` (env_id-tagged), `TickTraceRecord` (env_id-tagged), `EpisodeTrace`, `PpoUpdateRecord`, `EpisodeTracker`, `AnalyticsConfig`, `RunMetadata`, `CompactRunExport` | Environment truth, reward definitions |
+| `src/analytics/models.rs` | Canonical analytics schemas: `EpisodeRecord` (env_id-tagged, carries `controller: String`), `TickTraceRecord` (env_id-tagged), `EpisodeTrace`, `PpoUpdateRecord`, `EpisodeTracker` (with M6 `brain_records: Vec<BrainUpdateRecord>` + `last_recorded_brain_records` counter), `AnalyticsConfig`, `RunMetadata` (M6: gains `layout` / `ppo_cars` / `brain_cars` fields), `CompactRunExport` (M6: carries `brain_records`) | Environment truth, reward definitions, brain learner internals (owned by `brain::inspired`) |
 | `src/analytics/trackers/` | Per-car fixed-tick accumulation and episode/update record finalisation | When episodes end (owned by game) |
 | `src/analytics/metrics/` | Derived diagnostics, trend synthesis, visual rendering helpers | Raw data capture (owned by trackers) |
 | `src/analytics/exporters/` | Two-tier JSON export (`reports/json/analytics/`), diagnostic Markdown (`reports/analytics/`), `RunContext` snapshot capture, retention-limited directory cleanup | Schema definitions (owned by models) |
@@ -72,6 +72,7 @@ Each `TickTraceRecord` captures:
 
 `EpisodeRecord` combines:
 - `env_id` — which car completed this episode
+- `controller: String` (M6) — one of `"Ppo"` / `"Brain"` / `"Keyboard"` / `"Unknown"`. Populated in `episode_tracker_system` by reading `Option<&PpoCar>`, `Option<&BrainCar>`, `Option<&KeyboardCar>` on each car. Used by the markdown exporter to detect side-by-side runs and segment episodes by learner. `#[serde(default = "default_controller")]` so pre-M6 JSON files deserialise as `"Unknown"`.
 - episode identity and summary (id, progress, return, ticks, crashes, end reason)
 - reward decomposition sums (progress, time penalty, terminal, crash — `lap_bonus_sum` and `lap_completed` removed)
 - action statistics (steering/throttle mean and std)
@@ -121,17 +122,23 @@ Terminal episodes are classified into crash types based on the final tick's stat
 | `trajectory.rs` | Trajectory-level derived summaries and episode selection |
 | `pre_crash.rs` | Round-2: last-30-tick analysis per crash — throttle-release latency, distance-to-wall at crash, critic value drop. `PreCrashProfile` (per crash) and `PreCrashSummary` (aggregate with release-latency and distance-to-wall histograms). |
 
+### Per-Update Record (Brain)
+
+`BrainUpdateRecord` (owned by `brain::inspired`; serialised through analytics) captures one structural-cadence flush of the brain-inspired learner. Fields: `tick_start` / `tick_end` (cadence window), `neuron_count` / `hidden_count` / `synapse_count`, `mean_abs_weight`, `weight_sigma`, `mean_abs_eligibility`, `mean_utility` + `utility_p10` + `utility_p90`, `replacement_count` / `neurogenesis_count` / `prune_count` / `sprout_count` (per-window, not cumulative — counters reset after each flush), `dead_neuron_fraction`, `saturation_fraction`, `mean_m`. See `systems/brain-inspired.md` for the flush mechanism.
+
+`EpisodeTracker.brain_records` is the ordered sequence of these records for the run. Populated in `episode_tracker_system` by copying new entries from `BrainTrainingStats.history`, tracked idempotently by `tracker.last_recorded_brain_records`. Both fields are `#[serde(default)]` for pre-M6 back-compat.
+
 ### Two-Tier Export
 
-Export triggers on `AppExit` message from the `Last` schedule:
+Export triggers on `AppExit` message from the `Last` schedule. Filenames include a **layout slug** (M6 — `brain` / `side` / `ppo` / `keyboard`) so `ls reports/analytics/` answers "which runs were what" without opening any file. The slug comes from `trainer_config.layout.slug()`.
 
 | Output | Content | When |
 |--------|---------|------|
-| `reports/json/analytics/run_<ts>.json` | `CompactRunExport`: `RunMetadata` + all `EpisodeRecord`s + all `PpoUpdateRecord`s. No per-tick traces. | Always |
-| `reports/json/analytics/run_<ts>_traces.json` | Full `EpisodeTracker` including per-tick trace data | Only when `AnalyticsConfig.full_trace_export == true` |
-| `reports/analytics/run_<ts>.md` | Diagnostic Markdown report generated from full in-memory data, includes `RunContext` snapshot header | Always |
+| `reports/json/analytics/run_<ts>_<slug>.json` | `CompactRunExport`: `RunMetadata` + all `EpisodeRecord`s + all `PpoUpdateRecord`s + all `BrainUpdateRecord`s. No per-tick traces. | Always |
+| `reports/json/analytics/run_<ts>_<slug>_traces.json` | Full `EpisodeTracker` including per-tick trace data | Only when `AnalyticsConfig.full_trace_export == true` |
+| `reports/analytics/run_<ts>_<slug>.md` | Diagnostic Markdown report generated from full in-memory data, includes `RunContext` snapshot header | Always |
 
-`RunMetadata` captures: car count, track name, session timestamp, PPO hyperparameters (epochs, clip_epsilon, gamma, gae_lambda, max_steps, samples_per_tick).
+`RunMetadata` captures: car count, track name, session timestamp, PPO hyperparameters (epochs, clip_epsilon, gamma, gae_lambda, max_steps, samples_per_tick), **plus M6 fields** — `layout: String` (the variant label), `ppo_cars: usize`, `brain_cars: usize`. All three M6 fields are `#[serde(default)]` for pre-M6 back-compat.
 
 The compact JSON is typically kilobytes; the full trace JSON can be tens of megabytes for long runs.
 
@@ -156,6 +163,28 @@ The report is organised around **diagnostic questions** across 15 sections, each
 | **13. Value Target Scale Tracker** | Return min/mean/max/std trajectories over updates. When PopArt is active, additional sparklines of `value_norm_mu` and `value_norm_sigma` plus a tracking-error check. Surfaces whether the critic's target distribution is being tamed. |
 | **14. Critic Prediction Quality** | Explained-variance timeseries plus standardised-residual histogram (episode-start value vs actual total return). Bucketed into 7 σ-bins to show critic bias direction and calibration. |
 | **15. Fleet Variance** | Per-car table (episodes, max progress, mean life, mean reward, crash count, crash %). Convergence takeaway distinguishes "lucky car" from genuine fleet learning — relevant because the baseline run had route-consistency 0.001 and one car completing the loop. |
+| **16. Brain Structure Over Time** | M6 — brain-only. Neuron / hidden / synapse counts with sparklines showing growth trajectory across cadence windows. Skipped entirely when `tracker.brain_records` is empty. |
+| **17. Plasticity Health** | M6 — brain-only. Mean |w|, weight σ, mean |eligibility|, dead-neuron fraction, saturation fraction, modulator M; three sparklines for the key dynamic signals. Skipped when no brain records. |
+| **18. Structural Events** | M6 — brain-only. Replacement / neurogenesis / prune / sprout totals in a table, plus per-cadence-window sparklines. Auto-generated takeaway flags "no replacements happened" vs "replacements are happening as designed". Skipped when no brain records. |
+| **19. Fleet Comparison** | M6 — side-by-side only. Head-to-head PPO vs brain fleet table (episodes, mean reward, mean progress %, loops completed, crash rate), two parallel rolling-20 reward sparklines, auto-adaptive verdict. Skipped unless the run had both PPO-tagged and brain-tagged episodes. |
+
+### Section Gating (M6)
+
+Not every section renders for every run. Sections drop out based on what the run actually produced:
+
+- **Universal** (always render): 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 15.
+- **PPO-only** (require `!tracker.ppo_updates.is_empty()`): 9 Training Health, 12 Layer Health, 13 Value Target Scale, 14 Critic Prediction Quality. Previously these rendered as "No PPO updates recorded" stubs in brain-only runs; M6 D23 dropped the stubs in favour of skipping entirely.
+- **Brain-only** (require `!tracker.brain_records.is_empty()`): 16, 17, 18.
+- **Side-by-side only** (require at least one PPO-tagged episode AND one brain-tagged episode): 19.
+
+Net effect by layout:
+
+| Run type | Sections present |
+|---|---|
+| AllPpo | 1–15 (pre-M6 layout unchanged) |
+| AllBrain | 1–8, 10, 11, 15, 16, 17, 18 |
+| SideBySide | 1–15, 16, 17, 18, 19 |
+| Keyboard | 1–8, 10, 11, 15 (no learner produced updates or records) |
 
 ASCII visuals include Unicode sparklines (▁▂▃▄▅▆▇█), horizontal bar charts (█░), and single-row heatmaps.
 
@@ -166,10 +195,12 @@ ASCII visuals include Unicode sparklines (▁▂▃▄▅▆▇█), horizontal 
 | `ActionState.applied` | agent | Per-car action summaries and trace capture |
 | `EpisodeState` | game | Reward decomposition, terminal reason, episode summaries (distance_driven, spawn_s, previous_s) |
 | `SensorReadings` | agent | Trace capture: v_forward, v_lateral, speed_delta, previous actions, ray data |
-| `PolicyOutput` | brain | Per-car value prediction, policy means/stds for trace and episode capture |
+| `PolicyOutput` | brain (PPO or brain-inspired, depending on controller) | Per-car value/modulator + policy/activation means/stds for trace and episode capture. Semantics depend on which marker the car carries — analytics discriminates via `Option<&PpoCar>` / `Option<&BrainCar>`. |
+| `PpoCar` / `BrainCar` / `KeyboardCar` markers | brain (attached at spawn) | Discriminator for `EpisodeRecord.controller` field and for trace-capture conditional logic |
 | `PpoTrainingStats` | brain | PPO update records (including clip_fraction, approx_kl) |
+| `BrainTrainingStats` | brain::inspired | Brain update records (cadence-flushed); copied from `history` into `EpisodeTracker.brain_records` in `episode_tracker_system` |
 | `ObservationConfig` and `Track` | agent/maps | Lookahead snapshot reconstruction in traces |
-| `TrainerConfig` | game | Car count for RunMetadata |
+| `TrainerConfig` | game | Car count, `layout` label, `ppo_cars` / `brain_cars` counts for RunMetadata |
 | `PpoBrain` | brain | PPO hyperparameters for RunMetadata |
 | `EnvInstanceId` | game | Per-car tagging in all capture systems |
 

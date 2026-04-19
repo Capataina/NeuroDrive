@@ -26,7 +26,7 @@
   - `action_smoothing_system` iterates all cars and copies or low-pass filters `desired → applied`.
   - Physics and analytics consume `applied` only.
 - `ActionSmoothing` exists as a **global Resource** but defaults to **disabled** (`enabled: false`, time_constant=0.12s). The smoothing config is shared; the smoothing state (previous `applied`) lives in each car's `ActionState` component.
-- **Keyboard control** is mode-gated: `keyboard_action_input_system` exits immediately unless `AgentMode` is `Keyboard`. In multi-car mode, keyboard controls **`EnvInstanceId(0)` only**. Controls: A/D steer, W throttle.
+- **Keyboard control** is filter-gated via marker component: `keyboard_action_input_system` iterates `Query<&mut ActionState, With<KeyboardCar>>`. Cars without the `KeyboardCar` marker are never visited. The pre-M6 `AgentMode::Keyboard` Resource-check + env_id==0 special-case was removed in M6 S1 — see `notes/brain-v1-decisions.md` D1 and D4. In `TrainerLayout::Keyboard` exactly one car is spawned with `KeyboardCar`; in the other layouts no car has the marker. Controls: A/D steer, W throttle.
 
 ### Observation Contract
 

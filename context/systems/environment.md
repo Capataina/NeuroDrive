@@ -30,22 +30,32 @@
 
 ### Car
 
-- Multiple car entities spawned by `setup_game` in `GamePlugin` after the track is ready.
-- `TrainerConfig` controls the number of cars (default 8) and alpha values.
-- **Random spawn positions:** All cars (including car 0) spawn at random positions along the centreline, facing the tangent direction. On each episode reset, every car receives a new random position via the `SpawnRng` resource. There is no special-case car 0 that always resets to a fixed start.
+- Multiple car entities spawned by `setup_game` (on PostStartup) and by `cycle_trainer_layout_system` (on F4 press) in the `brain` subsystem, both via the shared `spawn_cars_for_layout` helper in `src/game/plugin.rs`.
+- `TrainerConfig` carries the fleet configuration:
+  - `layout: TrainerLayout` — `Keyboard` / `AllPpo{count}` / `AllBrain{count}` / `SideBySide{ppo, brain}`. Default `AllBrain{8}` (M6).
+  - `num_envs: usize` — kept synced from `layout.total_cars()` for back-compat with existing call sites (analytics context, debug leaderboard); `TrainerConfig::set_layout` mutates both atomically.
+  - `default_car_alpha` / `best_car_alpha` — sprite opacities.
+- **Random spawn positions:** All cars spawn at random positions along the centreline, facing the tangent direction. On each episode reset, every car receives a new random position via the `SpawnRng` resource.
+- **Colour palette depends on layout:**
+  - Single-controller layouts (`Keyboard`, `AllPpo`, `AllBrain`): standard 25-colour `CAR_PALETTE` via `car_colour_for_env(env_id)`.
+  - Side-by-side: warm palette (`car_colour_warm`) for PPO cars, cool palette (`car_colour_cool`) for brain cars. Gives immediate visual distinction between the two fleets.
+- **Controller assignment at spawn:** `spawn_cars_for_layout` attaches a `Controller` enum Component + one of the ZST markers (`PpoCar` / `BrainCar` / `KeyboardCar`) per the layout. All downstream learner systems filter by these markers; cross-controller contamination is impossible at compile time.
 - Each car entity carries:
-  - `Sprite` (unique colour from 25-colour palette, 12×6 world units),
+  - `Sprite` (layout-appropriate colour, 12×6 world units),
   - `Transform`,
   - `Car` component (velocity, rotation_speed=8.0, thrust=750.0, drag=0.985),
   - `EnvInstanceId(u32)` — stable identity for the car's lifetime,
   - `SpawnConfig { position, rotation }` — per-car reset target,
-  - `CarColour { r, g, b }` — unique visual colour,
+  - `CarColour { r, g, b }` — assigned visual colour,
   - `ActionState` — per-car desired/applied action (Component, not Resource),
   - `EpisodeState` — per-car episode counters, rewards, progress (Component, not Resource). Contains `distance_driven`, `spawn_s`, `previous_s` instead of lap-related fields,
   - `EpisodeMovingAverages` — per-car rolling statistics (Component, not Resource),
   - `TrackProgress`,
   - `SensorReadings`,
-  - `ObservationVector`.
+  - `ObservationVector`,
+  - `NeuronActivations` — brain-inspired per-car activation buffers (empty Vec by default; lazily grown to `graph.neurons.len()` on first `forward_tick`). Harmless for PPO cars.
+  - `PolicyOutput` — analytics/HUD surface, semantically repurposed by controller (see `brain-ppo.md` / `brain-inspired.md`).
+  - `Controller` enum + exactly one of `PpoCar` / `BrainCar` / `KeyboardCar`.
 
 ### Physics
 
