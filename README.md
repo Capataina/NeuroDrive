@@ -1,7 +1,7 @@
 # NeuroDrive
 
 <p align="center">
-  <img src="Neurodrive%20Media/01-cars-driving-10s.gif" alt="Eight cars training simultaneously in the multi-car vectorised trainer" width="720">
+  <img src="media/01-cars-driving-10s.gif" alt="Eight cars training simultaneously in the multi-car vectorised trainer" width="720">
 </p>
 
 ## Project Description
@@ -219,7 +219,7 @@ Lookahead (24)           12 heading deltas + 12 curvatures (30–650 units, dens
 Previous actions (2)     previous_steering, previous_throttle
 ```
 
-![12-point lookahead overlay — the 24 lookahead dimensions correspond to heading deltas + curvatures sampled at these positions](Neurodrive%20Media/02-lookahead-points-10s.gif)
+![12-point lookahead overlay — the 24 lookahead dimensions correspond to heading deltas + curvatures sampled at these positions](media/02-lookahead-points-10s.gif)
 
 This contract is **stable** and consumed identically by PPO and by the brain-inspired learner.
 
@@ -498,7 +498,7 @@ NeuroDrive includes comprehensive observability because "looks like learning" is
 
 All overlays default to off for clean viewing.
 
-![F1 + F2 overlays active — 11 raycast sensors and the 12-point lookahead account for 35 of the 43 observation dimensions](Neurodrive%20Media/03-lookahead-and-raycasts-10s.gif)
+![F1 + F2 overlays active — 11 raycast sensors and the 12-point lookahead account for 35 of the 43 observation dimensions](media/03-lookahead-and-raycasts-10s.gif)
 
 ### Analytics Pipeline
 
