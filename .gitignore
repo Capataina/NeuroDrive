@@ -6,3 +6,5 @@ reports/
 claude.md
 AGENTS.md
 gemini.md
+# macOS
+.DS_Store
